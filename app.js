@@ -73,6 +73,7 @@ function setActiveTab(name) {
   document.querySelectorAll('section.panel').forEach(s => s.classList.toggle('active', s.id === name));
   if (name === 'queue') renderQueue();
   if (name === 'admin') renderTeamList();
+  if (name === 'reports') initReportsTab();
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
@@ -482,6 +483,179 @@ async function renderTeamList() {
     </div>
   `).join('');
 }
+
+// =====================================================================
+// REPORTS — per-person monthly timesheet report (hours, overtime, leave)
+// =====================================================================
+
+let reportMonth = null;          // 'YYYY-MM', defaults to current month
+let reportTargetEmail = null;    // null = viewing your own report
+let reportPersonPopulated = false;
+
+const GAUGE_MAX = {
+  totalHours: 200, overtimeHours: 40, daysWorked: 26,
+  sickLeaveDays: 5, holidayDays: 6, emergencyLeaveDays: 3,
+};
+
+function monthKey(d) { return d.toISOString().slice(0, 7); }
+function monthLabel(key) {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+function shiftMonth(key, delta) {
+  const [y, m] = key.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return monthKey(d);
+}
+function last12Months(anchorKey) {
+  const out = [];
+  for (let i = 0; i < 12; i++) out.push(shiftMonth(anchorKey, -i));
+  return out;
+}
+
+// ---------- Speedometer-style SVG gauge (no external chart library) ----------
+function polarToCartesian(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function describeArc(cx, cy, r, startAngle, endAngle) {
+  const start = polarToCartesian(cx, cy, r, endAngle);
+  const end = polarToCartesian(cx, cy, r, startAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+  return ['M', start.x, start.y, 'A', r, r, 0, largeArcFlag, 0, end.x, end.y].join(' ');
+}
+function gaugeCard(label, value, max, unit, color) {
+  const cx = 65, cy = 62, r = 52;
+  const pct = Math.max(0, Math.min(1, max > 0 ? value / max : 0));
+  const valAngle = -90 + pct * 180;
+  const bg = describeArc(cx, cy, r, -90, 90);
+  const fg = describeArc(cx, cy, r, -90, valAngle);
+  const needle = polarToCartesian(cx, cy, r - 12, valAngle);
+  return `
+    <div class="gauge-card">
+      <svg viewBox="0 0 130 74" class="gauge-svg">
+        <path d="${bg}" class="gauge-track" />
+        <path d="${fg}" class="gauge-fill" style="stroke:${color}" />
+        <line x1="${cx}" y1="${cy}" x2="${needle.x}" y2="${needle.y}" class="gauge-needle" />
+        <circle cx="${cx}" cy="${cy}" r="4" class="gauge-pivot" />
+      </svg>
+      <div class="gauge-value">${value}<span class="gauge-unit">${unit}</span></div>
+      <div class="gauge-label">${escapeHtml(label)}</div>
+    </div>
+  `;
+}
+
+async function populateReportPersonPicker() {
+  const card = $('reportPersonCard');
+  if (currentProfile?.role !== 'admin') { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  if (reportPersonPopulated) return;
+  reportPersonPopulated = true;
+
+  const { data } = await sb.from('profiles').select('email, full_name').order('full_name', { ascending: true });
+  const select = $('reportPerson');
+  const people = data || [];
+  select.innerHTML = people.map(p =>
+    `<option value="${escapeHtml(p.email)}">${escapeHtml(p.full_name || p.email)}${p.email === currentUser.email ? ' (you)' : ''}</option>`
+  ).join('');
+  select.value = currentUser.email;
+  select.addEventListener('change', () => {
+    reportTargetEmail = select.value === currentUser.email ? null : select.value;
+    fetchAndRenderReport();
+  });
+}
+
+function renderMonthStrip() {
+  const strip = $('monthStrip');
+  const months = last12Months(monthKey(new Date()));
+  strip.innerHTML = months.map(key => {
+    const [y, m] = key.split('-');
+    const short = new Date(Date.UTC(Number(y), Number(m) - 1, 1)).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    return `<div class="month-pill ${key === reportMonth ? 'active' : ''}" data-month="${key}">${short}<br>${y}</div>`;
+  }).join('');
+  strip.querySelectorAll('.month-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      reportMonth = pill.dataset.month;
+      renderMonthStrip();
+      $('reportMonthLabel').textContent = monthLabel(reportMonth);
+      fetchAndRenderReport();
+    });
+  });
+}
+
+function renderReportTable(data) {
+  const wrap = $('reportTableWrap');
+  if (!data.dayRows.length) {
+    wrap.innerHTML = '<div class="empty">No timesheet entries this month.</div>';
+    return;
+  }
+  const rows = data.dayRows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.date || '—')}</td>
+      <td>${escapeHtml(MODE_LABEL[r.mode] || r.mode)}</td>
+      <td>${escapeHtml(r.project || '—')}</td>
+      <td>${r.hours}h</td>
+      <td class="${r.overtime > 0 ? 'ot' : ''}">${r.overtime > 0 ? r.overtime + 'h' : '—'}</td>
+    </tr>
+  `).join('');
+  wrap.innerHTML = `
+    <table class="report-table">
+      <thead><tr><th>Date</th><th>Mode</th><th>Project</th><th>Hours</th><th>Overtime</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderReport(data) {
+  const t = data.totals;
+  $('gaugeGrid').innerHTML = [
+    gaugeCard('Total Hours', t.totalHours, GAUGE_MAX.totalHours, 'h', 'var(--accent)'),
+    gaugeCard('Overtime', t.overtimeHours, GAUGE_MAX.overtimeHours, 'h', 'var(--warn)'),
+    gaugeCard('Days Worked', t.daysWorked, GAUGE_MAX.daysWorked, '', 'var(--accent-2)'),
+    gaugeCard('Sick Leave', t.sickLeaveDays, GAUGE_MAX.sickLeaveDays, 'd', 'var(--err)'),
+    gaugeCard('Holiday', t.holidayDays, GAUGE_MAX.holidayDays, 'd', 'var(--ok)'),
+    gaugeCard('Emergency', t.emergencyLeaveDays, GAUGE_MAX.emergencyLeaveDays, 'd', 'var(--warn)'),
+  ].join('');
+  renderReportTable(data);
+}
+
+async function fetchAndRenderReport() {
+  if (!currentUser) return;
+  $('gaugeGrid').innerHTML = '<div class="empty">Loading…</div>';
+  $('reportTableWrap').innerHTML = '';
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const { data, error } = await sb.functions.invoke('get-report', {
+      body: { targetEmail: reportTargetEmail, month: reportMonth },
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    });
+    if (error || data?.error) throw new Error(data?.error || error.message);
+    renderReport(data);
+  } catch (err) {
+    $('gaugeGrid').innerHTML = `<div class="empty">Couldn't load report: ${escapeHtml(String(err.message || err))}</div>`;
+  }
+}
+
+async function initReportsTab() {
+  if (!reportMonth) reportMonth = monthKey(new Date());
+  $('reportMonthLabel').textContent = monthLabel(reportMonth);
+  await populateReportPersonPicker();
+  renderMonthStrip();
+  fetchAndRenderReport();
+}
+
+$('reportPrevMonth').addEventListener('click', () => {
+  reportMonth = shiftMonth(reportMonth || monthKey(new Date()), -1);
+  $('reportMonthLabel').textContent = monthLabel(reportMonth);
+  renderMonthStrip();
+  fetchAndRenderReport();
+});
+$('reportNextMonth').addEventListener('click', () => {
+  reportMonth = shiftMonth(reportMonth || monthKey(new Date()), 1);
+  $('reportMonthLabel').textContent = monthLabel(reportMonth);
+  renderMonthStrip();
+  fetchAndRenderReport();
+});
 
 // =====================================================================
 // QUEUE rendering

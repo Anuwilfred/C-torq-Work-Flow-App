@@ -438,3 +438,105 @@ button.ghost:hover { color: var(--text); }
   .mode-grid { grid-template-columns: repeat(3, 1fr); }
   .row-2 { grid-template-columns: 1fr; }
 }
+
+/* ---------- Reports: month nav + layout ---------- */
+.report-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.report-month-label {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.report-layout {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 480px) {
+  .report-layout { grid-template-columns: 1fr; }
+  .month-strip { flex-direction: row; overflow-x: auto; max-height: none; }
+}
+
+/* Vertical month strip (right side) */
+.month-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-left: 2px;
+}
+.month-pill {
+  flex: none;
+  padding: 8px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.month-pill:hover { border-color: var(--glass-border-strong); color: var(--text); }
+.month-pill.active {
+  background: linear-gradient(160deg, rgba(224,138,95,0.24), rgba(204,120,92,0.15));
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Gauge grid */
+.gauge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+@media (max-width: 480px) {
+  .gauge-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.gauge-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 6px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.035);
+}
+.gauge-svg { width: 100%; max-width: 120px; height: auto; }
+.gauge-track { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 9; stroke-linecap: round; }
+.gauge-fill { fill: none; stroke-width: 9; stroke-linecap: round; transition: d 0.3s ease; }
+.gauge-needle { stroke: var(--text); stroke-width: 2; stroke-linecap: round; }
+.gauge-pivot { fill: var(--text); }
+.gauge-value { font-size: 16px; font-weight: 750; margin-top: 4px; }
+.gauge-unit { font-size: 10.5px; font-weight: 600; color: var(--text-muted); margin-left: 2px; }
+.gauge-label { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; text-align: center; }
+
+/* Report daily-breakdown table */
+.report-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.report-table th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 0 8px 8px 8px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.report-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--glass-border);
+  vertical-align: top;
+}
+.report-table tr:last-child td { border-bottom: none; }
+.report-table td.ot { color: var(--warn); font-weight: 700; }

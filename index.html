@@ -60,6 +60,7 @@
     <nav class="tabs">
       <button data-tab="entry" class="active">New Entry</button>
       <button data-tab="queue">Queue</button>
+      <button data-tab="reports">Reports</button>
       <button data-tab="admin" id="adminTabBtn" style="display:none">Admin</button>
       <button data-tab="settings">Settings</button>
     </nav>
@@ -184,6 +185,32 @@
           <button id="syncNowBtn" class="secondary">Sync now</button>
         </div>
         <div id="entryList" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="reports" class="panel">
+      <div class="card glass" id="reportPersonCard" style="display:none">
+        <label for="reportPerson">Viewing report for</label>
+        <select id="reportPerson"></select>
+      </div>
+
+      <div class="card glass">
+        <div class="report-month-nav">
+          <button type="button" id="reportPrevMonth" class="ghost">‹ Prev</button>
+          <div id="reportMonthLabel" class="report-month-label">—</div>
+          <button type="button" id="reportNextMonth" class="ghost">Next ›</button>
+        </div>
+
+        <div class="report-layout">
+          <div class="report-main">
+            <div class="gauge-grid" id="gaugeGrid"></div>
+            <div class="section-divider"></div>
+            <strong style="font-size:13px;">Daily breakdown</strong>
+            <div id="reportTableWrap" style="margin-top:10px;"></div>
+          </div>
+          <div class="month-strip" id="monthStrip"></div>
+        </div>
       </div>
     </section>
 
