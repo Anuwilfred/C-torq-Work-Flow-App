@@ -890,30 +890,77 @@ $('chatFileInput').addEventListener('change', () => {
   });
 });
 
+// Guards against a stalled mobile-network request leaving the send button
+// stuck disabled forever with no error shown.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out — check your connection and try again`)), ms)),
+  ]);
+}
+
+// Photos straight from a phone camera can be several MB, which stalls on
+// weak mobile data. Downscale/recompress before upload so sends are fast
+// and reliable; skipped for already-small images.
+async function compressImageIfNeeded(file) {
+  if (!file.type || !file.type.startsWith('image/') || file.size <= 800 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 1600;
+    let { width, height } = bitmap;
+    if (width > maxDim || height > maxDim) {
+      const scale = maxDim / Math.max(width, height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.75));
+    if (!blob) return file;
+    const newName = file.name.replace(/\.\w+$/, '') + '.jpg';
+    return new File([blob], newName, { type: 'image/jpeg' });
+  } catch {
+    return file; // if compression fails for any reason, just send the original
+  }
+}
+
 async function sendChatMessage() {
   const text = $('chatTextInput').value.trim();
   if (!activeChatId || (!text && !pendingChatAttachment)) return;
-  $('chatSendBtn').disabled = true;
+  const sendBtn = $('chatSendBtn');
+  const originalLabel = sendBtn.textContent;
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Sending…';
 
   let attachment_path = null, attachment_name = null, attachment_mime = null;
   try {
     if (pendingChatAttachment) {
-      const file = pendingChatAttachment;
+      const file = await compressImageIfNeeded(pendingChatAttachment);
       const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
       const path = `${activeChatId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${safeName}`;
-      const { error: upErr } = await sb.storage.from('chat-attachments').upload(path, file);
+      const { error: upErr } = await withTimeout(
+        sb.storage.from('chat-attachments').upload(path, file),
+        25000,
+        'Upload'
+      );
       if (upErr) throw upErr;
       attachment_path = path;
       attachment_name = file.name;
       attachment_mime = file.type || 'application/octet-stream';
     }
 
-    const { error } = await sb.from('messages').insert({
-      chat_id: activeChatId,
-      sender_id: currentUser.id,
-      content: text || null,
-      attachment_path, attachment_name, attachment_mime,
-    });
+    const { error } = await withTimeout(
+      sb.from('messages').insert({
+        chat_id: activeChatId,
+        sender_id: currentUser.id,
+        content: text || null,
+        attachment_path, attachment_name, attachment_mime,
+      }),
+      15000,
+      'Send'
+    );
     if (error) throw error;
 
     $('chatTextInput').value = '';
@@ -925,7 +972,8 @@ async function sendChatMessage() {
   } catch (err) {
     showToast(`Couldn't send: ${err.message || err}`);
   } finally {
-    $('chatSendBtn').disabled = false;
+    sendBtn.disabled = false;
+    sendBtn.textContent = originalLabel;
   }
 }
 $('chatSendBtn').addEventListener('click', sendChatMessage);
