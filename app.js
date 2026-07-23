@@ -376,6 +376,7 @@ $('logoutBtn').addEventListener('click', async () => {
   closeAiChat();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
   clearInterval(chatListTimer);
+  clearInterval(openChatTimer);
   activeChatId = null; activeChatMeta = null; teamProfiles = []; chatListCache = [];
   showAuthView('loginView');
 });
@@ -699,6 +700,7 @@ let activeChatId = null;
 let activeChatMeta = null;
 let messagesChannel = null;     // realtime subscription for the open thread
 let chatListTimer = null;
+let openChatTimer = null;       // backup poll for the open thread, in case realtime drops (flaky mobile networks)
 let pendingChatAttachment = null; // { file } selected but not yet sent
 
 async function loadTeamProfiles() {
@@ -852,10 +854,24 @@ async function openChat(chatId) {
       refreshChatList();
     })
     .subscribe();
+
+  // Realtime can silently drop on flaky mobile connections — this backup
+  // poll guarantees messages still show up within a few seconds either way.
+  clearInterval(openChatTimer);
+  openChatTimer = setInterval(() => { if (activeChatId === chatId) loadMessages(chatId); }, 5000);
 }
 
 $('chatBackBtn').addEventListener('click', () => {
   $('chatShell').classList.remove('show-thread');
+});
+
+// If the app was backgrounded (phone locked, switched tabs/apps) and comes
+// back, refresh right away instead of waiting for the next poll tick — this
+// is when a dropped realtime connection is most likely.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !currentUser) return;
+  if (activeChatId) loadMessages(activeChatId);
+  if (document.querySelector('#chat.panel.active')) refreshChatList();
 });
 
 // ---------- Sending messages ----------
