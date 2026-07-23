@@ -371,6 +371,8 @@ $('logoutBtn').addEventListener('click', async () => {
   currentProfile = null;
   $('appShell').style.display = 'none';
   $('authScreen').style.display = 'flex';
+  $('aiOrb').style.display = 'none';
+  closeAiChat();
   showAuthView('loginView');
 });
 
@@ -389,6 +391,7 @@ async function enterApp() {
   $('appShell').style.display = 'block';
   $('accountEmail').textContent = user.email;
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+  $('aiOrb').style.display = 'flex';
 
   renderQueue();
   syncQueue();
@@ -583,6 +586,29 @@ function renderMonthStrip() {
   });
 }
 
+function hoursBarChart(dayRows) {
+  if (!dayRows.length) return '<div class="empty">No hours to chart yet.</div>';
+  const chartH = 110;
+  const maxH = Math.max(10, ...dayRows.map(r => r.hours || 0));
+  const bars = dayRows.map(r => {
+    const day = r.date ? new Date(r.date + 'T00:00:00Z').getUTCDate() : '?';
+    const normalH = Math.min(r.hours || 0, 8);
+    const otH = r.overtime || 0;
+    const normalPx = Math.round((normalH / maxH) * chartH);
+    const otPx = Math.round((otH / maxH) * chartH);
+    return `
+      <div class="hbar-col" title="${escapeHtml(r.date || '')}: ${r.hours}h">
+        <div class="hbar-stack" style="height:${chartH}px">
+          ${otPx > 0 ? `<div class="hbar-ot" style="height:${otPx}px"></div>` : ''}
+          <div class="hbar-normal" style="height:${normalPx}px"></div>
+        </div>
+        <div class="hbar-day">${day}</div>
+      </div>
+    `;
+  }).join('');
+  return `<div class="hbar-chart">${bars}</div>`;
+}
+
 function renderReportTable(data) {
   const wrap = $('reportTableWrap');
   if (!data.dayRows.length) {
@@ -616,6 +642,7 @@ function renderReport(data) {
     gaugeCard('Holiday', t.holidayDays, GAUGE_MAX.holidayDays, 'd', 'var(--ok)'),
     gaugeCard('Emergency', t.emergencyLeaveDays, GAUGE_MAX.emergencyLeaveDays, 'd', 'var(--warn)'),
   ].join('');
+  $('hoursChart').innerHTML = hoursBarChart(data.dayRows);
   renderReportTable(data);
 }
 
@@ -742,6 +769,76 @@ async function syncQueue() {
 
 window.addEventListener('load', () => setTimeout(syncQueue, 1500));
 setInterval(syncQueue, 5 * 60 * 1000);
+
+// =====================================================================
+// AI CHAT — glowing orb, mesh reveal, Gemini-backed Q&A over GitHub data
+// =====================================================================
+
+let aiHistory = [];   // [{ role: 'user'|'assistant', text }]
+let aiOpen = false;
+let aiBusy = false;
+
+function openAiChat() {
+  aiOpen = true;
+  $('aiMesh').classList.add('show');
+  $('aiChatPanel').classList.add('show');
+  setTimeout(() => $('aiInput').focus(), 200);
+}
+function closeAiChat() {
+  aiOpen = false;
+  $('aiMesh').classList.remove('show');
+  $('aiChatPanel').classList.remove('show');
+}
+
+$('aiOrb').addEventListener('click', () => { aiOpen ? closeAiChat() : openAiChat(); });
+$('aiCloseBtn').addEventListener('click', closeAiChat);
+$('aiMesh').addEventListener('click', closeAiChat);
+
+function addAiMessage(role, text) {
+  const wrap = $('aiMessages');
+  const div = document.createElement('div');
+  div.className = `ai-msg ${role}`;
+  div.textContent = text;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+  return div;
+}
+
+async function sendAiMessage() {
+  const input = $('aiInput');
+  const text = input.value.trim();
+  if (!text || aiBusy || !currentUser) return;
+  aiBusy = true;
+  $('aiSendBtn').disabled = true;
+  input.value = '';
+
+  addAiMessage('user', text);
+  const loadingEl = addAiMessage('assistant loading', 'Thinking…');
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const { data, error } = await sb.functions.invoke('ai-chat', {
+      body: { message: text, history: aiHistory },
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    });
+    if (error || data?.error) throw new Error(data?.error || error.message);
+    loadingEl.textContent = data.reply;
+    loadingEl.className = 'ai-msg assistant';
+    aiHistory.push({ role: 'user', text }, { role: 'assistant', text: data.reply });
+    aiHistory = aiHistory.slice(-16);
+  } catch (err) {
+    loadingEl.textContent = `Couldn't get an answer: ${err.message || err}`;
+    loadingEl.className = 'ai-msg assistant';
+  } finally {
+    aiBusy = false;
+    $('aiSendBtn').disabled = false;
+  }
+}
+
+$('aiSendBtn').addEventListener('click', sendAiMessage);
+$('aiInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendAiMessage();
+});
 
 // ---------- Service worker ----------
 if ('serviceWorker' in navigator) {

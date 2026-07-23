@@ -206,6 +206,9 @@
           <div class="report-main">
             <div class="gauge-grid" id="gaugeGrid"></div>
             <div class="section-divider"></div>
+            <strong style="font-size:13px;">Hours per day</strong>
+            <div id="hoursChart" style="margin-top:10px;"></div>
+            <div class="section-divider"></div>
             <strong style="font-size:13px;">Daily breakdown</strong>
             <div id="reportTableWrap" style="margin-top:10px;"></div>
           </div>
@@ -255,6 +258,27 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- AI CHAT WIDGET -->
+<div id="aiMesh" class="ai-mesh"></div>
+
+<button id="aiOrb" class="ai-orb" aria-label="Ask AI" style="display:none">
+  <span class="ai-orb-core"></span>
+</button>
+
+<div id="aiChatPanel" class="ai-chat-panel">
+  <div class="ai-chat-header">
+    <span class="ai-chat-title">✨ Ask C-TORQ AI</span>
+    <button type="button" id="aiCloseBtn" class="ghost">✕</button>
+  </div>
+  <div id="aiMessages" class="ai-messages">
+    <div class="ai-msg assistant">Hi! Ask me things like "what did I work on 23/07/2026?" or "summarize my last report."</div>
+  </div>
+  <div class="ai-input-row">
+    <input id="aiInput" type="text" placeholder="Ask about your saved entries…" />
+    <button type="button" id="aiSendBtn" class="ai-send-btn">➤</button>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="./config.js"></script>
