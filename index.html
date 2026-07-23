@@ -13,7 +13,7 @@
 
 <!-- ============== AUTH SCREEN (shown until signed in) ============== -->
 <div id="authScreen" class="auth-wrap">
-  <div class="card auth-card">
+  <div class="card glass auth-card">
     <div class="auth-brand">
       <img src="./icon.svg" width="40" height="40" alt="" />
       <h2>C-TORQ Work Flow</h2>
@@ -66,7 +66,7 @@
 
     <!-- NEW ENTRY -->
     <section id="entry" class="panel active">
-      <div class="card">
+      <div class="card glass">
         <form id="entryForm">
           <label for="type">Type</label>
           <select id="type" required>
@@ -75,22 +75,102 @@
             <option value="data">Project Report</option>
           </select>
 
-          <label for="project">Project</label>
-          <input id="project" type="text" placeholder="e.g. Website Redesign" required />
+          <!-- ===== TIMESHEET-ONLY FIELDS ===== -->
+          <div id="timesheetBlock">
+            <label for="jobId">Job ID</label>
+            <input id="jobId" type="text" placeholder="e.g. JOB-1042" />
 
-          <label for="date">Date</label>
-          <input id="date" type="date" required />
+            <label>Mode of work</label>
+            <div id="modeGrid" class="mode-grid">
+              <div class="mode-chip" data-mode="office"><span class="emoji">🏢</span>Office</div>
+              <div class="mode-chip" data-mode="site"><span class="emoji">🏗️</span>Site</div>
+              <div class="mode-chip" data-mode="driver"><span class="emoji">🚗</span>Driver</div>
+              <div class="mode-chip" data-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
+              <div class="mode-chip" data-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+              <div class="mode-chip" data-mode="inspection"><span class="emoji">🔍</span>Inspection</div>
+              <div class="mode-chip" data-mode="field_work"><span class="emoji">🌾</span>Field Work</div>
+              <div class="mode-chip" data-mode="other"><span class="emoji">✨</span>Other</div>
+              <div class="mode-chip" data-mode="sick_leave"><span class="emoji">🤒</span>Sick Leave</div>
+              <div class="mode-chip" data-mode="holiday"><span class="emoji">🏖️</span>Holiday</div>
+              <div class="mode-chip" data-mode="emergency_leave"><span class="emoji">🚨</span>Emergency Leave</div>
+            </div>
 
-          <label for="hours" id="hoursLabel">Hours</label>
-          <input id="hours" type="number" step="0.25" min="0" placeholder="e.g. 4.5" />
+            <!-- work-type fields -->
+            <div id="workModeFields" class="field-group">
+              <div class="section-divider"></div>
+              <label for="project">Project</label>
+              <input id="project" type="text" placeholder="e.g. Website Redesign" />
 
-          <label for="description">Description / Notes</label>
-          <textarea id="description" placeholder="What did you work on?" required></textarea>
+              <label for="location">Location</label>
+              <div class="location-row">
+                <input id="location" type="text" placeholder="Tap to fetch, or type manually" />
+                <button type="button" id="fetchLocationBtn">📍 Use my location</button>
+              </div>
 
-          <label for="photo">Photo (optional, keep it small)</label>
-          <input id="photo" type="file" accept="image/*" />
+              <div class="row-2">
+                <div>
+                  <label for="date">Date</label>
+                  <input id="date" type="date" />
+                </div>
+                <div></div>
+              </div>
+              <div class="row-2">
+                <div>
+                  <label for="startTime">Start time</label>
+                  <input id="startTime" type="time" />
+                </div>
+                <div>
+                  <label for="endTime">End time</label>
+                  <input id="endTime" type="time" />
+                </div>
+              </div>
 
-          <button type="submit" class="primary">Save Entry</button>
+              <label for="workNotes">Notes (optional)</label>
+              <textarea id="workNotes" placeholder="Anything worth noting?"></textarea>
+            </div>
+
+            <!-- leave-type fields -->
+            <div id="leaveModeFields" class="field-group">
+              <div class="section-divider"></div>
+              <div class="row-2">
+                <div>
+                  <label for="leaveStart">Start date</label>
+                  <input id="leaveStart" type="date" />
+                </div>
+                <div>
+                  <label for="leaveEnd">End date</label>
+                  <input id="leaveEnd" type="date" />
+                </div>
+              </div>
+
+              <label for="leaveReason">Reason / notes</label>
+              <textarea id="leaveReason" placeholder="Brief reason"></textarea>
+
+              <div id="sickDocField" style="display:none">
+                <label for="sickDoc">Medical document (optional)</label>
+                <input id="sickDoc" type="file" accept="application/pdf,image/*" />
+                <p class="hint warn">No document attached? This will be recorded as a general Leave request instead of Sick Leave.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== DAILY PROGRESS / PROJECT REPORT FIELDS ===== -->
+          <div id="simpleBlock">
+            <label for="projectSimple">Project</label>
+            <input id="projectSimple" type="text" placeholder="e.g. Website Redesign" />
+
+            <label for="dateSimple">Date</label>
+            <input id="dateSimple" type="date" />
+
+            <label for="descriptionSimple">Description / Notes</label>
+            <textarea id="descriptionSimple" placeholder="What did you work on?"></textarea>
+
+            <label for="filesSimple">Attachments (PDF or images, multiple allowed)</label>
+            <input id="filesSimple" type="file" accept="application/pdf,image/*" multiple />
+            <p class="hint">Keep files reasonably small — large uploads take longer to sync.</p>
+          </div>
+
+          <button type="button" id="reviewBtn" class="primary">Review &amp; Submit</button>
           <p class="hint">Saved to this device instantly, even with no connection. Submits automatically once you're back online.</p>
         </form>
       </div>
@@ -98,18 +178,18 @@
 
     <!-- QUEUE -->
     <section id="queue" class="panel">
-      <div class="card">
+      <div class="card glass">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <strong style="font-size:14px;">Your entries</strong>
           <button id="syncNowBtn" class="secondary">Sync now</button>
         </div>
-        <div id="entryList" style="margin-top:10px;"></div>
+        <div id="entryList" style="margin-top:12px;"></div>
       </div>
     </section>
 
-    <!-- ADMIN (only visible if profile.role === 'admin') -->
+    <!-- ADMIN -->
     <section id="admin" class="panel">
-      <div class="card">
+      <div class="card glass">
         <label for="inviteEmail">Teammate's email</label>
         <input id="inviteEmail" type="email" placeholder="name@example.com" />
         <label for="inviteName">Full name (optional)</label>
@@ -117,21 +197,34 @@
         <button id="sendInviteBtn" class="primary">Send invite</button>
         <p class="hint">They'll get an email to confirm and set their own password. Once accepted, they show up as "active" below.</p>
       </div>
-      <div class="card">
+      <div class="card glass">
         <strong style="font-size:14px;">Team</strong>
-        <div id="teamList" style="margin-top:10px;"></div>
+        <div id="teamList" style="margin-top:12px;"></div>
       </div>
     </section>
 
     <!-- SETTINGS -->
     <section id="settings" class="panel">
-      <div class="card">
+      <div class="card glass">
         <label>Signed in as</label>
-        <div id="accountEmail" style="padding:6px 0 12px; font-size:14px;"></div>
+        <div id="accountEmail" style="padding:6px 0 14px; font-size:14px;"></div>
         <button id="logoutBtn" class="secondary" style="width:100%;">Log out</button>
       </div>
     </section>
   </main>
+</div>
+
+<!-- REVIEW OVERLAY -->
+<div id="reviewOverlay" class="overlay">
+  <div class="card glass review-card">
+    <h3>Review your entry</h3>
+    <p class="hint">Check the details below before submitting.</p>
+    <div id="reviewContent"></div>
+    <div class="review-actions">
+      <button type="button" id="reviewBackBtn" class="secondary">Back to edit</button>
+      <button type="button" id="reviewConfirmBtn" class="primary">Confirm &amp; Submit</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
