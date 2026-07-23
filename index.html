@@ -59,6 +59,7 @@
   <main>
     <nav class="tabs">
       <button data-tab="entry" class="active">New Entry</button>
+      <button data-tab="chat">Chat</button>
       <button data-tab="queue">Queue</button>
       <button data-tab="reports">Reports</button>
       <button data-tab="admin" id="adminTabBtn" style="display:none">Admin</button>
@@ -187,6 +188,67 @@
         <div id="entryList" style="margin-top:12px;"></div>
       </div>
     </section>
+
+    <!-- CHAT -->
+    <section id="chat" class="panel">
+      <div class="card glass chat-shell" id="chatShell">
+        <div class="chat-sidebar">
+          <div class="chat-sidebar-header">
+            <strong>Chats</strong>
+            <div class="chat-new-buttons">
+              <button type="button" id="newDmBtn" class="ghost" title="New direct message">💬+</button>
+              <button type="button" id="newGroupBtn" class="ghost" style="display:none" title="New group">👥+</button>
+            </div>
+          </div>
+          <div id="chatList" class="chat-list"><div class="empty">No chats yet.</div></div>
+        </div>
+
+        <div class="chat-main">
+          <div id="chatEmpty" class="chat-empty">Pick a chat on the left, or start a new one.</div>
+          <div id="chatThreadWrap" class="chat-thread-wrap" style="display:none">
+            <div class="chat-thread-header">
+              <button type="button" id="chatBackBtn" class="ghost chat-back-btn">‹</button>
+              <strong id="chatThreadTitle">—</strong>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <div id="chatAttachPreview" class="chat-attach-preview" style="display:none"></div>
+            <div class="chat-input-row">
+              <input type="file" id="chatFileInput" style="display:none" accept="image/*,application/pdf" />
+              <button type="button" id="chatAttachBtn" class="chat-attach-btn" title="Attach photo or PDF">📎</button>
+              <input id="chatTextInput" type="text" placeholder="Type a message…" />
+              <button type="button" id="chatSendBtn" class="ai-send-btn">➤</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- NEW DM PICKER -->
+    <div id="newDmOverlay" class="overlay">
+      <div class="card glass review-card">
+        <h3>Start a direct message</h3>
+        <p class="hint">Pick a teammate to chat with.</p>
+        <div id="dmPersonList" style="margin:6px 0 4px;"></div>
+        <div class="review-actions">
+          <button type="button" id="newDmCancelBtn" class="secondary" style="flex:1;">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- NEW GROUP -->
+    <div id="newGroupOverlay" class="overlay">
+      <div class="card glass review-card">
+        <h3>Create a group</h3>
+        <label for="groupNameInput">Group name</label>
+        <input id="groupNameInput" type="text" placeholder="e.g. Site Team" />
+        <label>Add teammates</label>
+        <div id="groupMemberList" style="margin:6px 0 4px;"></div>
+        <div class="review-actions">
+          <button type="button" id="newGroupCancelBtn" class="secondary">Cancel</button>
+          <button type="button" id="newGroupCreateBtn" class="primary" style="margin-top:0;">Create group</button>
+        </div>
+      </div>
+    </div>
 
     <!-- REPORTS -->
     <section id="reports" class="panel">

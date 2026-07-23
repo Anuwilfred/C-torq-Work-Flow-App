@@ -74,6 +74,7 @@ function setActiveTab(name) {
   if (name === 'queue') renderQueue();
   if (name === 'admin') renderTeamList();
   if (name === 'reports') initReportsTab();
+  if (name === 'chat') initChatTab();
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
@@ -373,6 +374,9 @@ $('logoutBtn').addEventListener('click', async () => {
   $('authScreen').style.display = 'flex';
   $('aiOrb').style.display = 'none';
   closeAiChat();
+  if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
+  clearInterval(chatListTimer);
+  activeChatId = null; activeChatMeta = null; teamProfiles = []; chatListCache = [];
   showAuthView('loginView');
 });
 
@@ -391,6 +395,7 @@ async function enterApp() {
   $('appShell').style.display = 'block';
   $('accountEmail').textContent = user.email;
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+  $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
   $('aiOrb').style.display = 'flex';
 
   renderQueue();
@@ -682,6 +687,298 @@ $('reportNextMonth').addEventListener('click', () => {
   $('reportMonthLabel').textContent = monthLabel(reportMonth);
   renderMonthStrip();
   fetchAndRenderReport();
+});
+
+// =====================================================================
+// CHAT — Slack/WhatsApp-style groups + DMs, live via Supabase Realtime
+// =====================================================================
+
+let teamProfiles = [];          // cached team list (excluding self) for DM/group pickers
+let chatListCache = [];         // [{ id, type, name, memberNames, lastLine, lastAt }]
+let activeChatId = null;
+let activeChatMeta = null;
+let messagesChannel = null;     // realtime subscription for the open thread
+let chatListTimer = null;
+let pendingChatAttachment = null; // { file } selected but not yet sent
+
+async function loadTeamProfiles() {
+  const { data } = await sb.from('profiles').select('id, email, full_name').neq('id', currentUser.id);
+  teamProfiles = data || [];
+}
+
+function chatDisplayName(chatRow) {
+  if (chatRow.type === 'group') return chatRow.name || 'Group';
+  const other = (chatRow.memberProfiles || []).find((p) => p.id !== currentUser.id);
+  return other ? (other.full_name || other.email) : 'Direct message';
+}
+
+async function fetchChatList() {
+  const { data, error } = await sb
+    .from('chats')
+    .select('id, type, name, created_at, chat_members(user_id, profiles(id, full_name, email))');
+  if (error) return [];
+
+  const rows = (data || []).map((c) => ({
+    id: c.id,
+    type: c.type,
+    name: c.name,
+    memberProfiles: (c.chat_members || []).map((m) => m.profiles).filter(Boolean),
+  }));
+
+  // Grab each chat's most recent message for the preview line, in parallel.
+  const withPreview = await Promise.all(rows.map(async (r) => {
+    const { data: last } = await sb
+      .from('messages')
+      .select('content, attachment_name, created_at, sender_id')
+      .eq('chat_id', r.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const m = last?.[0];
+    return {
+      ...r,
+      lastLine: m ? (m.content || (m.attachment_name ? `📎 ${m.attachment_name}` : '')) : 'No messages yet',
+      lastAt: m?.created_at || null,
+    };
+  }));
+
+  withPreview.sort((a, b) => String(b.lastAt || '').localeCompare(String(a.lastAt || '')));
+  return withPreview;
+}
+
+function renderChatList() {
+  const list = $('chatList');
+  if (!chatListCache.length) { list.innerHTML = '<div class="empty">No chats yet — start one above.</div>'; return; }
+  list.innerHTML = chatListCache.map((c) => {
+    const name = chatDisplayName(c);
+    const icon = c.type === 'group' ? '👥' : '🙂';
+    return `
+      <div class="chat-list-item ${c.id === activeChatId ? 'active' : ''}" data-chat-id="${c.id}">
+        <span class="chat-list-avatar">${icon}</span>
+        <div class="chat-list-body">
+          <div class="chat-list-name">${escapeHtml(name)}</div>
+          <div class="chat-list-preview">${escapeHtml(c.lastLine)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  list.querySelectorAll('.chat-list-item').forEach((el) => {
+    el.addEventListener('click', () => openChat(el.dataset.chatId));
+  });
+}
+
+async function refreshChatList() {
+  chatListCache = await fetchChatList();
+  renderChatList();
+}
+
+async function initChatTab() {
+  if (!teamProfiles.length) await loadTeamProfiles();
+  await refreshChatList();
+  clearInterval(chatListTimer);
+  chatListTimer = setInterval(refreshChatList, 20000); // near-real-time list refresh
+}
+
+function attachmentMimeIsImage(mime) { return (mime || '').startsWith('image/'); }
+
+async function attachmentUrl(path) {
+  const { data } = await sb.storage.from('chat-attachments').createSignedUrl(path, 3600);
+  return data?.signedUrl || null;
+}
+
+async function renderMessages(rows) {
+  const wrap = $('chatMessages');
+  const isGroup = activeChatMeta?.type === 'group';
+  const parts = await Promise.all(rows.map(async (m) => {
+    const mine = m.sender_id === currentUser.id;
+    let mediaHtml = '';
+    if (m.attachment_path) {
+      const url = await attachmentUrl(m.attachment_path);
+      if (url && attachmentMimeIsImage(m.attachment_mime)) {
+        mediaHtml = `<a href="${url}" target="_blank" rel="noopener"><img class="chat-img" src="${url}" alt="${escapeHtml(m.attachment_name || '')}" /></a>`;
+      } else if (url) {
+        mediaHtml = `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener">📄 ${escapeHtml(m.attachment_name || 'file')}</a>`;
+      }
+    }
+    const senderName = isGroup && !mine ? `<div class="chat-bubble-sender">${escapeHtml(m.senderLabel || '')}</div>` : '';
+    const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `
+      <div class="chat-bubble-row ${mine ? 'mine' : ''}">
+        <div class="chat-bubble">
+          ${senderName}
+          ${m.content ? escapeHtml(m.content) : ''}
+          ${mediaHtml}
+          <div class="chat-bubble-time">${time}</div>
+        </div>
+      </div>
+    `;
+  }));
+  wrap.innerHTML = parts.join('');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+async function loadMessages(chatId) {
+  const { data } = await sb
+    .from('messages')
+    .select('id, chat_id, sender_id, content, attachment_path, attachment_name, attachment_mime, created_at')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: true });
+
+  const rows = data || [];
+  if (activeChatMeta?.type === 'group') {
+    const senders = {};
+    (activeChatMeta.memberProfiles || []).forEach((p) => { senders[p.id] = p.full_name || p.email; });
+    rows.forEach((r) => { r.senderLabel = senders[r.sender_id] || 'Someone'; });
+  }
+  await renderMessages(rows);
+}
+
+async function openChat(chatId) {
+  activeChatId = chatId;
+  activeChatMeta = chatListCache.find((c) => c.id === chatId) || null;
+
+  $('chatEmpty').style.display = 'none';
+  $('chatThreadWrap').style.display = 'flex';
+  $('chatShell').classList.add('show-thread');
+  $('chatThreadTitle').textContent = activeChatMeta ? chatDisplayName(activeChatMeta) : 'Chat';
+  renderChatList();
+
+  await loadMessages(chatId);
+
+  if (messagesChannel) sb.removeChannel(messagesChannel);
+  messagesChannel = sb
+    .channel(`messages-${chatId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` }, () => {
+      loadMessages(chatId);
+      refreshChatList();
+    })
+    .subscribe();
+}
+
+$('chatBackBtn').addEventListener('click', () => {
+  $('chatShell').classList.remove('show-thread');
+});
+
+// ---------- Sending messages ----------
+$('chatAttachBtn').addEventListener('click', () => $('chatFileInput').click());
+$('chatFileInput').addEventListener('change', () => {
+  const file = $('chatFileInput').files[0];
+  if (!file) return;
+  pendingChatAttachment = file;
+  const preview = $('chatAttachPreview');
+  preview.style.display = 'flex';
+  preview.innerHTML = `📎 ${escapeHtml(file.name)} <button type="button" id="chatAttachRemoveBtn">✕</button>`;
+  $('chatAttachRemoveBtn').addEventListener('click', () => {
+    pendingChatAttachment = null;
+    $('chatFileInput').value = '';
+    preview.style.display = 'none';
+  });
+});
+
+async function sendChatMessage() {
+  const text = $('chatTextInput').value.trim();
+  if (!activeChatId || (!text && !pendingChatAttachment)) return;
+  $('chatSendBtn').disabled = true;
+
+  let attachment_path = null, attachment_name = null, attachment_mime = null;
+  try {
+    if (pendingChatAttachment) {
+      const file = pendingChatAttachment;
+      const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
+      const path = `${activeChatId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+      const { error: upErr } = await sb.storage.from('chat-attachments').upload(path, file);
+      if (upErr) throw upErr;
+      attachment_path = path;
+      attachment_name = file.name;
+      attachment_mime = file.type || 'application/octet-stream';
+    }
+
+    const { error } = await sb.from('messages').insert({
+      chat_id: activeChatId,
+      sender_id: currentUser.id,
+      content: text || null,
+      attachment_path, attachment_name, attachment_mime,
+    });
+    if (error) throw error;
+
+    $('chatTextInput').value = '';
+    pendingChatAttachment = null;
+    $('chatFileInput').value = '';
+    $('chatAttachPreview').style.display = 'none';
+    await loadMessages(activeChatId);
+    refreshChatList();
+  } catch (err) {
+    showToast(`Couldn't send: ${err.message || err}`);
+  } finally {
+    $('chatSendBtn').disabled = false;
+  }
+}
+$('chatSendBtn').addEventListener('click', sendChatMessage);
+$('chatTextInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChatMessage(); });
+
+// ---------- New DM ----------
+function personPickRow(p, checkbox) {
+  return `
+    <label class="person-pick-row">
+      ${checkbox ? `<input type="checkbox" value="${p.id}" />` : ''}
+      <span>${escapeHtml(p.full_name || p.email)}</span>
+    </label>
+  `;
+}
+
+$('newDmBtn').addEventListener('click', async () => {
+  if (!teamProfiles.length) await loadTeamProfiles();
+  $('dmPersonList').innerHTML = teamProfiles.length
+    ? teamProfiles.map((p) => personPickRow(p, false)).join('')
+    : '<div class="empty">No teammates yet.</div>';
+  $('dmPersonList').querySelectorAll('.person-pick-row').forEach((row, i) => {
+    row.addEventListener('click', () => startDm(teamProfiles[i]));
+  });
+  $('newDmOverlay').classList.add('show');
+});
+$('newDmCancelBtn').addEventListener('click', () => $('newDmOverlay').classList.remove('show'));
+
+async function startDm(person) {
+  $('newDmOverlay').classList.remove('show');
+  // Reuse an existing DM with this person if one already exists.
+  const existing = chatListCache.find((c) => c.type === 'dm' && (c.memberProfiles || []).some((p) => p.id === person.id));
+  if (existing) { setActiveTab('chat'); await openChat(existing.id); return; }
+
+  const { data: chatRow, error } = await sb.from('chats').insert({ type: 'dm', created_by: currentUser.id }).select().single();
+  if (error) { showToast(`Couldn't start chat: ${error.message}`); return; }
+  await sb.from('chat_members').insert([
+    { chat_id: chatRow.id, user_id: currentUser.id },
+    { chat_id: chatRow.id, user_id: person.id },
+  ]);
+  await refreshChatList();
+  await openChat(chatRow.id);
+}
+
+// ---------- New Group ----------
+$('newGroupBtn').addEventListener('click', async () => {
+  if (!teamProfiles.length) await loadTeamProfiles();
+  $('groupNameInput').value = '';
+  $('groupMemberList').innerHTML = teamProfiles.length
+    ? teamProfiles.map((p) => personPickRow(p, true)).join('')
+    : '<div class="empty">No teammates yet.</div>';
+  $('newGroupOverlay').classList.add('show');
+});
+$('newGroupCancelBtn').addEventListener('click', () => $('newGroupOverlay').classList.remove('show'));
+
+$('newGroupCreateBtn').addEventListener('click', async () => {
+  const name = $('groupNameInput').value.trim();
+  const selectedIds = Array.from($('groupMemberList').querySelectorAll('input[type="checkbox"]:checked')).map((c) => c.value);
+  if (!name) { showToast('Give the group a name.'); return; }
+  if (!selectedIds.length) { showToast('Pick at least one teammate.'); return; }
+
+  const { data: chatRow, error } = await sb.from('chats').insert({ type: 'group', name, created_by: currentUser.id }).select().single();
+  if (error) { showToast(`Couldn't create group: ${error.message}`); return; }
+  await sb.from('chat_members').insert([
+    { chat_id: chatRow.id, user_id: currentUser.id },
+    ...selectedIds.map((id) => ({ chat_id: chatRow.id, user_id: id })),
+  ]);
+  $('newGroupOverlay').classList.remove('show');
+  await refreshChatList();
+  await openChat(chatRow.id);
 });
 
 // =====================================================================
