@@ -1,0 +1,13 @@
+{
+  "name": "C-TORQ Work Flow",
+  "short_name": "C-TORQ WF",
+  "description": "Offline-first timesheet, progress and data collection tracker synced to GitHub",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1a1a19",
+  "theme_color": "#cc785c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
