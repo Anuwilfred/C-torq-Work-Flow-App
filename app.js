@@ -74,7 +74,6 @@ function setActiveTab(name) {
   if (name === 'queue') renderQueue();
   if (name === 'admin') renderTeamList();
   if (name === 'reports') initReportsTab();
-  if (name === 'chat') initChatTab();
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
@@ -374,7 +373,11 @@ $('logoutBtn').addEventListener('click', async () => {
   $('authScreen').style.display = 'flex';
   $('aiOrb').style.display = 'none';
   $('aiOrbLabel').style.display = 'none';
+  $('chatOrb').style.display = 'none';
+  $('chatOrbLabel').style.display = 'none';
   closeAiChat();
+  closeChatOverlay();
+  stopPresence();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
   clearInterval(chatListTimer);
   clearInterval(openChatTimer);
@@ -400,6 +403,9 @@ async function enterApp() {
   $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
   $('aiOrb').style.display = 'flex';
   $('aiOrbLabel').style.display = 'block';
+  $('chatOrb').style.display = 'flex';
+  $('chatOrbLabel').style.display = 'block';
+  startPresence();
 
   renderQueue();
   syncQueue();
@@ -704,6 +710,51 @@ let messagesChannel = null;     // realtime subscription for the open thread
 let chatListTimer = null;
 let openChatTimer = null;       // backup poll for the open thread, in case realtime drops (flaky mobile networks)
 let pendingChatAttachment = null; // { file } selected but not yet sent
+let onlineUserIds = new Set();  // who's currently online, via Supabase Realtime Presence
+let presenceChannel = null;
+
+// ---------- Chat overlay (floating icon, bottom-left) ----------
+function openChatOverlay() {
+  $('chatOverlayBackdrop').classList.add('show');
+  $('chatOverlay').classList.add('show');
+  initChatTab();
+}
+function closeChatOverlay() {
+  $('chatOverlayBackdrop').classList.remove('show');
+  $('chatOverlay').classList.remove('show');
+}
+$('chatOrb').addEventListener('click', openChatOverlay);
+$('chatOverlayBackdrop').addEventListener('click', closeChatOverlay);
+$('chatCloseBtn').addEventListener('click', closeChatOverlay);
+$('chatHomeBtn').addEventListener('click', closeChatOverlay);
+
+// ---------- Online presence — who's currently in the app ----------
+function startPresence() {
+  if (presenceChannel || !currentUser) return;
+  presenceChannel = sb.channel('presence:online', { config: { presence: { key: currentUser.id } } });
+  presenceChannel
+    .on('presence', { event: 'sync' }, () => {
+      onlineUserIds = new Set(Object.keys(presenceChannel.presenceState()));
+      renderChatList();
+      updateThreadPresence();
+    })
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') await presenceChannel.track({ online_at: new Date().toISOString() });
+    });
+}
+function stopPresence() {
+  if (presenceChannel) { sb.removeChannel(presenceChannel); presenceChannel = null; }
+  onlineUserIds = new Set();
+}
+function updateThreadPresence() {
+  const dot = $('chatThreadPresence');
+  if (!dot) return;
+  const other = activeChatMeta?.type === 'dm'
+    ? (activeChatMeta.memberProfiles || []).find((p) => p.id !== currentUser.id)
+    : null;
+  dot.style.display = other ? 'inline-block' : 'none';
+  dot.classList.toggle('online', !!(other && onlineUserIds.has(other.id)));
+}
 
 async function loadTeamProfiles() {
   const { data } = await sb.from('profiles').select('id, email, full_name').neq('id', currentUser.id);
@@ -755,9 +806,15 @@ function renderChatList() {
   list.innerHTML = chatListCache.map((c) => {
     const name = chatDisplayName(c);
     const icon = c.type === 'group' ? '👥' : '🙂';
+    let dot = '';
+    if (c.type === 'dm') {
+      const other = (c.memberProfiles || []).find((p) => p.id !== currentUser.id);
+      const isOnline = other && onlineUserIds.has(other.id);
+      dot = `<span class="presence-dot ${isOnline ? 'online' : ''}"></span>`;
+    }
     return `
       <div class="chat-list-item ${c.id === activeChatId ? 'active' : ''}" data-chat-id="${c.id}">
-        <span class="chat-list-avatar">${icon}</span>
+        <span class="chat-list-avatar">${icon}${dot}</span>
         <div class="chat-list-body">
           <div class="chat-list-name">${escapeHtml(name)}</div>
           <div class="chat-list-preview">${escapeHtml(c.lastLine)}</div>
@@ -844,6 +901,7 @@ async function openChat(chatId) {
   $('chatThreadWrap').style.display = 'flex';
   $('chatShell').classList.add('show-thread');
   $('chatThreadTitle').textContent = activeChatMeta ? chatDisplayName(activeChatMeta) : 'Chat';
+  updateThreadPresence();
   renderChatList();
 
   await loadMessages(chatId);
@@ -873,7 +931,7 @@ $('chatBackBtn').addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !currentUser) return;
   if (activeChatId) loadMessages(activeChatId);
-  if (document.querySelector('#chat.panel.active')) refreshChatList();
+  if ($('chatOverlay').classList.contains('show')) refreshChatList();
 });
 
 // ---------- Sending messages ----------
@@ -1007,7 +1065,7 @@ async function startDm(person) {
   $('newDmOverlay').classList.remove('show');
   // Reuse an existing DM with this person if one already exists.
   const existing = chatListCache.find((c) => c.type === 'dm' && (c.memberProfiles || []).some((p) => p.id === person.id));
-  if (existing) { setActiveTab('chat'); await openChat(existing.id); return; }
+  if (existing) { await openChat(existing.id); return; }
 
   const { data: chatRow, error } = await sb.from('chats').insert({ type: 'dm', created_by: currentUser.id }).select().single();
   if (error) { showToast(`Couldn't start chat: ${error.message}`); return; }

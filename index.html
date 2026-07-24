@@ -59,7 +59,6 @@
   <main>
     <nav class="tabs">
       <button data-tab="entry" class="active">New Entry</button>
-      <button data-tab="chat">Chat</button>
       <button data-tab="queue">Queue</button>
       <button data-tab="reports">Reports</button>
       <button data-tab="admin" id="adminTabBtn" style="display:none">Admin</button>
@@ -189,39 +188,8 @@
       </div>
     </section>
 
-    <!-- CHAT -->
-    <section id="chat" class="panel">
-      <div class="card glass chat-shell" id="chatShell">
-        <div class="chat-sidebar">
-          <div class="chat-sidebar-header">
-            <strong>Chats</strong>
-            <div class="chat-new-buttons">
-              <button type="button" id="newDmBtn" class="ghost" title="New direct message">💬+</button>
-              <button type="button" id="newGroupBtn" class="ghost" style="display:none" title="New group">👥+</button>
-            </div>
-          </div>
-          <div id="chatList" class="chat-list"><div class="empty">No chats yet.</div></div>
-        </div>
-
-        <div class="chat-main">
-          <div id="chatEmpty" class="chat-empty">Pick a chat on the left, or start a new one.</div>
-          <div id="chatThreadWrap" class="chat-thread-wrap" style="display:none">
-            <div class="chat-thread-header">
-              <button type="button" id="chatBackBtn" class="ghost chat-back-btn">‹</button>
-              <strong id="chatThreadTitle">—</strong>
-            </div>
-            <div id="chatMessages" class="chat-messages"></div>
-            <div id="chatAttachPreview" class="chat-attach-preview" style="display:none"></div>
-            <div class="chat-input-row">
-              <input type="file" id="chatFileInput" style="display:none" accept="image/*,application/pdf" />
-              <button type="button" id="chatAttachBtn" class="chat-attach-btn" title="Attach photo or PDF">📎</button>
-              <input id="chatTextInput" type="text" placeholder="Type a message…" />
-              <button type="button" id="chatSendBtn" class="ai-send-btn">➤</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <!-- CHAT is no longer a tab — see the floating chatOrb overlay near the
+         bottom of this file, next to the AEON Ai orb. -->
 
     <!-- NEW DM PICKER -->
     <div id="newDmOverlay" class="overlay">
@@ -340,6 +308,47 @@
   <div class="ai-input-row">
     <input id="aiInput" type="text" placeholder="Ask about your saved entries…" />
     <button type="button" id="aiSendBtn" class="ai-send-btn">➤</button>
+  </div>
+</div>
+
+<!-- AEON TEAMS CHAT — floating icon, bottom-left, mirrors the AEON Ai orb -->
+<span id="chatOrbLabel" class="chat-orb-label" style="display:none">Aeon Teams Chat</span>
+<button id="chatOrb" class="chat-orb" aria-label="Open Aeon Teams Chat" title="Aeon Teams Chat" style="display:none">💬</button>
+
+<div id="chatOverlayBackdrop" class="chat-overlay-backdrop"></div>
+<div id="chatOverlay" class="chat-overlay">
+  <div class="card glass chat-shell" id="chatShell">
+    <div class="chat-sidebar">
+      <div class="chat-sidebar-header">
+        <strong>Aeon Teams Chat</strong>
+        <div class="chat-new-buttons">
+          <button type="button" id="newDmBtn" class="ghost" title="New direct message">💬+</button>
+          <button type="button" id="newGroupBtn" class="ghost" style="display:none" title="New group">👥+</button>
+          <button type="button" id="chatCloseBtn" class="ghost" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="chatList" class="chat-list"><div class="empty">No chats yet.</div></div>
+    </div>
+
+    <div class="chat-main">
+      <div id="chatEmpty" class="chat-empty">Pick a chat on the left, or start a new one.</div>
+      <div id="chatThreadWrap" class="chat-thread-wrap" style="display:none">
+        <div class="chat-thread-header">
+          <button type="button" id="chatBackBtn" class="ghost chat-back-btn">‹</button>
+          <span id="chatThreadPresence" class="presence-dot" style="display:none"></span>
+          <strong id="chatThreadTitle">—</strong>
+          <button type="button" id="chatHomeBtn" class="ghost chat-home-btn" title="Back to home">🏠 Home</button>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div id="chatAttachPreview" class="chat-attach-preview" style="display:none"></div>
+        <div class="chat-input-row">
+          <input type="file" id="chatFileInput" style="display:none" />
+          <button type="button" id="chatAttachBtn" class="chat-attach-btn" title="Attach a file">📎</button>
+          <input id="chatTextInput" type="text" placeholder="Type a message…" />
+          <button type="button" id="chatSendBtn" class="ai-send-btn">➤</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
