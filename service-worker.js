@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.10';
+const CACHE_NAME = 'ctorq-workflow-v3.11';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 const ASSETS = [
   './',
@@ -52,6 +52,37 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() => caches.match('./index.html'));
+    })
+  );
+});
+
+// ---------- Push notifications (WhatsApp-style system alerts) ----------
+// Fired by the browser's push service when send-push sends a message. This
+// runs even if the app/tab is fully closed, as long as the browser/OS allows
+// background push for this site (works on Android + desktop Chrome/Edge;
+// on iPhone this only fires if the app was added to the Home Screen).
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = {}; }
+  const title = data.title || 'Aeon Teams Chat';
+  const options = {
+    body: data.body || 'You have a new message',
+    icon: './icon-192.png',
+    badge: './icon-192.png',
+    data: { url: data.url || './' },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || './';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );
 });

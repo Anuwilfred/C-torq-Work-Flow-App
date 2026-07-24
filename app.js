@@ -74,6 +74,7 @@ function setActiveTab(name) {
   if (name === 'queue') renderQueue();
   if (name === 'admin') renderTeamList();
   if (name === 'reports') initReportsTab();
+  if (name === 'settings') refreshPushStatus();
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
@@ -748,12 +749,18 @@ function stopPresence() {
 }
 function updateThreadPresence() {
   const dot = $('chatThreadPresence');
+  const statusText = $('chatThreadStatus');
   if (!dot) return;
   const other = activeChatMeta?.type === 'dm'
     ? (activeChatMeta.memberProfiles || []).find((p) => p.id !== currentUser.id)
     : null;
+  const isOnline = !!(other && onlineUserIds.has(other.id));
   dot.style.display = other ? 'inline-block' : 'none';
-  dot.classList.toggle('online', !!(other && onlineUserIds.has(other.id)));
+  dot.classList.toggle('online', isOnline);
+  if (statusText) {
+    statusText.textContent = other ? (isOnline ? 'Online' : '') : '';
+    statusText.classList.toggle('online', isOnline);
+  }
 }
 
 async function loadTeamProfiles() {
@@ -1011,13 +1018,13 @@ async function sendChatMessage() {
       attachment_mime = file.type || 'application/octet-stream';
     }
 
-    const { error } = await withTimeout(
+    const { data: newMsg, error } = await withTimeout(
       sb.from('messages').insert({
         chat_id: activeChatId,
         sender_id: currentUser.id,
         content: text || null,
         attachment_path, attachment_name, attachment_mime,
-      }),
+      }).select().single(),
       15000,
       'Send'
     );
@@ -1029,6 +1036,16 @@ async function sendChatMessage() {
     $('chatAttachPreview').style.display = 'none';
     await loadMessages(activeChatId);
     refreshChatList();
+
+    // Best-effort: trigger a real system notification for the other person(s).
+    // Never let a push failure interrupt the chat itself.
+    if (newMsg) {
+      const { data: { session } } = await sb.auth.getSession();
+      sb.functions.invoke('send-push', {
+        body: { chatId: activeChatId, messageId: newMsg.id },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      }).catch(() => {});
+    }
   } catch (err) {
     showToast(`Couldn't send: ${err.message || err}`);
   } finally {
@@ -1269,3 +1286,65 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./service-worker.js').catch(console.error);
   });
 }
+
+// ---------- Push notifications (WhatsApp-style system alerts) ----------
+// iOS Safari requires: the app installed to the Home Screen (iOS 16.4+), and
+// this must run from a real button tap — it silently fails from page-load code.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+async function getPushStatusLabel() {
+  if (!pushSupported()) return 'Not supported on this browser/device';
+  if (Notification.permission === 'denied') return 'Blocked — enable notifications for this site in your browser settings';
+  const reg = await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+  return existing ? 'Enabled on this device' : 'Not enabled yet';
+}
+
+async function refreshPushStatus() {
+  const el = $('pushStatus');
+  if (!el) return;
+  el.textContent = await getPushStatusLabel();
+}
+
+async function enablePushNotifications() {
+  if (!pushSupported()) { showToast("This browser/device doesn't support notifications."); return; }
+  const btn = $('enablePushBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enabling…'; }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') { showToast('Notifications permission was not granted.'); return; }
+
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(window.CTORQ_CONFIG.VAPID_PUBLIC_KEY),
+      });
+    }
+    const json = sub.toJSON();
+    const { error } = await sb.from('push_subscriptions').upsert({
+      user_id: currentUser.id,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+    }, { onConflict: 'endpoint' });
+    if (error) throw error;
+    showToast('Notifications enabled on this device.');
+  } catch (err) {
+    showToast(`Couldn't enable notifications: ${err.message || err}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Enable notifications'; }
+    refreshPushStatus();
+  }
+}
+if ($('enablePushBtn')) $('enablePushBtn').addEventListener('click', enablePushNotifications);

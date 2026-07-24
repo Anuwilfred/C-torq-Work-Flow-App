@@ -270,6 +270,12 @@
         <div id="accountEmail" style="padding:6px 0 14px; font-size:14px;"></div>
         <button id="logoutBtn" class="secondary" style="width:100%;">Log out</button>
       </div>
+      <div class="card glass">
+        <label>Notifications</label>
+        <p class="hint" style="margin-top:0;">Get a system/lock-screen alert when someone messages you in Aeon Teams Chat, even when the app is closed.</p>
+        <div id="pushStatus" class="hint" style="margin:2px 0 12px;">Checking…</div>
+        <button id="enablePushBtn" class="primary" style="margin-top:0;">Enable notifications</button>
+      </div>
     </section>
   </main>
 </div>
@@ -336,7 +342,10 @@
         <div class="chat-thread-header">
           <button type="button" id="chatBackBtn" class="ghost chat-back-btn">‹</button>
           <span id="chatThreadPresence" class="presence-dot" style="display:none"></span>
-          <strong id="chatThreadTitle">—</strong>
+          <div style="display:flex; flex-direction:column; line-height:1.2;">
+            <strong id="chatThreadTitle">—</strong>
+            <span id="chatThreadStatus" class="chat-thread-status"></span>
+          </div>
           <button type="button" id="chatHomeBtn" class="ghost chat-home-btn" title="Back to home">🏠 Home</button>
         </div>
         <div id="chatMessages" class="chat-messages"></div>

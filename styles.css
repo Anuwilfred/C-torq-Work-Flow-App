@@ -753,7 +753,9 @@ button.ghost:hover { color: var(--text); }
   background: var(--text-dim);
   border: 2px solid var(--bg-0);
 }
-.presence-dot.online { background: var(--ok); }
+.presence-dot.online { background: var(--ok); box-shadow: 0 0 6px 1px rgba(99, 209, 151, 0.6); }
+.chat-thread-status { font-size: 10.5px; color: var(--text-dim); font-weight: 600; }
+.chat-thread-status.online { color: var(--ok); }
 .chat-list-avatar .presence-dot {
   position: absolute;
   right: -1px;
