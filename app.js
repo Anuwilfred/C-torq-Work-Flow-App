@@ -373,6 +373,7 @@ $('logoutBtn').addEventListener('click', async () => {
   $('appShell').style.display = 'none';
   $('authScreen').style.display = 'flex';
   $('aiOrb').style.display = 'none';
+  $('aiOrbLabel').style.display = 'none';
   closeAiChat();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
   clearInterval(chatListTimer);
@@ -398,6 +399,7 @@ async function enterApp() {
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
   $('aiOrb').style.display = 'flex';
+  $('aiOrbLabel').style.display = 'block';
 
   renderQueue();
   syncQueue();
@@ -1143,12 +1145,14 @@ function openAiChat() {
   aiOpen = true;
   $('aiMesh').classList.add('show');
   $('aiChatPanel').classList.add('show');
+  $('aiOrbLabel').style.display = 'none';
   setTimeout(() => $('aiInput').focus(), 200);
 }
 function closeAiChat() {
   aiOpen = false;
   $('aiMesh').classList.remove('show');
   $('aiChatPanel').classList.remove('show');
+  if (currentUser) $('aiOrbLabel').style.display = 'block';
 }
 
 $('aiOrb').addEventListener('click', () => { aiOpen ? closeAiChat() : openAiChat(); });

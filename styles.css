@@ -17,6 +17,7 @@
   --glass-border: rgba(255, 255, 255, 0.14);
   --glass-border-strong: rgba(255, 255, 255, 0.26);
   --sheen: rgba(255, 255, 255, 0.5);
+  --neon: #00e0ff;
   --blur: 34px;
   --blur-soft: 16px;
   --r-lg: 28px;
@@ -141,7 +142,7 @@ nav.tabs button {
 nav.tabs button.active {
   background: var(--glass-strong);
   color: var(--text);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 0 1px rgba(0, 224, 255, 0.18), 0 0 14px rgba(0, 224, 255, 0.22);
 }
 
 section.panel { display: none; }
@@ -475,72 +476,52 @@ button.ghost:hover { color: var(--text); }
 
 /* ---------- AI chat widget ---------- */
 
-/* A slowly-turning glowing gem, bottom-right — vertical diamond silhouette
-   with faceted, iridescent light like a cut jewel catching different angles
-   as it rotates in 3D. */
+/* Siri-style orb, bottom-right: soft blurred color slowly swirling inside a
+   circle, a glassy highlight on top, and a gentle breathing glow — tuned to
+   Petronas' signature teal-green (#00A19C) instead of Apple's rainbow. */
 .ai-orb {
   position: fixed;
-  right: 22px;
-  bottom: 30px;
-  width: 46px;
-  height: 78px;
+  right: 20px;
+  bottom: 26px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
   border: none;
   padding: 0;
   cursor: pointer;
   z-index: 60;
-  background: transparent;
-  perspective: 800px;
-  filter:
-    drop-shadow(0 0 14px rgba(167, 139, 250, 0.55))
-    drop-shadow(0 0 30px rgba(96, 165, 250, 0.35))
-    drop-shadow(0 0 46px rgba(244, 114, 182, 0.22));
+  background: #0b0b10;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 0 22px 6px rgba(0, 161, 156, 0.6), 0 0 50px 16px rgba(0, 161, 156, 0.4), 0 0 80px 26px rgba(0, 161, 156, 0.22);
   transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: siriPulse 3.2s ease-in-out infinite;
 }
 .ai-orb:hover { transform: scale(1.08); }
 
 .ai-orb-core {
-  position: relative;
+  position: absolute;
+  inset: -30%;
   display: block;
-  width: 100%;
-  height: 100%;
-  transform-style: preserve-3d;
-  animation: diamondTurn 7s ease-in-out infinite;
-  clip-path: polygon(50% 0%, 88% 32%, 68% 100%, 32% 100%, 12% 32%);
-  background:
-    linear-gradient(155deg, rgba(255, 255, 255, 0.85), transparent 38%),
-    conic-gradient(from 200deg at 50% 42%, #a78bfa, #60a5fa, #34d399, #fbbf24, #f472b6, #a78bfa);
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, #00a19c, #4cbdb9, #99d9d7, #00706d, #00a19c);
+  filter: blur(9px) saturate(160%);
+  animation: siriSpin 6s linear infinite;
 }
-/* A second facet layer that shifts independently, so light seems to move
-   across different faces of the gem rather than the whole thing dimming
-   and brightening uniformly. */
-.ai-orb-core::before {
+/* Soft glass highlight sitting on top of the color swirl */
+.ai-orb::after {
   content: "";
   position: absolute;
   inset: 0;
-  clip-path: inherit;
-  background: linear-gradient(200deg, rgba(255, 255, 255, 0.65), transparent 45%);
-  mix-blend-mode: screen;
-  animation: facetShift 3.4s ease-in-out infinite alternate;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.55), transparent 45%);
+  pointer-events: none;
+  z-index: 2;
 }
-/* Thin engraved facet lines, like real gem cuts. */
-.ai-orb-core::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  clip-path: inherit;
-  background: repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.18) 0 1.5px, transparent 1.5px 13px);
-  opacity: 0.55;
-}
-@keyframes diamondTurn {
-  0%   { transform: translateY(0)    rotateY(0deg)   rotateZ(0deg); }
-  25%  { transform: translateY(-5px) rotateY(95deg)  rotateZ(1deg); }
-  50%  { transform: translateY(0)    rotateY(180deg) rotateZ(0deg); }
-  75%  { transform: translateY(-5px) rotateY(275deg) rotateZ(-1deg); }
-  100% { transform: translateY(0)    rotateY(360deg) rotateZ(0deg); }
-}
-@keyframes facetShift {
-  from { transform: translateX(-12%) translateY(-6%); opacity: 0.5; }
-  to   { transform: translateX(12%) translateY(6%); opacity: 0.9; }
+@keyframes siriSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes siriPulse {
+  0%, 100% { box-shadow: 0 0 22px 6px rgba(0,161,156,0.6), 0 0 50px 16px rgba(0,161,156,0.4), 0 0 80px 26px rgba(0,161,156,0.22); transform: scale(1); }
+  50% { box-shadow: 0 0 30px 9px rgba(0,161,156,0.8), 0 0 66px 22px rgba(0,161,156,0.55), 0 0 100px 34px rgba(0,161,156,0.32); transform: scale(1.06); }
 }
 
 /* Mesh reveal: expands from the orb's corner to cover the whole screen */
@@ -569,7 +550,7 @@ button.ghost:hover { color: var(--text); }
 .ai-chat-panel {
   position: fixed;
   right: 20px;
-  bottom: 116px;
+  bottom: 96px;
   width: min(360px, calc(100vw - 32px));
   max-height: min(560px, calc(100vh - 150px));
   display: flex;
@@ -653,9 +634,36 @@ button.ghost:hover { color: var(--text); }
 }
 .ai-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Small professional label sitting just to the left of the orb */
+.ai-orb-label {
+  position: fixed;
+  right: 86px;
+  bottom: 40px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.15px;
+  color: var(--text);
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur-soft));
+  -webkit-backdrop-filter: blur(var(--blur-soft));
+  border: 1px solid var(--glass-border);
+  padding: 7px 14px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 161, 156, 0.18);
+  white-space: nowrap;
+  z-index: 59;
+  pointer-events: none;
+  animation: labelFloat 3.2s ease-in-out infinite;
+}
+@keyframes labelFloat {
+  0%, 100% { transform: translateY(0); opacity: 0.92; }
+  50% { transform: translateY(-2px); opacity: 1; }
+}
+
 @media (max-width: 420px) {
-  .ai-chat-panel { right: 10px; left: 10px; width: auto; bottom: 108px; }
-  .ai-orb { right: 16px; bottom: 22px; width: 40px; height: 68px; }
+  .ai-chat-panel { right: 10px; left: 10px; width: auto; bottom: 92px; }
+  .ai-orb { right: 16px; bottom: 20px; }
+  .ai-orb-label { right: 82px; bottom: 34px; font-size: 11.5px; padding: 6px 12px; }
 }
 
 /* ---------- Chat tab (Slack/WhatsApp-style) ---------- */
