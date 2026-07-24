@@ -529,29 +529,36 @@ button.ghost:hover { color: var(--text); }
   50% { box-shadow: 0 0 30px 9px rgba(0,161,156,0.8), 0 0 66px 22px rgba(0,161,156,0.55), 0 0 100px 34px rgba(0,161,156,0.32); transform: scale(1.06); }
 }
 
-/* Mesh reveal: expands from the orb's corner to cover the whole screen */
+/* Mesh reveal: a soft, water-like fade/drift instead of a hard clip-path
+   wipe — clip-path animating together with backdrop-filter is what caused
+   the "glitchy" stutter on phones, since the browser has to re-blur the
+   whole screen every frame along a sharp circular edge. Opacity + a gentle
+   scale/blur settle is far cheaper and reads as smooth and floaty. */
 .ai-mesh {
   position: fixed;
   inset: 0;
   z-index: 55;
   pointer-events: none;
   background:
-    radial-gradient(900px 900px at 100% 100%, rgba(224, 138, 95, 0.30), transparent 55%),
-    radial-gradient(700px 700px at 85% 90%, rgba(94, 128, 148, 0.26), transparent 60%),
-    rgba(8, 7, 6, 0.72);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-  clip-path: circle(0% at 100% 100%);
+    radial-gradient(900px 900px at 100% 100%, rgba(224, 138, 95, 0.28), transparent 55%),
+    radial-gradient(700px 700px at 85% 90%, rgba(94, 128, 148, 0.24), transparent 60%),
+    rgba(8, 7, 6, 0.68);
   opacity: 0;
-  transition: clip-path 0.65s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+  transform: scale(1.05);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1), transform 0.9s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.9s ease;
 }
 .ai-mesh.show {
-  clip-path: circle(150% at 100% 100%);
   opacity: 1;
+  transform: scale(1);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   pointer-events: auto;
 }
 
-/* Chat panel */
+/* Chat panel — a gentle glide-and-settle rather than a snap, timed to land
+   just after the mesh starts fading in. */
 .ai-chat-panel {
   position: fixed;
   right: 20px;
@@ -562,10 +569,10 @@ button.ghost:hover { color: var(--text); }
   flex-direction: column;
   border-radius: 22px;
   z-index: 61;
-  transform: scale(0.82) translateY(24px);
+  transform: scale(0.9) translateY(16px);
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.12s, opacity 0.3s ease 0.12s;
+  transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.08s, opacity 0.5s ease 0.08s;
   background: var(--glass-strong);
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);

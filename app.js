@@ -1216,8 +1216,36 @@ let aiHistory = [];   // [{ role: 'user'|'assistant', text }]
 let aiOpen = false;
 let aiBusy = false;
 
+// A short, soft synthesized chime for opening AEON Ai — no audio file needed,
+// just a gentle rising sine tone with a smooth fade in/out envelope so it
+// feels like a light "bloop" rather than a harsh beep.
+let launchAudioCtx = null;
+function playLaunchSound() {
+  try {
+    launchAudioCtx = launchAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (launchAudioCtx.state === 'suspended') launchAudioCtx.resume();
+    const ctx = launchAudioCtx;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  } catch { /* Web Audio not available — silently skip the sound */ }
+}
+
 function openAiChat() {
   aiOpen = true;
+  playLaunchSound();
   $('aiMesh').classList.add('show');
   $('aiChatPanel').classList.add('show');
   $('aiOrbLabel').style.display = 'none';
