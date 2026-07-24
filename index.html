@@ -306,12 +306,16 @@
 <div id="aiChatPanel" class="ai-chat-panel">
   <div class="ai-chat-header">
     <span class="ai-chat-title">✨ AEON Ai</span>
-    <button type="button" id="aiCloseBtn" class="ghost">✕</button>
+    <div style="display:flex; align-items:center; gap:4px;">
+      <button type="button" id="aiVoiceToggle" class="ghost" title="Voice replies on — tap to mute">🔊</button>
+      <button type="button" id="aiCloseBtn" class="ghost">✕</button>
+    </div>
   </div>
   <div id="aiMessages" class="ai-messages">
     <div class="ai-msg assistant">Hi, I'm AEON Ai. Ask me things like "what did I work on 23/07/2026?" or "summarize my last report."</div>
   </div>
   <div class="ai-input-row">
+    <button type="button" id="aiMicBtn" class="ai-mic-btn" title="Speak your question">🎙️</button>
     <input id="aiInput" type="text" placeholder="Ask about your saved entries…" />
     <button type="button" id="aiSendBtn" class="ai-send-btn">➤</button>
   </div>
