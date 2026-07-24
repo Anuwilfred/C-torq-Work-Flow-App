@@ -1216,31 +1216,14 @@ let aiHistory = [];   // [{ role: 'user'|'assistant', text }]
 let aiOpen = false;
 let aiBusy = false;
 
-// A short, soft synthesized chime for opening AEON Ai — no audio file needed,
-// just a gentle rising sine tone with a smooth fade in/out envelope so it
-// feels like a light "bloop" rather than a harsh beep.
-let launchAudioCtx = null;
+// Soft launch chime for opening AEON Ai (real audio clip, not synthesized).
+const launchAudio = new Audio('./notify.mp3');
+launchAudio.volume = 0.55;
 function playLaunchSound() {
   try {
-    launchAudioCtx = launchAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (launchAudioCtx.state === 'suspended') launchAudioCtx.resume();
-    const ctx = launchAudioCtx;
-    const now = ctx.currentTime;
-
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(320, now);
-    osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
-
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(0.15, now + 0.06);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.5);
-  } catch { /* Web Audio not available — silently skip the sound */ }
+    launchAudio.currentTime = 0;
+    launchAudio.play().catch(() => {}); // ignore if autoplay is blocked
+  } catch { /* audio not available — silently skip the sound */ }
 }
 
 function openAiChat() {
@@ -1256,11 +1239,85 @@ function closeAiChat() {
   $('aiMesh').classList.remove('show');
   $('aiChatPanel').classList.remove('show');
   if (currentUser) $('aiOrbLabel').style.display = 'block';
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  $('aiOrb').classList.remove('speaking');
 }
 
 $('aiOrb').addEventListener('click', () => { aiOpen ? closeAiChat() : openAiChat(); });
 $('aiCloseBtn').addEventListener('click', closeAiChat);
 $('aiMesh').addEventListener('click', closeAiChat);
+
+// ---------- Voice assist: AEON Ai speaks its replies, and can listen too ----------
+// Both use browser-native APIs (Web Speech) — no API key, no extra cost.
+let voiceOutputEnabled = true; // toggled by the speaker button in the chat header
+
+function speakText(text) {
+  if (!voiceOutputEnabled || !('speechSynthesis' in window) || !text) return;
+  try {
+    window.speechSynthesis.cancel(); // don't stack up overlapping replies
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 1;
+    utter.pitch = 1;
+    // Glow the orb brighter/faster while AEON Ai is actually talking.
+    utter.onstart = () => $('aiOrb').classList.add('speaking');
+    utter.onend = () => $('aiOrb').classList.remove('speaking');
+    utter.onerror = () => $('aiOrb').classList.remove('speaking');
+    window.speechSynthesis.speak(utter);
+  } catch { /* speech synthesis not available — silently skip */ }
+}
+
+function updateVoiceToggleUi() {
+  const btn = $('aiVoiceToggle');
+  if (!btn) return;
+  btn.textContent = voiceOutputEnabled ? '🔊' : '🔇';
+  btn.title = voiceOutputEnabled ? 'Voice replies on — tap to mute' : 'Voice replies off — tap to unmute';
+}
+if ($('aiVoiceToggle')) {
+  $('aiVoiceToggle').addEventListener('click', () => {
+    voiceOutputEnabled = !voiceOutputEnabled;
+    if (!voiceOutputEnabled) { window.speechSynthesis.cancel(); $('aiOrb').classList.remove('speaking'); }
+    updateVoiceToggleUi();
+  });
+  updateVoiceToggleUi();
+}
+
+// Mic button: tap, speak your question, it fills the input and sends
+// automatically once you stop talking — the same loop as Siri/Google Assistant.
+const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
+if ($('aiMicBtn') && SpeechRecognitionApi) {
+  const recognizer = new SpeechRecognitionApi();
+  recognizer.lang = 'en-US';
+  recognizer.interimResults = false;
+  recognizer.maxAlternatives = 1;
+  let listening = false;
+
+  recognizer.addEventListener('result', (event) => {
+    const transcript = event.results[0]?.[0]?.transcript?.trim();
+    if (transcript) {
+      $('aiInput').value = transcript;
+      sendAiMessage();
+    }
+  });
+  recognizer.addEventListener('end', () => {
+    listening = false;
+    $('aiMicBtn').classList.remove('listening');
+  });
+  recognizer.addEventListener('error', () => {
+    listening = false;
+    $('aiMicBtn').classList.remove('listening');
+  });
+
+  $('aiMicBtn').addEventListener('click', () => {
+    if (listening) { recognizer.stop(); return; }
+    try {
+      recognizer.start();
+      listening = true;
+      $('aiMicBtn').classList.add('listening');
+    } catch { /* already started, or mic permission denied */ }
+  });
+} else if ($('aiMicBtn')) {
+  $('aiMicBtn').style.display = 'none'; // not supported on this browser
+}
 
 function addAiMessage(role, text) {
   const wrap = $('aiMessages');
@@ -1294,6 +1351,7 @@ async function sendAiMessage() {
     loadingEl.className = 'ai-msg assistant';
     aiHistory.push({ role: 'user', text }, { role: 'assistant', text: data.reply });
     aiHistory = aiHistory.slice(-16);
+    speakText(data.reply);
   } catch (err) {
     loadingEl.textContent = `Couldn't get an answer: ${err.message || err}`;
     loadingEl.className = 'ai-msg assistant';

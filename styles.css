@@ -529,6 +529,16 @@ button.ghost:hover { color: var(--text); }
   50% { box-shadow: 0 0 30px 9px rgba(0,161,156,0.8), 0 0 66px 22px rgba(0,161,156,0.55), 0 0 100px 34px rgba(0,161,156,0.32); transform: scale(1.06); }
 }
 
+/* Brighter, faster glow while AEON Ai is actually speaking a reply out loud —
+   like the orb is "lit up" by its own voice. */
+.ai-orb.speaking {
+  animation: aiTalkGlow 0.55s ease-in-out infinite;
+}
+@keyframes aiTalkGlow {
+  0%, 100% { box-shadow: 0 0 24px 7px rgba(0,161,156,0.75), 0 0 55px 18px rgba(0,161,156,0.5), 0 0 90px 30px rgba(0,161,156,0.3); transform: scale(1.02); }
+  50% { box-shadow: 0 0 38px 12px rgba(0,161,156,1), 0 0 80px 26px rgba(0,161,156,0.7), 0 0 130px 42px rgba(0,161,156,0.45); transform: scale(1.12); }
+}
+
 /* Mesh reveal: a soft, water-like fade/drift instead of a hard clip-path
    wipe — clip-path animating together with backdrop-filter is what caused
    the "glitchy" stutter on phones, since the browser has to re-blur the
@@ -645,6 +655,29 @@ button.ghost:hover { color: var(--text); }
   cursor: pointer;
 }
 .ai-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ai-mic-btn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border-strong);
+  background: var(--glass);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.ai-mic-btn:hover { border-color: var(--accent); }
+.ai-mic-btn.listening {
+  background: rgba(242, 125, 112, 0.18);
+  border-color: var(--err);
+  animation: micPulse 1.1s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242, 125, 112, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(242, 125, 112, 0); }
+}
 
 /* Small professional label sitting just to the left of the orb */
 .ai-orb-label {
