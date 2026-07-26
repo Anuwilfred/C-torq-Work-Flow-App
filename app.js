@@ -725,20 +725,34 @@ if ($('projectDetailBackBtn')) {
 // =====================================================================
 
 async function fetchProjects() {
-  const { data, error } = await sb
-    .from('projects')
-    .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status')
-    .order('created_at', { ascending: false });
-  if (error) console.error('fetchProjects failed:', error);
-  return { rows: error ? [] : (data || []), error };
+  try {
+    const { data, error } = await sb
+      .from('projects')
+      .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status')
+      .order('created_at', { ascending: false });
+    if (error) { console.error('fetchProjects failed:', error); return { rows: [], error }; }
+    return { rows: data || [], error: null };
+  } catch (err) {
+    // A thrown error (vs. a returned {error}) previously blew past the
+    // render logic entirely, leaving the panel blank with nothing shown —
+    // this is what caused "no projects until I create one": the very first
+    // fetch right after opening the panel could throw (cold client/session),
+    // and nothing ever told the user or retried.
+    console.error('fetchProjects threw:', err);
+    return { rows: [], error: err };
+  }
 }
 
-async function renderProjectsList() {
+async function renderProjectsList(isRetry = false) {
   const wrap = $('projectsListArea');
   if (!wrap) return;
-  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  if (!isRetry) wrap.innerHTML = '<div class="empty">Loading…</div>';
   const { rows, error } = await fetchProjects();
-  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load projects: ${escapeHtml(error.message || 'unknown error')}</div>`; return; }
+  if (error) {
+    if (!isRetry) { await new Promise((r) => setTimeout(r, 400)); return renderProjectsList(true); }
+    wrap.innerHTML = `<div class="empty">Couldn't load projects: ${escapeHtml(error.message || String(error))}</div>`;
+    return;
+  }
   if (!rows.length) { wrap.innerHTML = '<div class="empty">No projects yet' + (currentProfile?.role === 'admin' ? ' — add one above.' : ' yet.') + '</div>'; return; }
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((r) => `
