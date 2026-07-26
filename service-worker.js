@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.12';
+const CACHE_NAME = 'ctorq-workflow-v3.16';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 const ASSETS = [
   './',
@@ -11,6 +11,7 @@ const ASSETS = [
   './icon.svg',
   './icon-192.png',
   './icon-512.png',
+  './notify.mp3',
   SUPABASE_SDK_URL
 ];
 

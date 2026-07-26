@@ -168,6 +168,15 @@ label {
 }
 label:first-child { margin-top: 0; }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.toggle-row span { color: var(--text); font-size: 13px; font-weight: 600; }
+.toggle-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+
 input, select, textarea {
   width: 100%;
   padding: 12px 14px;
@@ -353,6 +362,18 @@ button.ghost:hover { color: var(--text); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.position-select {
+  flex: none;
+  width: auto;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+}
+.position-select:disabled { opacity: 0.5; }
 
 .chip {
   flex: none;
@@ -806,6 +827,133 @@ button.ghost:hover { color: var(--text); }
   .chat-overlay { inset: 0; }
   .chat-overlay .chat-shell { border-radius: 0; }
 }
+
+/* ---------- Generic full-screen glass panel overlay (Projects, Learning, Health) ---------- */
+.panel-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(8, 7, 6, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.panel-overlay-backdrop.show { opacity: 1; pointer-events: auto; }
+
+.panel-overlay {
+  position: fixed;
+  inset: 6vh 5vw;
+  z-index: 71;
+  display: flex;
+  transform: scale(0.94);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+}
+.panel-overlay.show { transform: scale(1); opacity: 1; pointer-events: auto; }
+
+.panel-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--glass-border);
+  flex: none;
+}
+.panel-header strong { font-size: 14px; flex: 1; }
+.panel-header button.ghost { flex: none; }
+.panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+@media (max-width: 640px) {
+  .panel-overlay { inset: 0; }
+  .panel-shell { border-radius: 0; }
+}
+
+/* Right-side admin quick-launch rail (wide screens only) */
+.admin-rail {
+  position: fixed;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 45;
+  flex-direction: column;
+  gap: 14px;
+}
+.admin-rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 64px;
+  padding: 12px 6px;
+  border-radius: 18px;
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.admin-rail-btn span { font-size: 10px; }
+.admin-rail-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
+@media (max-width: 900px) {
+  .admin-rail { display: none !important; }
+}
+
+.admin-more-row { display: none; flex-wrap: wrap; }
+.admin-more-row button { flex: 1; min-width: 110px; }
+@media (min-width: 901px) {
+  .admin-more-row { display: none !important; }
+}
+
+/* Project hour rings (Apple-Watch-style dual ring per role) */
+.project-rings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 480px) {
+  .project-rings { grid-template-columns: 1fr; }
+}
+.ring-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 12px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+}
+.ring-card .ring-role { font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; }
+.ring-svg { width: 140px; height: 140px; }
+.ring-center-value { font-size: 16px; font-weight: 800; margin-top: 6px; }
+.ring-center-value.over { color: var(--warn); }
+.ring-center-value.under { color: var(--ok); }
+.ring-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+.contrib-row { margin-bottom: 12px; }
+.contrib-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
+.contrib-name { font-weight: 600; }
+.contrib-hours { color: var(--text-dim); }
+.contrib-bar-track { height: 8px; border-radius: 999px; background: var(--glass-2); overflow: hidden; }
+.contrib-bar-fill { height: 100%; border-radius: 999px; background: var(--accent); }
 @media (max-width: 420px) {
   .chat-orb { left: 16px; bottom: 20px; }
   .chat-orb-label { left: 78px; bottom: 34px; font-size: 11.5px; padding: 6px 12px; }
@@ -1102,7 +1250,8 @@ button.ghost:hover { color: var(--text); }
 .hbar-day { font-size: 9px; color: var(--text-dim); margin-top: 4px; }
 
 /* Report daily-breakdown table */
-.report-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+#reportTableWrap { overflow-x: auto; }
+.report-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 12.5px; }
 .report-table th {
   text-align: left;
   color: var(--text-dim);

@@ -78,8 +78,10 @@
 
           <!-- ===== TIMESHEET-ONLY FIELDS ===== -->
           <div id="timesheetBlock">
-            <label for="jobId">Job ID</label>
-            <input id="jobId" type="text" placeholder="e.g. JOB-1042" />
+            <label for="jobId">Project / Job ID</label>
+            <select id="jobId">
+              <option value="">No project</option>
+            </select>
 
             <label>Mode of work</label>
             <div id="modeGrid" class="mode-grid">
@@ -108,6 +110,12 @@
                 <button type="button" id="fetchLocationBtn">📍 Use my location</button>
               </div>
 
+              <label for="allowanceLocation">Allowance area (optional)</label>
+              <select id="allowanceLocation">
+                <option value="">No allowance area</option>
+              </select>
+              <p class="hint" style="margin-top:4px;">Pick this if you traveled somewhere with an extra-hours allowance — it's added automatically.</p>
+
               <div class="row-2">
                 <div>
                   <label for="date">Date</label>
@@ -124,6 +132,16 @@
                   <label for="endTime">End time</label>
                   <input id="endTime" type="time" />
                 </div>
+              </div>
+
+              <label class="toggle-row" for="lunchBreakToggle">
+                <span>Lunch break</span>
+                <input id="lunchBreakToggle" type="checkbox" />
+              </label>
+              <div id="lunchBreakField" style="display:none">
+                <label for="lunchMinutes">Lunch break length (minutes)</label>
+                <input id="lunchMinutes" type="number" min="0" step="5" value="60" />
+                <p class="hint">This gets subtracted from your total hours for the day.</p>
               </div>
 
               <label for="workNotes">Notes (optional)</label>
@@ -249,6 +267,11 @@
 
     <!-- ADMIN -->
     <section id="admin" class="panel">
+      <div class="card glass admin-more-row" id="adminMoreRow" style="display:none;">
+        <button type="button" class="secondary" data-open="projects">📁 Projects</button>
+        <button type="button" class="secondary" data-open="learning">🎓 Learning</button>
+        <button type="button" class="secondary" data-open="health">💪 Health Challenges</button>
+      </div>
       <div class="card glass">
         <label for="inviteEmail">Teammate's email</label>
         <input id="inviteEmail" type="email" placeholder="name@example.com" />
@@ -260,6 +283,32 @@
       <div class="card glass">
         <strong style="font-size:14px;">Team</strong>
         <div id="teamList" style="margin-top:12px;"></div>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">Locations &amp; allowances</strong>
+        <p class="hint" style="margin-top:4px;">Add a place (country/city/site) and how many extra hours get added automatically when someone works there — e.g. "Abu Dhabi" +2 hours.</p>
+        <div class="row-2" style="margin-top:10px;">
+          <input id="newLocationName" type="text" placeholder="e.g. Abu Dhabi" />
+          <input id="newLocationHours" type="number" min="0" step="0.5" placeholder="Extra hours" />
+        </div>
+        <button id="addLocationBtn" class="primary" style="margin-top:12px;">Add location</button>
+        <div id="locationList" style="margin-top:14px;"></div>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">Today's job assignments</strong>
+        <p class="hint" style="margin-top:4px;">Assign each person's job for a date — this is what the 6:55am reminder tells them.</p>
+        <label for="assignPerson" style="margin-top:10px;">Person</label>
+        <select id="assignPerson"></select>
+        <label for="assignDate">Date</label>
+        <input id="assignDate" type="date" />
+        <label for="assignProject">Job / project</label>
+        <input id="assignProject" type="text" placeholder="e.g. Site inspection — Tower 3" />
+        <label for="assignLocation">Location (optional)</label>
+        <input id="assignLocation" type="text" placeholder="e.g. Abu Dhabi" />
+        <label for="assignNotes">Notes (optional)</label>
+        <input id="assignNotes" type="text" placeholder="Anything they should know" />
+        <button id="saveAssignmentBtn" class="primary" style="margin-top:12px;">Save assignment</button>
+        <div id="assignmentList" style="margin-top:14px;"></div>
       </div>
     </section>
 
@@ -361,6 +410,92 @@
           <button type="button" id="chatSendBtn" class="ai-send-btn">➤</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN RIGHT-SIDE RAIL — desktop only, hidden on phones (see #adminMoreRow in the Admin tab) -->
+<div id="adminRail" class="admin-rail" style="display:none">
+  <button type="button" class="admin-rail-btn" data-open="projects" title="Projects">📁<span>Projects</span></button>
+  <button type="button" class="admin-rail-btn" data-open="learning" title="Learning">🎓<span>Learning</span></button>
+  <button type="button" class="admin-rail-btn" data-open="health" title="Health Challenges">💪<span>Health</span></button>
+</div>
+
+<!-- PROJECTS OVERLAY -->
+<div id="projectsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="projectsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Projects</strong>
+      <button type="button" class="ghost" data-close="projects">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">New project</strong>
+        <label for="newProjectJobId">Job ID</label>
+        <input id="newProjectJobId" type="text" placeholder="e.g. JOB-1042" />
+        <label for="newProjectName">Name (optional)</label>
+        <input id="newProjectName" type="text" placeholder="e.g. Tower 3 site inspection" />
+        <div class="row-2" style="margin-top:6px;">
+          <div>
+            <label for="newProjectEngHours">Engineer hours</label>
+            <input id="newProjectEngHours" type="number" min="0" step="0.5" placeholder="0" />
+          </div>
+          <div>
+            <label for="newProjectTechHours">Technician hours</label>
+            <input id="newProjectTechHours" type="number" min="0" step="0.5" placeholder="0" />
+          </div>
+        </div>
+        <button id="createProjectBtn" class="primary" style="margin-top:12px;">Create project</button>
+      </div>
+      <div id="projectsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PROJECT DETAIL OVERLAY -->
+<div id="projectDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="projectDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="projectDetailBackBtn">‹ Back</button>
+      <strong id="projectDetailTitle">Project</strong>
+      <button type="button" class="ghost" data-close="projectDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="projectRingsArea"></div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Who worked on this</strong>
+        <div id="projectContributors" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LEARNING OVERLAY (placeholder) -->
+<div id="learningOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="learningOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Learning</strong>
+      <button type="button" class="ghost" data-close="learning">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
+    </div>
+  </div>
+</div>
+
+<!-- HEALTH CHALLENGES OVERLAY (placeholder) -->
+<div id="healthOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="healthOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Health Challenges</strong>
+      <button type="button" class="ghost" data-close="health">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
     </div>
   </div>
 </div>

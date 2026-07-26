@@ -72,7 +72,7 @@ function setActiveTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('section.panel').forEach(s => s.classList.toggle('active', s.id === name));
   if (name === 'queue') renderQueue();
-  if (name === 'admin') renderTeamList();
+  if (name === 'admin') { renderTeamList(); renderLocationList(); populateAssignPersonPicker(); renderAssignmentList(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
 }
@@ -116,6 +116,10 @@ document.querySelectorAll('.mode-chip').forEach(chip => {
     document.querySelectorAll('.mode-chip').forEach(c => c.classList.toggle('selected', c === chip));
     refreshModeVisibility();
   });
+});
+
+$('lunchBreakToggle').addEventListener('change', () => {
+  $('lunchBreakField').style.display = $('lunchBreakToggle').checked ? 'block' : 'none';
 });
 
 // Default date fields to today for convenience (still fully editable/manual).
@@ -233,6 +237,8 @@ async function buildDraftFromForm() {
     }
 
     if (!$('date').value) { showToast('Pick a date.'); return null; }
+    const lunchMinutes = $('lunchBreakToggle').checked ? (parseInt($('lunchMinutes').value, 10) || 0) : 0;
+    const allowanceLocation = $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null;
     return {
       ...base,
       category: 'timesheet',
@@ -240,9 +246,11 @@ async function buildDraftFromForm() {
       jobId: $('jobId').value.trim() || null,
       project: $('project').value.trim(),
       location: $('location').value.trim(),
+      allowanceLocation,
       date: $('date').value,
       startTime: $('startTime').value,
       endTime: $('endTime').value,
+      lunchMinutes,
       description: $('workNotes').value.trim(),
       attachments: []
     };
@@ -376,8 +384,14 @@ $('logoutBtn').addEventListener('click', async () => {
   $('aiOrbLabel').style.display = 'none';
   $('chatOrb').style.display = 'none';
   $('chatOrbLabel').style.display = 'none';
+  $('adminRail').style.display = 'none';
+  $('adminMoreRow').style.display = 'none';
   closeAiChat();
   closeChatOverlay();
+  closePanel('projects');
+  closePanel('projectDetail');
+  closePanel('learning');
+  closePanel('health');
   stopPresence();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
   clearInterval(chatListTimer);
@@ -407,9 +421,25 @@ async function enterApp() {
   $('chatOrb').style.display = 'flex';
   $('chatOrbLabel').style.display = 'block';
   startPresence();
+  populateAllowanceDropdown();
+  populateJobIdDropdown();
+  $('adminRail').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
+  $('adminMoreRow').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
 
   renderQueue();
   syncQueue();
+}
+
+// Populates the New Entry "Project / Job ID" dropdown for everyone.
+async function populateJobIdDropdown() {
+  const select = $('jobId');
+  if (!select) return;
+  const { data, error } = await sb.from('projects').select('job_id, name').eq('status', 'active').order('job_id');
+  const rows = error ? [] : (data || []);
+  const current = select.value;
+  select.innerHTML = '<option value="">No project</option>' +
+    rows.map((r) => `<option value="${escapeHtml(r.job_id)}">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</option>`).join('');
+  if (current) select.value = current;
 }
 
 sb.auth.onAuthStateChange(async (event, session) => {
@@ -482,11 +512,13 @@ $('sendInviteBtn').addEventListener('click', async () => {
   renderTeamList();
 });
 
+const POSITION_LABEL = { engineer: 'Engineer', technician: 'Technician', other: 'Other' };
+
 async function renderTeamList() {
   const list = $('teamList');
   const { data, error } = await sb
     .from('profiles')
-    .select('email, full_name, role, status, created_at')
+    .select('id, email, full_name, role, status, position, created_at')
     .order('created_at', { ascending: false });
   if (error) { list.innerHTML = `<div class="empty">Couldn't load team list.</div>`; return; }
   if (!data.length) { list.innerHTML = '<div class="empty">No one invited yet.</div>'; return; }
@@ -497,9 +529,335 @@ async function renderTeamList() {
         <div class="entry-meta">${escapeHtml(p.full_name || p.email)}</div>
         <div class="entry-desc">${escapeHtml(p.email)}</div>
       </div>
+      <select class="position-select" data-position-user="${p.id}" ${p.role === 'admin' ? 'disabled' : ''}>
+        ${Object.entries(POSITION_LABEL).map(([val, label]) => `<option value="${val}" ${p.position === val ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
       <span class="chip ${p.status === 'active' ? 'synced' : 'pending'}">${p.status}</span>
     </div>
   `).join('');
+  list.querySelectorAll('[data-position-user]').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const { error: updErr } = await sb.from('profiles').update({ position: sel.value }).eq('id', sel.dataset.positionUser);
+      if (updErr) { showToast(`Couldn't update position: ${updErr.message}`); return; }
+      showToast('Position updated.');
+    });
+  });
+}
+
+// =====================================================================
+// LOCATIONS & ALLOWANCES — admin-managed list; used to auto-add extra hours
+// when someone works from a listed place (e.g. Abu Dhabi = +2 hours).
+// =====================================================================
+
+async function fetchLocationAllowances() {
+  const { data, error } = await sb.from('location_allowances').select('id, name, extra_hours').order('name');
+  return error ? [] : (data || []);
+}
+
+// Populates the New Entry "Allowance area" dropdown for everyone.
+async function populateAllowanceDropdown() {
+  const select = $('allowanceLocation');
+  if (!select) return;
+  const rows = await fetchLocationAllowances();
+  const current = select.value;
+  select.innerHTML = '<option value="">No allowance area</option>' +
+    rows.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)} (+${r.extra_hours}h)</option>`).join('');
+  if (current) select.value = current;
+}
+
+// Admin-only: list + add + delete locations.
+async function renderLocationList() {
+  const list = $('locationList');
+  if (!list) return;
+  const rows = await fetchLocationAllowances();
+  if (!rows.length) { list.innerHTML = '<div class="empty">No locations added yet.</div>'; return; }
+  list.innerHTML = rows.map((r) => `
+    <div class="entry">
+      <span class="type-icon">📍</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.name)}</div>
+        <div class="entry-meta">+${r.extra_hours} hour${Number(r.extra_hours) === 1 ? '' : 's'} allowance</div>
+      </div>
+      <button type="button" class="ghost" data-location-id="${r.id}">✕</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-location-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await sb.from('location_allowances').delete().eq('id', btn.dataset.locationId);
+      renderLocationList();
+      populateAllowanceDropdown();
+    });
+  });
+}
+
+if ($('addLocationBtn')) {
+  $('addLocationBtn').addEventListener('click', async () => {
+    const name = $('newLocationName').value.trim();
+    const hours = parseFloat($('newLocationHours').value);
+    if (!name) { showToast('Enter a location name.'); return; }
+    if (isNaN(hours) || hours < 0) { showToast('Enter a valid number of extra hours.'); return; }
+    const { error } = await sb.from('location_allowances').insert({ name, extra_hours: hours, created_by: currentUser.id });
+    if (error) { showToast(`Couldn't add location: ${error.message}`); return; }
+    $('newLocationName').value = '';
+    $('newLocationHours').value = '';
+    renderLocationList();
+    populateAllowanceDropdown();
+  });
+}
+
+// =====================================================================
+// DAILY JOB ASSIGNMENTS — admin assigns each person's job/location for a
+// date; the 6:55am reminder (server-side) reads this to tell them their
+// job for the day. Only ever shows/edits TODAY + upcoming — old ones just
+// age out of the list naturally.
+// =====================================================================
+
+let assignPeoplePopulated = false;
+
+async function populateAssignPersonPicker() {
+  const select = $('assignPerson');
+  if (!select || assignPeoplePopulated) return;
+  assignPeoplePopulated = true;
+  const { data } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
+  const people = data || [];
+  select.innerHTML = people.map(p => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+  if (!$('assignDate').value) $('assignDate').value = new Date().toISOString().slice(0, 10);
+}
+
+async function renderAssignmentList() {
+  const list = $('assignmentList');
+  if (!list) return;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb
+    .from('daily_assignments')
+    .select('id, work_date, project, location, notes, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .gte('work_date', todayKey)
+    .order('work_date', { ascending: true });
+  if (error || !data || !data.length) { list.innerHTML = '<div class="empty">No upcoming assignments yet.</div>'; return; }
+  list.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon">🗓️</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.project || 'No job set')}</div>
+        <div class="entry-meta">${escapeHtml(r.work_date)}${r.location ? ' · ' + escapeHtml(r.location) : ''}</div>
+      </div>
+      <button type="button" class="ghost" data-assignment-id="${r.id}">✕</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-assignment-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await sb.from('daily_assignments').delete().eq('id', btn.dataset.assignmentId);
+      renderAssignmentList();
+    });
+  });
+}
+
+if ($('saveAssignmentBtn')) {
+  $('saveAssignmentBtn').addEventListener('click', async () => {
+    const personId = $('assignPerson').value;
+    const workDate = $('assignDate').value;
+    const project = $('assignProject').value.trim();
+    if (!personId || !workDate) { showToast('Pick a person and a date.'); return; }
+    if (!project) { showToast('Enter a job/project for them.'); return; }
+    const { error } = await sb.from('daily_assignments').upsert({
+      person_id: personId, work_date: workDate, project,
+      location: $('assignLocation').value.trim() || null,
+      notes: $('assignNotes').value.trim() || null,
+      created_by: currentUser.id,
+    }, { onConflict: 'person_id,work_date' });
+    if (error) { showToast(`Couldn't save assignment: ${error.message}`); return; }
+    $('assignProject').value = '';
+    $('assignLocation').value = '';
+    $('assignNotes').value = '';
+    renderAssignmentList();
+    showToast('Assignment saved.');
+  });
+}
+
+// =====================================================================
+// GENERIC FULL-SCREEN PANEL OVERLAYS — Projects / Project detail / Learning
+// / Health Challenges all share the same open/close plumbing.
+// =====================================================================
+
+const PANEL_IDS = {
+  projects: ['projectsOverlay', 'projectsOverlayBackdrop'],
+  projectDetail: ['projectDetailOverlay', 'projectDetailOverlayBackdrop'],
+  learning: ['learningOverlay', 'learningOverlayBackdrop'],
+  health: ['healthOverlay', 'healthOverlayBackdrop'],
+};
+function openPanel(name) {
+  const ids = PANEL_IDS[name];
+  if (!ids) return;
+  $(ids[0]).classList.add('show');
+  $(ids[1]).classList.add('show');
+  if (name === 'projects') renderProjectsList();
+}
+function closePanel(name) {
+  const ids = PANEL_IDS[name];
+  if (!ids) return;
+  $(ids[0]).classList.remove('show');
+  $(ids[1]).classList.remove('show');
+}
+document.querySelectorAll('[data-open]').forEach((btn) => {
+  btn.addEventListener('click', () => openPanel(btn.dataset.open));
+});
+document.querySelectorAll('[data-close]').forEach((btn) => {
+  btn.addEventListener('click', () => closePanel(btn.dataset.close));
+});
+Object.entries(PANEL_IDS).forEach(([name, ids]) => {
+  const backdrop = $(ids[1]);
+  if (backdrop) backdrop.addEventListener('click', () => closePanel(name));
+});
+if ($('projectDetailBackBtn')) {
+  $('projectDetailBackBtn').addEventListener('click', () => { closePanel('projectDetail'); openPanel('projects'); });
+}
+
+// =====================================================================
+// PROJECTS DASHBOARD — admin creates a project with an hour budget per
+// role; timesheet entries that pick that Job ID count against it. Two
+// rings per project (Engineer / Technician) show used-vs-allocated hours,
+// switching to an orange overage ring once someone goes past the budget.
+// =====================================================================
+
+async function fetchProjects() {
+  const { data, error } = await sb
+    .from('projects')
+    .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status')
+    .order('created_at', { ascending: false });
+  return error ? [] : (data || []);
+}
+
+async function renderProjectsList() {
+  const wrap = $('projectsListArea');
+  if (!wrap) return;
+  const rows = await fetchProjects();
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No projects yet — add one above.</div>'; return; }
+  wrap.innerHTML = rows.map((r) => `
+    <div class="entry" data-project-row="${escapeHtml(r.job_id)}" data-project-name="${escapeHtml(r.name || '')}" style="cursor:pointer;">
+      <span class="type-icon">📁</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
+        <div class="entry-meta">Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
+      </div>
+      <button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-project-row]').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-delete-project]')) return;
+      openProjectDetail(row.dataset.projectRow, row.dataset.projectName);
+    });
+  });
+  wrap.querySelectorAll('[data-delete-project]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await sb.from('projects').delete().eq('job_id', btn.dataset.deleteProject);
+      renderProjectsList();
+      populateJobIdDropdown();
+    });
+  });
+}
+
+if ($('createProjectBtn')) {
+  $('createProjectBtn').addEventListener('click', async () => {
+    const jobId = $('newProjectJobId').value.trim();
+    const name = $('newProjectName').value.trim();
+    const eng = parseFloat($('newProjectEngHours').value) || 0;
+    const tech = parseFloat($('newProjectTechHours').value) || 0;
+    if (!jobId) { showToast('Enter a Job ID.'); return; }
+    const { error } = await sb.from('projects').insert({
+      job_id: jobId, name: name || null,
+      allocated_hours_engineer: eng, allocated_hours_technician: tech,
+      created_by: currentUser.id,
+    });
+    if (error) { showToast(`Couldn't create project: ${error.message}`); return; }
+    $('newProjectJobId').value = '';
+    $('newProjectName').value = '';
+    $('newProjectEngHours').value = '';
+    $('newProjectTechHours').value = '';
+    renderProjectsList();
+    populateJobIdDropdown();
+    showToast('Project created.');
+  });
+}
+
+// Apple-Watch-style dual ring: green fills 0→100% of allocated hours used;
+// once used exceeds allocated, the green ring stays full and a second,
+// smaller orange ring fills to show the overage.
+function ringSvg(used, allocated) {
+  const size = 140, stroke = 14;
+  const rOuter = (size - stroke) / 2;
+  const rInner = rOuter - stroke - 6;
+  const cOuter = 2 * Math.PI * rOuter;
+  const cInner = 2 * Math.PI * rInner;
+  const usedPct = allocated > 0 ? Math.min(used / allocated, 1) : (used > 0 ? 1 : 0);
+  const overHours = Math.max(0, used - allocated);
+  const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
+  const outerOffset = cOuter * (1 - usedPct);
+  const innerOffset = cInner * (1 - overPct);
+  const cx = size / 2, cy = size / 2;
+  return `
+    <svg viewBox="0 0 ${size} ${size}" class="ring-svg">
+      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
+      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--ok)" stroke-width="${stroke}"
+        stroke-dasharray="${cOuter}" stroke-dashoffset="${outerOffset}" stroke-linecap="round"
+        transform="rotate(-90 ${cx} ${cy})" />
+      ${overHours > 0 ? `
+      <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke - 4}" />
+      <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--warn)" stroke-width="${stroke - 4}"
+        stroke-dasharray="${cInner}" stroke-dashoffset="${innerOffset}" stroke-linecap="round"
+        transform="rotate(-90 ${cx} ${cy})" />` : ''}
+    </svg>
+  `;
+}
+
+function ringCard(roleLabel, used, allocated) {
+  const over = Math.max(0, Math.round((used - allocated) * 100) / 100);
+  const remaining = Math.max(0, Math.round((allocated - used) * 100) / 100);
+  const centerText = over > 0 ? `−${over}h` : `${remaining}h left`;
+  const centerClass = over > 0 ? 'over' : 'under';
+  return `
+    <div class="ring-card">
+      <div class="ring-role">${escapeHtml(roleLabel)}</div>
+      ${ringSvg(used, allocated)}
+      <div class="ring-center-value ${centerClass}">${centerText}</div>
+      <div class="ring-sub">${used}h used of ${allocated}h</div>
+    </div>
+  `;
+}
+
+function renderProjectContributors(data) {
+  const wrap = $('projectContributors');
+  const contributors = data.contributors || [];
+  if (!contributors.length) { wrap.innerHTML = '<div class="empty">No one has logged hours on this project yet.</div>'; return; }
+  const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
+  wrap.innerHTML = contributors.map((c) => `
+    <div class="contrib-row">
+      <div class="contrib-top">
+        <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${POSITION_LABEL[c.position] || c.position}</span></span>
+        <span class="contrib-hours">${c.hours}h</span>
+      </div>
+      <div class="contrib-bar-track"><div class="contrib-bar-fill" style="width:${Math.round((c.hours / maxHours) * 100)}%"></div></div>
+    </div>
+  `).join('');
+}
+
+async function openProjectDetail(jobId, name) {
+  $('projectDetailTitle').textContent = name ? `${jobId} — ${name}` : jobId;
+  $('projectRingsArea').innerHTML = '<div class="empty">Loading…</div>';
+  $('projectContributors').innerHTML = '';
+  openPanel('projectDetail');
+  const { data: { session } } = await sb.auth.getSession();
+  const { data, error } = await sb.functions.invoke('get-project-report', {
+    body: { jobId },
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (error || data?.error) {
+    $('projectRingsArea').innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || error.message)}</div>`;
+    return;
+  }
+  $('projectRingsArea').innerHTML = `<div class="project-rings">${ringCard('Engineer', data.totals.engineerHours, data.project.allocatedEngineer)}${ringCard('Technician', data.totals.technicianHours, data.project.allocatedTechnician)}</div>`;
+  renderProjectContributors(data);
 }
 
 // =====================================================================
@@ -512,7 +870,7 @@ let reportPersonPopulated = false;
 
 const GAUGE_MAX = {
   totalHours: 200, overtimeHours: 40, daysWorked: 26,
-  sickLeaveDays: 5, holidayDays: 6, emergencyLeaveDays: 3,
+  sickLeaveDays: 5, holidayDays: 6, emergencyLeaveDays: 3, allowanceHours: 20,
 };
 
 function monthKey(d) { return d.toISOString().slice(0, 7); }
@@ -637,11 +995,13 @@ function renderReportTable(data) {
       <td>${escapeHtml(r.project || '—')}</td>
       <td>${r.hours}h</td>
       <td class="${r.overtime > 0 ? 'ot' : ''}">${r.overtime > 0 ? r.overtime + 'h' : '—'}</td>
+      <td>${r.lunchMinutes ? r.lunchMinutes + ' min' : '—'}</td>
+      <td>${r.allowanceLocation ? escapeHtml(r.allowanceLocation) + (r.allowanceHours ? ` (+${r.allowanceHours}h)` : '') : '—'}</td>
     </tr>
   `).join('');
   wrap.innerHTML = `
     <table class="report-table">
-      <thead><tr><th>Date</th><th>Mode</th><th>Project</th><th>Hours</th><th>Overtime</th></tr></thead>
+      <thead><tr><th>Date</th><th>Mode</th><th>Project</th><th>Hours</th><th>Overtime</th><th>Lunch</th><th>Allowance</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
@@ -656,6 +1016,7 @@ function renderReport(data) {
     gaugeCard('Sick Leave', t.sickLeaveDays, GAUGE_MAX.sickLeaveDays, 'd', 'var(--err)'),
     gaugeCard('Holiday', t.holidayDays, GAUGE_MAX.holidayDays, 'd', 'var(--ok)'),
     gaugeCard('Emergency', t.emergencyLeaveDays, GAUGE_MAX.emergencyLeaveDays, 'd', 'var(--warn)'),
+    gaugeCard('Allowance', t.allowanceHours || 0, GAUGE_MAX.allowanceHours, 'h', 'var(--ok)'),
   ].join('');
   $('hoursChart').innerHTML = hoursBarChart(data.dayRows);
   renderReportTable(data);
