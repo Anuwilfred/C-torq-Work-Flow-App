@@ -729,13 +729,16 @@ async function fetchProjects() {
     .from('projects')
     .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status')
     .order('created_at', { ascending: false });
-  return error ? [] : (data || []);
+  if (error) console.error('fetchProjects failed:', error);
+  return { rows: error ? [] : (data || []), error };
 }
 
 async function renderProjectsList() {
   const wrap = $('projectsListArea');
   if (!wrap) return;
-  const rows = await fetchProjects();
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { rows, error } = await fetchProjects();
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load projects: ${escapeHtml(error.message || 'unknown error')}</div>`; return; }
   if (!rows.length) { wrap.innerHTML = '<div class="empty">No projects yet' + (currentProfile?.role === 'admin' ? ' — add one above.' : ' yet.') + '</div>'; return; }
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((r) => `
@@ -836,16 +839,30 @@ function renderProjectContributors(data) {
   const wrap = $('projectContributors');
   const contributors = data.contributors || [];
   if (!contributors.length) { wrap.innerHTML = '<div class="empty">No one has logged hours on this project yet.</div>'; return; }
+  // Bar width = this person's hours as a % of THEIR ROLE's allocated budget
+  // for this project (capped at 100%) -- not relative to other contributors.
+  // Relative-to-max was wrong: with a single contributor it always came out
+  // to 100%, making the bar look "full" even at 1 of 40 hours.
+  const allocatedForRole = {
+    engineer: Number(data.project?.allocatedEngineer) || 0,
+    technician: Number(data.project?.allocatedTechnician) || 0,
+  };
   const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
-  wrap.innerHTML = contributors.map((c) => `
+  wrap.innerHTML = contributors.map((c) => {
+    const allocated = allocatedForRole[c.position];
+    const pct = allocated > 0
+      ? Math.min(Math.round((c.hours / allocated) * 100), 100)
+      : Math.round((c.hours / maxHours) * 100);
+    return `
     <div class="contrib-row">
       <div class="contrib-top">
         <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${POSITION_LABEL[c.position] || c.position}</span></span>
         <span class="contrib-hours">${c.hours}h</span>
       </div>
-      <div class="contrib-bar-track"><div class="contrib-bar-fill" style="width:${Math.round((c.hours / maxHours) * 100)}%"></div></div>
+      <div class="contrib-bar-track"><div class="contrib-bar-fill" style="width:${pct}%"></div></div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 let currentProjectReport = null;
