@@ -916,38 +916,211 @@ async function populateShareGroupPicker() {
   select.innerHTML = groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name || 'Group')}</option>`).join('');
 }
 
+// Renders the same information the Project Detail screen shows (both rings
+// + the "who worked on this" list) onto a canvas and exports it as a PNG,
+// so sharing to a group sends an actual picture of the view instead of a
+// few lines of plain text.
+function drawShareRing(ctx, cx, cy, used, allocated, label) {
+  const rOuter = 58, rInner = 42, stroke = 12;
+  const usedPct = allocated > 0 ? Math.min(used / allocated, 1) : (used > 0 ? 1 : 0);
+  const overHours = Math.max(0, used - allocated);
+  const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
+  const TAU = Math.PI * 2, START = -Math.PI / 2;
+
+  ctx.lineCap = 'round';
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = stroke;
+  ctx.beginPath();
+  ctx.arc(cx, cy, rOuter, 0, TAU);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#63d197';
+  ctx.beginPath();
+  ctx.arc(cx, cy, rOuter, START, START + usedPct * TAU);
+  ctx.stroke();
+
+  if (overHours > 0) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = stroke - 4;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, TAU);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#f2b755';
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, START, START + overPct * TAU);
+    ctx.stroke();
+  }
+
+  const over = Math.max(0, Math.round((used - allocated) * 100) / 100);
+  const remaining = Math.max(0, Math.round((allocated - used) * 100) / 100);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = over > 0 ? '#f2b755' : '#f5f4f0';
+  ctx.font = '700 15px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText(over > 0 ? `−${over}h` : `${remaining}h left`, cx, cy + 5);
+
+  ctx.fillStyle = '#f5f4f0';
+  ctx.font = '700 14px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText(label, cx, cy + rOuter + 26);
+  ctx.fillStyle = '#a8a6a2';
+  ctx.font = '12px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText(`${used}h used of ${allocated}h`, cx, cy + rOuter + 44);
+  ctx.textAlign = 'left';
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+async function buildProjectShareImage(data) {
+  const { project, totals, contributors = [] } = data;
+  const W = 720, HEADER_H = 260, ROW_H = 56;
+  const H = HEADER_H + Math.max(contributors.length, 1) * ROW_H + 90;
+
+  const canvas = document.createElement('canvas');
+  const scale = 2;
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+
+  ctx.fillStyle = '#0d0d0e';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,255,255,0.045)';
+  roundRectPath(ctx, 16, 16, W - 32, H - 32, 20);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1;
+  roundRectPath(ctx, 16, 16, W - 32, H - 32, 20);
+  ctx.stroke();
+
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#f5f4f0';
+  ctx.font = '700 22px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText(project.name ? `${project.jobId} — ${project.name}` : project.jobId, 40, 52);
+  ctx.fillStyle = '#a8a6a2';
+  ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText('C-TORQ Work Flow — project status', 40, 76);
+
+  drawShareRing(ctx, W / 2 - 110, 168, totals.engineerHours, project.allocatedEngineer, 'Engineer');
+  drawShareRing(ctx, W / 2 + 110, 168, totals.technicianHours, project.allocatedTechnician, 'Technician');
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.beginPath();
+  ctx.moveTo(40, HEADER_H - 14);
+  ctx.lineTo(W - 40, HEADER_H - 14);
+  ctx.stroke();
+
+  ctx.fillStyle = '#f5f4f0';
+  ctx.font = '700 14px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText('Who worked on this', 40, HEADER_H + 8);
+
+  const allocatedForRole = {
+    engineer: Number(project.allocatedEngineer) || 0,
+    technician: Number(project.allocatedTechnician) || 0,
+  };
+  const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
+
+  let y = HEADER_H + 40;
+  if (!contributors.length) {
+    ctx.fillStyle = '#a8a6a2';
+    ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.fillText('No one has logged hours on this project yet.', 40, y);
+  } else {
+    for (const c of contributors) {
+      const barX = 40, barW = W - 80, barY = y + 12, barH = 8;
+
+      ctx.font = '700 14px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillStyle = '#f5f4f0';
+      ctx.fillText(c.name, barX, y);
+      const nameW = ctx.measureText(c.name).width;
+
+      ctx.font = '11px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillStyle = '#a8a6a2';
+      ctx.fillText(POSITION_LABEL[c.position] || c.position, barX + nameW + 10, y);
+
+      ctx.textAlign = 'right';
+      ctx.font = '800 13.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillStyle = '#f5f4f0';
+      ctx.fillText(`${c.hours}h`, W - 40, y);
+      ctx.textAlign = 'left';
+
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      roundRectPath(ctx, barX, barY, barW, barH, barH / 2);
+      ctx.fill();
+
+      const allocated = allocatedForRole[c.position];
+      const pct = allocated > 0 ? Math.min(c.hours / allocated, 1) : (c.hours / maxHours);
+      const fillW = Math.max(barH, barW * pct);
+      const grad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
+      grad.addColorStop(0, '#e08a5f');
+      grad.addColorStop(1, '#cc785c');
+      ctx.fillStyle = grad;
+      roundRectPath(ctx, barX, barY, fillW, barH, barH / 2);
+      ctx.fill();
+
+      y += ROW_H;
+    }
+  }
+
+  ctx.fillStyle = '#6b6965';
+  ctx.font = '11px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+  ctx.fillText(new Date().toLocaleString(), 40, H - 30);
+
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+}
+
 if ($('shareProjectBtn')) {
   $('shareProjectBtn').addEventListener('click', async () => {
     const chatId = $('shareProjectGroupSelect').value;
     if (!chatId) { showToast('Pick a group to share to.'); return; }
     if (!currentProjectReport) { showToast('Still loading project data — try again in a second.'); return; }
 
-    const { project, totals } = currentProjectReport;
-    const engOver = Math.max(0, Math.round((totals.engineerHours - project.allocatedEngineer) * 100) / 100);
-    const techOver = Math.max(0, Math.round((totals.technicianHours - project.allocatedTechnician) * 100) / 100);
-    const lines = [
-      `📊 Project status: ${project.jobId}${project.name ? ' — ' + project.name : ''}`,
-      `Engineer: ${totals.engineerHours}h / ${project.allocatedEngineer}h${engOver > 0 ? ` (⚠️ ${engOver}h over budget)` : ''}`,
-      `Technician: ${totals.technicianHours}h / ${project.allocatedTechnician}h${techOver > 0 ? ` (⚠️ ${techOver}h over budget)` : ''}`,
-    ];
-    const content = lines.join('\n');
-
     const btn = $('shareProjectBtn');
+    const originalLabel = btn.textContent;
     btn.disabled = true;
-    const { data: newMsg, error } = await sb.from('messages').insert({
-      chat_id: chatId, sender_id: currentUser.id, content,
-    }).select().single();
-    btn.disabled = false;
-    if (error) { showToast(`Couldn't share: ${error.message}`); return; }
+    btn.textContent = 'Preparing image…';
 
-    if (newMsg) {
-      const { data: { session } } = await sb.auth.getSession();
-      sb.functions.invoke('send-push', {
-        body: { chatId, messageId: newMsg.id },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      }).catch(() => {});
+    try {
+      const blob = await buildProjectShareImage(currentProjectReport);
+      if (!blob) throw new Error('Could not generate the image.');
+
+      const { project } = currentProjectReport;
+      const safeJobId = String(project.jobId).replace(/[^a-z0-9_.-]/gi, '_');
+      const fileName = `project-${safeJobId}-${Date.now()}.png`;
+      const path = `${chatId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${fileName}`;
+
+      const { error: upErr } = await sb.storage.from('chat-attachments').upload(path, blob, { contentType: 'image/png' });
+      if (upErr) throw upErr;
+
+      const caption = `📊 Project status: ${project.jobId}${project.name ? ' — ' + project.name : ''}`;
+      const { data: newMsg, error } = await sb.from('messages').insert({
+        chat_id: chatId, sender_id: currentUser.id, content: caption,
+        attachment_path: path, attachment_name: fileName, attachment_mime: 'image/png',
+      }).select().single();
+      if (error) throw error;
+
+      if (newMsg) {
+        const { data: { session } } = await sb.auth.getSession();
+        sb.functions.invoke('send-push', {
+          body: { chatId, messageId: newMsg.id },
+          headers: { Authorization: `Bearer ${session?.access_token}` },
+        }).catch(() => {});
+      }
+      showToast('Shared to group.');
+    } catch (err) {
+      showToast(`Couldn't share: ${err.message || err}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
     }
-    showToast('Shared to group.');
   });
 }
 
