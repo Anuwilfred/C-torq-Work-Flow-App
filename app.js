@@ -423,6 +423,7 @@ async function enterApp() {
   startPresence();
   populateAllowanceDropdown();
   populateJobIdDropdown();
+  renderMyTodayAssignment();
   // Projects / Learning / Health Challenges are visible to everyone now —
   // only creating/deleting projects (and setting positions) stays admin-only.
   $('adminRail').style.display = 'flex';
@@ -430,6 +431,34 @@ async function enterApp() {
 
   renderQueue();
   syncQueue();
+}
+
+// Shows the signed-in person's own Job Allocation for today, right on the
+// New Entry tab — previously this only ever reached them via the 6:55am
+// push/email reminder, with no way to check it again later in the day.
+async function renderMyTodayAssignment() {
+  const card = $('myAssignmentCard');
+  const area = $('myAssignmentArea');
+  if (!card || !area || !currentUser) return;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb
+    .from('daily_assignments')
+    .select('project, location, notes, assignment_type')
+    .eq('person_id', currentUser.id)
+    .eq('work_date', todayKey)
+    .maybeSingle();
+  if (error || !data) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  const isTransport = data.assignment_type === 'transportation';
+  area.innerHTML = `
+    <div class="entry">
+      <span class="type-icon">${isTransport ? '🚕' : '🗓️'}</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(data.project || 'No details given')}</div>
+        <div class="entry-meta">${data.location ? escapeHtml(data.location) : ''}${data.notes ? (data.location ? ' · ' : '') + escapeHtml(data.notes) : ''}</div>
+      </div>
+    </div>
+  `;
 }
 
 // Populates the New Entry "Project / Job ID" dropdown for everyone.
@@ -518,12 +547,13 @@ const POSITION_LABEL = { engineer: 'Engineer', technician: 'Technician', other: 
 
 async function renderTeamList() {
   const list = $('teamList');
-  const { data, error } = await sb
-    .from('profiles')
-    .select('id, email, full_name, role, status, position, created_at')
-    .order('created_at', { ascending: false });
+  const [{ data, error }, { rows: depts }] = await Promise.all([
+    sb.from('profiles').select('id, email, full_name, role, status, position, department_id, created_at').order('created_at', { ascending: false }),
+    fetchDepartments(),
+  ]);
   if (error) { list.innerHTML = `<div class="empty">Couldn't load team list.</div>`; return; }
   if (!data.length) { list.innerHTML = '<div class="empty">No one invited yet.</div>'; return; }
+  const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
   list.innerHTML = data.map(p => `
     <div class="entry">
       <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
@@ -534,6 +564,9 @@ async function renderTeamList() {
       <select class="position-select" data-position-user="${p.id}" ${p.role === 'admin' ? 'disabled' : ''}>
         ${Object.entries(POSITION_LABEL).map(([val, label]) => `<option value="${val}" ${p.position === val ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
+      <select class="position-select" data-department-user="${p.id}">
+        ${deptOptions.replace(`value="${p.department_id || ''}"`, `value="${p.department_id || ''}" selected`)}
+      </select>
       <span class="chip ${p.status === 'active' ? 'synced' : 'pending'}">${p.status}</span>
     </div>
   `).join('');
@@ -542,6 +575,13 @@ async function renderTeamList() {
       const { error: updErr } = await sb.from('profiles').update({ position: sel.value }).eq('id', sel.dataset.positionUser);
       if (updErr) { showToast(`Couldn't update position: ${updErr.message}`); return; }
       showToast('Position updated.');
+    });
+  });
+  list.querySelectorAll('[data-department-user]').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const { error: updErr } = await sb.from('profiles').update({ department_id: sel.value || null }).eq('id', sel.dataset.departmentUser);
+      if (updErr) { showToast(`Couldn't update department: ${updErr.message}`); return; }
+      showToast('Department updated.');
     });
   });
 }
@@ -632,13 +672,13 @@ async function renderAssignmentList() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('daily_assignments')
-    .select('id, work_date, project, location, notes, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .select('id, work_date, project, location, notes, assignment_type, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
     .gte('work_date', todayKey)
     .order('work_date', { ascending: true });
   if (error || !data || !data.length) { list.innerHTML = '<div class="empty">No upcoming assignments yet.</div>'; return; }
   list.innerHTML = data.map((r) => `
     <div class="entry">
-      <span class="type-icon">🗓️</span>
+      <span class="type-icon">${r.assignment_type === 'transportation' ? '🚕' : '🗓️'}</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.project || 'No job set')}</div>
         <div class="entry-meta">${escapeHtml(r.work_date)}${r.location ? ' · ' + escapeHtml(r.location) : ''}</div>
@@ -654,23 +694,37 @@ async function renderAssignmentList() {
   });
 }
 
+if ($('assignIsTransport')) {
+  $('assignIsTransport').addEventListener('change', () => {
+    const isTransport = $('assignIsTransport').checked;
+    $('assignProjectLabel').textContent = isTransport ? 'Task / arrangement' : 'Job / project';
+    $('assignProject').placeholder = isTransport ? 'e.g. Pick up 3 engineers from site' : 'e.g. Site inspection — Tower 3';
+    $('assignLocationLabel').textContent = isTransport ? 'Pickup location (optional)' : 'Location (optional)';
+  });
+}
+
 if ($('saveAssignmentBtn')) {
   $('saveAssignmentBtn').addEventListener('click', async () => {
     const personId = $('assignPerson').value;
     const workDate = $('assignDate').value;
     const project = $('assignProject').value.trim();
+    const isTransport = $('assignIsTransport')?.checked || false;
     if (!personId || !workDate) { showToast('Pick a person and a date.'); return; }
-    if (!project) { showToast('Enter a job/project for them.'); return; }
+    if (!project) { showToast(isTransport ? 'Enter the transportation task.' : 'Enter a job/project for them.'); return; }
     const { error } = await sb.from('daily_assignments').upsert({
       person_id: personId, work_date: workDate, project,
       location: $('assignLocation').value.trim() || null,
       notes: $('assignNotes').value.trim() || null,
+      assignment_type: isTransport ? 'transportation' : 'job',
       created_by: currentUser.id,
     }, { onConflict: 'person_id,work_date' });
     if (error) { showToast(`Couldn't save assignment: ${error.message}`); return; }
     $('assignProject').value = '';
     $('assignLocation').value = '';
     $('assignNotes').value = '';
+    if ($('assignIsTransport')) $('assignIsTransport').checked = false;
+    $('assignProjectLabel').textContent = 'Job / project';
+    $('assignLocationLabel').textContent = 'Location (optional)';
     renderAssignmentList();
     showToast('Assignment saved.');
   });
@@ -684,6 +738,8 @@ if ($('saveAssignmentBtn')) {
 const PANEL_IDS = {
   projects: ['projectsOverlay', 'projectsOverlayBackdrop'],
   projectDetail: ['projectDetailOverlay', 'projectDetailOverlayBackdrop'],
+  departments: ['departmentsOverlay', 'departmentsOverlayBackdrop'],
+  departmentDetail: ['departmentDetailOverlay', 'departmentDetailOverlayBackdrop'],
   learning: ['learningOverlay', 'learningOverlayBackdrop'],
   health: ['healthOverlay', 'healthOverlayBackdrop'],
 };
@@ -695,6 +751,10 @@ function openPanel(name) {
   if (name === 'projects') {
     $('newProjectCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
     renderProjectsList();
+  }
+  if (name === 'departments') {
+    $('newDepartmentCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    renderDepartmentsList();
   }
 }
 function closePanel(name) {
@@ -715,6 +775,131 @@ Object.entries(PANEL_IDS).forEach(([name, ids]) => {
 });
 if ($('projectDetailBackBtn')) {
   $('projectDetailBackBtn').addEventListener('click', () => { closePanel('projectDetail'); openPanel('projects'); });
+}
+if ($('departmentDetailBackBtn')) {
+  $('departmentDetailBackBtn').addEventListener('click', () => { closePanel('departmentDetail'); openPanel('departments'); });
+}
+
+// =====================================================================
+// DEPARTMENTS — admin creates/manages a list of departments; every person
+// is assigned to one (Admin → Team). Anyone can browse the list and open a
+// department to see who's in it and what each person's Job Allocation says
+// they're doing today.
+// =====================================================================
+
+let departmentsCache = null; // [{id, name}], refetched each time the picker is (re)opened
+
+async function fetchDepartments() {
+  try {
+    const { data, error } = await sb.from('departments').select('id, name').order('name', { ascending: true });
+    if (error) { console.error('fetchDepartments failed:', error); return { rows: [], error }; }
+    return { rows: data || [], error: null };
+  } catch (err) {
+    console.error('fetchDepartments threw:', err);
+    return { rows: [], error: err };
+  }
+}
+
+async function renderDepartmentsList(isRetry = false) {
+  const wrap = $('departmentsListArea');
+  if (!wrap) return;
+  if (!isRetry) wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { rows, error } = await fetchDepartments();
+  departmentsCache = rows;
+  if (error) {
+    if (!isRetry) { await new Promise((r) => setTimeout(r, 400)); return renderDepartmentsList(true); }
+    wrap.innerHTML = `<div class="empty">Couldn't load departments: ${escapeHtml(error.message || String(error))}</div>`;
+    return;
+  }
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No departments yet.</div>'; return; }
+  const isAdmin = currentProfile?.role === 'admin';
+  wrap.innerHTML = rows.map((d) => `
+    <div class="entry" data-department-row="${escapeHtml(d.id)}" data-department-name="${escapeHtml(d.name)}" style="cursor:pointer;">
+      <span class="type-icon">🏢</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(d.name)}</div>
+      </div>
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-department="${escapeHtml(d.id)}">✕</button>` : ''}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-department-row]').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-delete-department]')) return;
+      openDepartmentDetail(row.dataset.departmentRow, row.dataset.departmentName);
+    });
+  });
+  wrap.querySelectorAll('[data-delete-department]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await sb.from('departments').delete().eq('id', btn.dataset.deleteDepartment);
+      renderDepartmentsList();
+    });
+  });
+}
+
+if ($('createDepartmentBtn')) {
+  $('createDepartmentBtn').addEventListener('click', async () => {
+    const name = $('newDepartmentName').value.trim();
+    if (!name) { showToast('Enter a department name.'); return; }
+    const { error } = await sb.from('departments').insert({ name, created_by: currentUser.id });
+    if (error) { showToast(`Couldn't create department: ${error.message}`); return; }
+    $('newDepartmentName').value = '';
+    renderDepartmentsList();
+    showToast('Department created.');
+  });
+}
+
+async function openDepartmentDetail(deptId, deptName) {
+  $('departmentDetailTitle').textContent = deptName;
+  $('departmentDetailCount').textContent = '';
+  $('departmentMembersArea').innerHTML = '<div class="empty">Loading…</div>';
+  openPanel('departmentDetail');
+
+  const { data: people, error: peopleErr } = await sb
+    .from('profiles')
+    .select('id, email, full_name, position')
+    .eq('department_id', deptId)
+    .eq('status', 'active')
+    .order('full_name', { ascending: true });
+
+  if (peopleErr) {
+    $('departmentMembersArea').innerHTML = `<div class="empty">Couldn't load this department: ${escapeHtml(peopleErr.message)}</div>`;
+    return;
+  }
+  if (!people || !people.length) {
+    $('departmentDetailCount').textContent = '0 people';
+    $('departmentMembersArea').innerHTML = '<div class="empty">No one is assigned to this department yet — set it from Admin → Team.</div>';
+    return;
+  }
+
+  $('departmentDetailCount').textContent = `${people.length} ${people.length === 1 ? 'person' : 'people'}`;
+
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const personIds = people.map((p) => p.id);
+  const { data: assignments } = await sb
+    .from('daily_assignments')
+    .select('person_id, project, location, assignment_type')
+    .eq('work_date', todayKey)
+    .in('person_id', personIds);
+  const byPerson = {};
+  (assignments || []).forEach((a) => { byPerson[a.person_id] = a; });
+
+  $('departmentMembersArea').innerHTML = people.map((p) => {
+    const a = byPerson[p.id];
+    const posLabel = POSITION_LABEL[p.position] || p.position;
+    const jobText = a
+      ? `${a.assignment_type === 'transportation' ? '🚕 ' : ''}${escapeHtml(a.project || 'Assigned, no details')}${a.location ? ' · ' + escapeHtml(a.location) : ''}`
+      : 'No job allocated today';
+    return `
+      <div class="entry">
+        <span class="type-icon">🙂</span>
+        <div class="entry-body">
+          <div class="entry-desc">${escapeHtml(p.full_name || p.email)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(posLabel)}</span></div>
+          <div class="entry-meta">${jobText}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 // =====================================================================

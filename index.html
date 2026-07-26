@@ -67,6 +67,10 @@
 
     <!-- NEW ENTRY -->
     <section id="entry" class="panel active">
+      <div class="card glass" id="myAssignmentCard" style="display:none;">
+        <strong style="font-size:14px;">Today's job</strong>
+        <div id="myAssignmentArea" style="margin-top:8px;"></div>
+      </div>
       <div class="card glass">
         <form id="entryForm">
           <label for="type">Type</label>
@@ -269,6 +273,7 @@
     <section id="admin" class="panel">
       <div class="card glass admin-more-row" id="adminMoreRow" style="display:none;">
         <button type="button" class="secondary" data-open="projects">📁 Projects</button>
+        <button type="button" class="secondary" data-open="departments">🏢 Departments</button>
         <button type="button" class="secondary" data-open="learning">🎓 Learning</button>
         <button type="button" class="secondary" data-open="health">💪 Health Challenges</button>
       </div>
@@ -295,15 +300,19 @@
         <div id="locationList" style="margin-top:14px;"></div>
       </div>
       <div class="card glass">
-        <strong style="font-size:14px;">Today's job assignments</strong>
-        <p class="hint" style="margin-top:4px;">Assign each person's job for a date — this is what the 6:55am reminder tells them.</p>
+        <strong style="font-size:14px;">Job Allocation</strong>
+        <p class="hint" style="margin-top:4px;">Assign each person's job for a date — this is what the 6:55am reminder tells them, and what shows on their own Home screen and their department's page today.</p>
         <label for="assignPerson" style="margin-top:10px;">Person</label>
         <select id="assignPerson"></select>
         <label for="assignDate">Date</label>
         <input id="assignDate" type="date" />
-        <label for="assignProject">Job / project</label>
+        <label class="toggle-row" for="assignIsTransport">
+          <span>🚕 Transportation arrangement</span>
+          <input id="assignIsTransport" type="checkbox" />
+        </label>
+        <label for="assignProject" id="assignProjectLabel">Job / project</label>
         <input id="assignProject" type="text" placeholder="e.g. Site inspection — Tower 3" />
-        <label for="assignLocation">Location (optional)</label>
+        <label for="assignLocation" id="assignLocationLabel">Location (optional)</label>
         <input id="assignLocation" type="text" placeholder="e.g. Abu Dhabi" />
         <label for="assignNotes">Notes (optional)</label>
         <input id="assignNotes" type="text" placeholder="Anything they should know" />
@@ -417,6 +426,7 @@
 <!-- ADMIN RIGHT-SIDE RAIL — desktop only, hidden on phones (see #adminMoreRow in the Admin tab) -->
 <div id="adminRail" class="admin-rail" style="display:none">
   <button type="button" class="admin-rail-btn" data-open="projects" title="Projects">📁<span>Projects</span></button>
+  <button type="button" class="admin-rail-btn" data-open="departments" title="Departments">🏢<span>Departments</span></button>
   <button type="button" class="admin-rail-btn" data-open="learning" title="Learning">🎓<span>Learning</span></button>
   <button type="button" class="admin-rail-btn" data-open="health" title="Health Challenges">💪<span>Health</span></button>
 </div>
@@ -473,6 +483,45 @@
         <p class="hint" style="margin-top:4px;">Post the current status into one of your group chats.</p>
         <select id="shareProjectGroupSelect" style="margin-top:8px;"></select>
         <button id="shareProjectBtn" class="primary" style="margin-top:10px;">Share to group</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DEPARTMENTS OVERLAY -->
+<div id="departmentsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="departmentsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Departments</strong>
+      <button type="button" class="ghost" data-close="departments">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newDepartmentCard" style="display:none;">
+        <strong style="font-size:14px;">Create department</strong>
+        <label for="newDepartmentName">Name</label>
+        <input id="newDepartmentName" type="text" placeholder="e.g. Quality Assurance" />
+        <button id="createDepartmentBtn" class="primary" style="margin-top:12px;">Create department</button>
+      </div>
+      <div id="departmentsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DEPARTMENT DETAIL OVERLAY -->
+<div id="departmentDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="departmentDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="departmentDetailBackBtn">‹ Back</button>
+      <strong id="departmentDetailTitle">Department</strong>
+      <button type="button" class="ghost" data-close="departmentDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">People in this department</strong>
+        <p class="hint" id="departmentDetailCount" style="margin-top:4px;"></p>
+        <div id="departmentMembersArea" style="margin-top:12px;"></div>
       </div>
     </div>
   </div>
