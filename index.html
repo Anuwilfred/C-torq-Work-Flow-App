@@ -430,7 +430,7 @@
       <button type="button" class="ghost" data-close="projects">✕</button>
     </div>
     <div class="panel-body">
-      <div class="card glass">
+      <div class="card glass" id="newProjectCard" style="display:none;">
         <strong style="font-size:14px;">New project</strong>
         <label for="newProjectJobId">Job ID</label>
         <input id="newProjectJobId" type="text" placeholder="e.g. JOB-1042" />
@@ -467,6 +467,12 @@
       <div class="card glass" style="margin-top:16px;">
         <strong style="font-size:14px;">Who worked on this</strong>
         <div id="projectContributors" style="margin-top:12px;"></div>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Share this project</strong>
+        <p class="hint" style="margin-top:4px;">Post the current status into one of your group chats.</p>
+        <select id="shareProjectGroupSelect" style="margin-top:8px;"></select>
+        <button id="shareProjectBtn" class="primary" style="margin-top:10px;">Share to group</button>
       </div>
     </div>
   </div>
