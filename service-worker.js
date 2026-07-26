@@ -1,7 +1,6 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.22';
+const CACHE_NAME = 'ctorq-workflow-v3.23';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
-const LUCIDE_SDK_URL = 'https://cdn.jsdelivr.net/npm/lucide@0.462.0/dist/umd/lucide.js';
 const ASSETS = [
   './',
   './index.html',
@@ -13,8 +12,7 @@ const ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './notify.mp3',
-  SUPABASE_SDK_URL,
-  LUCIDE_SDK_URL
+  SUPABASE_SDK_URL
 ];
 
 self.addEventListener('install', (event) => {
@@ -42,7 +40,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   const isAppShell = url.origin === self.location.origin;
-  const isSupabaseSdk = event.request.url === SUPABASE_SDK_URL || event.request.url === LUCIDE_SDK_URL;
+  const isSupabaseSdk = event.request.url === SUPABASE_SDK_URL;
   if (!isAppShell && !isSupabaseSdk) return; // don't touch auth/API calls
 
   event.respondWith(

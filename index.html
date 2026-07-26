@@ -89,17 +89,17 @@
 
             <label>Mode of work</label>
             <div id="modeGrid" class="mode-grid">
-              <div class="mode-chip" data-mode="office"><span class="emoji"><i data-lucide="building-2"></i></span>Office</div>
-              <div class="mode-chip" data-mode="site"><span class="emoji"><i data-lucide="hard-hat"></i></span>Site</div>
-              <div class="mode-chip" data-mode="driver"><span class="emoji"><i data-lucide="car"></i></span>Driver</div>
-              <div class="mode-chip" data-mode="wfh"><span class="emoji"><i data-lucide="home"></i></span>Work from Home</div>
-              <div class="mode-chip" data-mode="exhibition"><span class="emoji"><i data-lucide="tent"></i></span>Exhibition</div>
-              <div class="mode-chip" data-mode="inspection"><span class="emoji"><i data-lucide="search"></i></span>Inspection</div>
-              <div class="mode-chip" data-mode="field_work"><span class="emoji"><i data-lucide="wheat"></i></span>Field Work</div>
-              <div class="mode-chip" data-mode="other"><span class="emoji"><i data-lucide="sparkles"></i></span>Other</div>
-              <div class="mode-chip" data-mode="sick_leave"><span class="emoji"><i data-lucide="thermometer"></i></span>Sick Leave</div>
-              <div class="mode-chip" data-mode="holiday"><span class="emoji"><i data-lucide="palmtree"></i></span>Holiday</div>
-              <div class="mode-chip" data-mode="emergency_leave"><span class="emoji"><i data-lucide="siren"></i></span>Emergency Leave</div>
+              <div class="mode-chip" data-mode="office"><span class="emoji">🏢</span>Office</div>
+              <div class="mode-chip" data-mode="site"><span class="emoji">🏗️</span>Site</div>
+              <div class="mode-chip" data-mode="driver"><span class="emoji">🚗</span>Driver</div>
+              <div class="mode-chip" data-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
+              <div class="mode-chip" data-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+              <div class="mode-chip" data-mode="inspection"><span class="emoji">🔍</span>Inspection</div>
+              <div class="mode-chip" data-mode="field_work"><span class="emoji">🌾</span>Field Work</div>
+              <div class="mode-chip" data-mode="other"><span class="emoji">✨</span>Other</div>
+              <div class="mode-chip" data-mode="sick_leave"><span class="emoji">🤒</span>Sick Leave</div>
+              <div class="mode-chip" data-mode="holiday"><span class="emoji">🏖️</span>Holiday</div>
+              <div class="mode-chip" data-mode="emergency_leave"><span class="emoji">🚨</span>Emergency Leave</div>
             </div>
 
             <!-- work-type fields -->
@@ -111,7 +111,7 @@
               <label for="location">Location</label>
               <div class="location-row">
                 <input id="location" type="text" placeholder="Tap to fetch, or type manually" />
-                <button type="button" id="fetchLocationBtn"><i data-lucide="map-pin"></i> Use my location</button>
+                <button type="button" id="fetchLocationBtn">📍 Use my location</button>
               </div>
 
               <label for="allowanceLocation">Allowance area (optional)</label>
@@ -272,10 +272,10 @@
     <!-- ADMIN -->
     <section id="admin" class="panel">
       <div class="card glass admin-more-row" id="adminMoreRow" style="display:none;">
-        <button type="button" class="secondary" data-open="projects"><i data-lucide="folder"></i> Projects</button>
-        <button type="button" class="secondary" data-open="departments"><i data-lucide="building-2"></i> Departments</button>
-        <button type="button" class="secondary" data-open="learning"><i data-lucide="graduation-cap"></i> Learning</button>
-        <button type="button" class="secondary" data-open="health"><i data-lucide="dumbbell"></i> Health Challenges</button>
+        <button type="button" class="secondary" data-open="projects">📁 Projects</button>
+        <button type="button" class="secondary" data-open="departments">🏢 Departments</button>
+        <button type="button" class="secondary" data-open="learning">🎓 Learning</button>
+        <button type="button" class="secondary" data-open="health">💪 Health Challenges</button>
       </div>
       <div class="card glass">
         <label for="inviteEmail">Teammate's email</label>
@@ -307,7 +307,7 @@
         <label for="assignDate">Date</label>
         <input id="assignDate" type="date" />
         <label class="toggle-row" for="assignIsTransport">
-          <span><i data-lucide="car-taxi-front"></i> Transportation arrangement</span>
+          <span>🚕 Transportation arrangement</span>
           <input id="assignIsTransport" type="checkbox" />
         </label>
         <label for="assignProject" id="assignProjectLabel">Job / project</label>
@@ -363,25 +363,25 @@
 
 <div id="aiChatPanel" class="ai-chat-panel">
   <div class="ai-chat-header">
-    <span class="ai-chat-title"><i data-lucide="sparkles"></i> AEON Ai</span>
+    <span class="ai-chat-title">✨ AEON Ai</span>
     <div style="display:flex; align-items:center; gap:4px;">
-      <button type="button" id="aiVoiceToggle" class="ghost" title="Voice replies on — tap to mute"><i data-lucide="volume-2"></i></button>
-      <button type="button" id="aiCloseBtn" class="ghost"><i data-lucide="x"></i></button>
+      <button type="button" id="aiVoiceToggle" class="ghost" title="Voice replies on — tap to mute">🔊</button>
+      <button type="button" id="aiCloseBtn" class="ghost">✕</button>
     </div>
   </div>
   <div id="aiMessages" class="ai-messages">
     <div class="ai-msg assistant">Hi, I'm AEON Ai. Ask me things like "what did I work on 23/07/2026?" or "summarize my last report."</div>
   </div>
   <div class="ai-input-row">
-    <button type="button" id="aiMicBtn" class="ai-mic-btn" title="Speak your question"><i data-lucide="mic"></i></button>
+    <button type="button" id="aiMicBtn" class="ai-mic-btn" title="Speak your question">🎙️</button>
     <input id="aiInput" type="text" placeholder="Ask about your saved entries…" />
-    <button type="button" id="aiSendBtn" class="ai-send-btn"><i data-lucide="send"></i></button>
+    <button type="button" id="aiSendBtn" class="ai-send-btn">➤</button>
   </div>
 </div>
 
 <!-- AEON TEAMS CHAT — floating icon, bottom-left, mirrors the AEON Ai orb -->
 <span id="chatOrbLabel" class="chat-orb-label" style="display:none">Aeon Teams Chat</span>
-<button id="chatOrb" class="chat-orb" aria-label="Open Aeon Teams Chat" title="Aeon Teams Chat" style="display:none"><i data-lucide="message-circle"></i></button>
+<button id="chatOrb" class="chat-orb" aria-label="Open Aeon Teams Chat" title="Aeon Teams Chat" style="display:none">💬</button>
 
 <div id="chatOverlayBackdrop" class="chat-overlay-backdrop"></div>
 <div id="chatOverlay" class="chat-overlay">
@@ -390,9 +390,9 @@
       <div class="chat-sidebar-header">
         <strong>Aeon Teams Chat</strong>
         <div class="chat-new-buttons">
-          <button type="button" id="newDmBtn" class="ghost" title="New direct message"><i data-lucide="message-circle"></i>+</button>
-          <button type="button" id="newGroupBtn" class="ghost" style="display:none" title="New group"><i data-lucide="users"></i>+</button>
-          <button type="button" id="chatCloseBtn" class="ghost" title="Close"><i data-lucide="x"></i></button>
+          <button type="button" id="newDmBtn" class="ghost" title="New direct message">💬+</button>
+          <button type="button" id="newGroupBtn" class="ghost" style="display:none" title="New group">👥+</button>
+          <button type="button" id="chatCloseBtn" class="ghost" title="Close">✕</button>
         </div>
       </div>
       <div id="chatList" class="chat-list"><div class="empty">No chats yet.</div></div>
@@ -408,15 +408,15 @@
             <strong id="chatThreadTitle">—</strong>
             <span id="chatThreadStatus" class="chat-thread-status"></span>
           </div>
-          <button type="button" id="chatHomeBtn" class="ghost chat-home-btn" title="Back to home"><i data-lucide="home"></i> Home</button>
+          <button type="button" id="chatHomeBtn" class="ghost chat-home-btn" title="Back to home">🏠 Home</button>
         </div>
         <div id="chatMessages" class="chat-messages"></div>
         <div id="chatAttachPreview" class="chat-attach-preview" style="display:none"></div>
         <div class="chat-input-row">
           <input type="file" id="chatFileInput" style="display:none" />
-          <button type="button" id="chatAttachBtn" class="chat-attach-btn" title="Attach a file"><i data-lucide="paperclip"></i></button>
+          <button type="button" id="chatAttachBtn" class="chat-attach-btn" title="Attach a file">📎</button>
           <input id="chatTextInput" type="text" placeholder="Type a message…" />
-          <button type="button" id="chatSendBtn" class="ai-send-btn"><i data-lucide="send"></i></button>
+          <button type="button" id="chatSendBtn" class="ai-send-btn">➤</button>
         </div>
       </div>
     </div>
@@ -425,10 +425,10 @@
 
 <!-- ADMIN RIGHT-SIDE RAIL — desktop only, hidden on phones (see #adminMoreRow in the Admin tab) -->
 <div id="adminRail" class="admin-rail" style="display:none">
-  <button type="button" class="admin-rail-btn" data-open="projects" title="Projects"><i data-lucide="folder"></i><span>Projects</span></button>
-  <button type="button" class="admin-rail-btn" data-open="departments" title="Departments"><i data-lucide="building-2"></i><span>Departments</span></button>
-  <button type="button" class="admin-rail-btn" data-open="learning" title="Learning"><i data-lucide="graduation-cap"></i><span>Learning</span></button>
-  <button type="button" class="admin-rail-btn" data-open="health" title="Health Challenges"><i data-lucide="dumbbell"></i><span>Health</span></button>
+  <button type="button" class="admin-rail-btn" data-open="projects" title="Projects">📁<span>Projects</span></button>
+  <button type="button" class="admin-rail-btn" data-open="departments" title="Departments">🏢<span>Departments</span></button>
+  <button type="button" class="admin-rail-btn" data-open="learning" title="Learning">🎓<span>Learning</span></button>
+  <button type="button" class="admin-rail-btn" data-open="health" title="Health Challenges">💪<span>Health</span></button>
 </div>
 
 <!-- PROJECTS OVERLAY -->
@@ -437,7 +437,7 @@
   <div class="panel-shell">
     <div class="panel-header">
       <strong>Projects</strong>
-      <button type="button" class="ghost" data-close="projects"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-close="projects">✕</button>
     </div>
     <div class="panel-body">
       <div class="card glass" id="newProjectCard" style="display:none;">
@@ -470,7 +470,7 @@
     <div class="panel-header">
       <button type="button" class="ghost" id="projectDetailBackBtn">‹ Back</button>
       <strong id="projectDetailTitle">Project</strong>
-      <button type="button" class="ghost" data-close="projectDetail"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-close="projectDetail">✕</button>
     </div>
     <div class="panel-body">
       <div id="projectRingsArea"></div>
@@ -494,7 +494,7 @@
   <div class="panel-shell">
     <div class="panel-header">
       <strong>Departments</strong>
-      <button type="button" class="ghost" data-close="departments"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-close="departments">✕</button>
     </div>
     <div class="panel-body">
       <div class="card glass" id="newDepartmentCard" style="display:none;">
@@ -515,7 +515,7 @@
     <div class="panel-header">
       <button type="button" class="ghost" id="departmentDetailBackBtn">‹ Back</button>
       <strong id="departmentDetailTitle">Department</strong>
-      <button type="button" class="ghost" data-close="departmentDetail"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-close="departmentDetail">✕</button>
     </div>
     <div class="panel-body">
       <div class="card glass">
@@ -533,7 +533,7 @@
   <div class="panel-shell">
     <div class="panel-header">
       <strong>Learning</strong>
-      <button type="button" class="ghost" data-close="learning"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-close="learning">✕</button>
     </div>
     <div class="panel-body">
       <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
@@ -547,7 +547,7 @@
   <div class="panel-shell">
     <div class="panel-header">
       <strong>Health Challenges</strong>
-      <button type="button" class="ghost" data-close="health"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-close="health">✕</button>
     </div>
     <div class="panel-body">
       <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
@@ -556,7 +556,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lucide@0.462.0/dist/umd/lucide.js"></script>
 <script src="./config.js"></script>
 <script src="./app.js"></script>
 </body>

@@ -4,21 +4,6 @@ const sb = window.supabase.createClient(
   window.CTORQ_CONFIG.SUPABASE_ANON_KEY
 );
 
-// ---------- Icons (Lucide) ----------
-// Every icon in this app is a `<i data-lucide="name"></i>` tag rather than
-// an emoji, so it renders as a clean, consistent line-icon set instead of
-// looking like default emoji. Lucide only turns those tags into real SVGs
-// when told to — most of this app's UI is rebuilt via innerHTML on every
-// render (team list, entries, chat, projects, departments, etc.), so a
-// MutationObserver just re-runs it automatically whenever new markup lands
-// in the page, instead of remembering to call it after every single render
-// function by hand.
-function refreshIcons() {
-  if (window.lucide) window.lucide.createIcons();
-}
-if (window.lucide) window.lucide.createIcons();
-new MutationObserver(() => refreshIcons()).observe(document.body, { childList: true, subtree: true });
-
 let currentUser = null;
 let currentProfile = null;
 let selectedMode = null; // mode-of-work chip currently selected
@@ -152,7 +137,7 @@ $('fetchLocationBtn').addEventListener('click', () => {
   }
   const btn = $('fetchLocationBtn');
   btn.disabled = true;
-  btn.innerHTML = '<i data-lucide="map-pin"></i> Locating…';
+  btn.textContent = '📍 Locating…';
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
       const { latitude, longitude } = pos.coords;
@@ -167,13 +152,13 @@ $('fetchLocationBtn').addEventListener('click', () => {
         $('location').value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="map-pin"></i> Use my location';
+        btn.textContent = '📍 Use my location';
       }
     },
     () => {
       showToast('Could not get location — type it manually.');
       btn.disabled = false;
-      btn.innerHTML = '<i data-lucide="map-pin"></i> Use my location';
+      btn.textContent = '📍 Use my location';
     },
     { enableHighAccuracy: true, timeout: 10000 }
   );
@@ -467,7 +452,7 @@ async function renderMyTodayAssignment() {
   const isTransport = data.assignment_type === 'transportation';
   area.innerHTML = `
     <div class="entry">
-      <span class="type-icon">${isTransport ? '<i data-lucide="car-taxi-front"></i>' : '<i data-lucide="calendar"></i>'}</span>
+      <span class="type-icon">${isTransport ? '🚕' : '🗓️'}</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(data.project || 'No details given')}</div>
         <div class="entry-meta">${data.location ? escapeHtml(data.location) : ''}${data.notes ? (data.location ? ' · ' : '') + escapeHtml(data.notes) : ''}</div>
@@ -571,7 +556,7 @@ async function renderTeamList() {
   const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
   list.innerHTML = data.map(p => `
     <div class="entry">
-      <span class="type-icon">${p.role === 'admin' ? '<i data-lucide="crown"></i>' : '<i data-lucide="user"></i>'}</span>
+      <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
       <div class="entry-body">
         <div class="entry-meta">${escapeHtml(p.full_name || p.email)}</div>
         <div class="entry-desc">${escapeHtml(p.email)}</div>
@@ -630,12 +615,12 @@ async function renderLocationList() {
   if (!rows.length) { list.innerHTML = '<div class="empty">No locations added yet.</div>'; return; }
   list.innerHTML = rows.map((r) => `
     <div class="entry">
-      <span class="type-icon"><i data-lucide="map-pin"></i></span>
+      <span class="type-icon">📍</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.name)}</div>
         <div class="entry-meta">+${r.extra_hours} hour${Number(r.extra_hours) === 1 ? '' : 's'} allowance</div>
       </div>
-      <button type="button" class="ghost" data-location-id="${r.id}"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-location-id="${r.id}">✕</button>
     </div>
   `).join('');
   list.querySelectorAll('[data-location-id]').forEach((btn) => {
@@ -693,12 +678,12 @@ async function renderAssignmentList() {
   if (error || !data || !data.length) { list.innerHTML = '<div class="empty">No upcoming assignments yet.</div>'; return; }
   list.innerHTML = data.map((r) => `
     <div class="entry">
-      <span class="type-icon">${r.assignment_type === 'transportation' ? '<i data-lucide="car-taxi-front"></i>' : '<i data-lucide="calendar"></i>'}</span>
+      <span class="type-icon">${r.assignment_type === 'transportation' ? '🚕' : '🗓️'}</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.project || 'No job set')}</div>
         <div class="entry-meta">${escapeHtml(r.work_date)}${r.location ? ' · ' + escapeHtml(r.location) : ''}</div>
       </div>
-      <button type="button" class="ghost" data-assignment-id="${r.id}"><i data-lucide="x"></i></button>
+      <button type="button" class="ghost" data-assignment-id="${r.id}">✕</button>
     </div>
   `).join('');
   list.querySelectorAll('[data-assignment-id]').forEach((btn) => {
@@ -830,11 +815,11 @@ async function renderDepartmentsList(isRetry = false) {
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((d) => `
     <div class="entry" data-department-row="${escapeHtml(d.id)}" data-department-name="${escapeHtml(d.name)}" style="cursor:pointer;">
-      <span class="type-icon"><i data-lucide="building-2"></i></span>
+      <span class="type-icon">🏢</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(d.name)}</div>
       </div>
-      ${isAdmin ? `<button type="button" class="ghost" data-delete-department="${escapeHtml(d.id)}"><i data-lucide="x"></i></button>` : ''}
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-department="${escapeHtml(d.id)}">✕</button>` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-department-row]').forEach((row) => {
@@ -903,11 +888,11 @@ async function openDepartmentDetail(deptId, deptName) {
     const a = byPerson[p.id];
     const posLabel = POSITION_LABEL[p.position] || p.position;
     const jobText = a
-      ? `${a.assignment_type === 'transportation' ? '<i data-lucide="car-taxi-front"></i> ' : ''}${escapeHtml(a.project || 'Assigned, no details')}${a.location ? ' · ' + escapeHtml(a.location) : ''}`
+      ? `${a.assignment_type === 'transportation' ? '🚕 ' : ''}${escapeHtml(a.project || 'Assigned, no details')}${a.location ? ' · ' + escapeHtml(a.location) : ''}`
       : 'No job allocated today';
     return `
       <div class="entry">
-        <span class="type-icon"><i data-lucide="user"></i></span>
+        <span class="type-icon">🙂</span>
         <div class="entry-body">
           <div class="entry-desc">${escapeHtml(p.full_name || p.email)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(posLabel)}</span></div>
           <div class="entry-meta">${jobText}</div>
@@ -957,12 +942,12 @@ async function renderProjectsList(isRetry = false) {
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((r) => `
     <div class="entry" data-project-row="${escapeHtml(r.job_id)}" data-project-name="${escapeHtml(r.name || '')}" style="cursor:pointer;">
-      <span class="type-icon"><i data-lucide="folder"></i></span>
+      <span class="type-icon">📁</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
         <div class="entry-meta">Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
       </div>
-      ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}"><i data-lucide="x"></i></button>` : ''}
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-project-row]').forEach((row) => {
@@ -1623,7 +1608,7 @@ async function fetchChatList() {
     const m = last?.[0];
     return {
       ...r,
-      lastLine: m ? (m.content || (m.attachment_name ? `<i data-lucide="paperclip"></i> ${m.attachment_name}` : '')) : 'No messages yet',
+      lastLine: m ? (m.content || (m.attachment_name ? `📎 ${m.attachment_name}` : '')) : 'No messages yet',
       lastAt: m?.created_at || null,
     };
   }));
@@ -1637,7 +1622,7 @@ function renderChatList() {
   if (!chatListCache.length) { list.innerHTML = '<div class="empty">No chats yet — start one above.</div>'; return; }
   list.innerHTML = chatListCache.map((c) => {
     const name = chatDisplayName(c);
-    const icon = c.type === 'group' ? '<i data-lucide="users"></i>' : '<i data-lucide="user"></i>';
+    const icon = c.type === 'group' ? '👥' : '🙂';
     let dot = '';
     if (c.type === 'dm') {
       const other = (c.memberProfiles || []).find((p) => p.id !== currentUser.id);
@@ -1689,7 +1674,7 @@ async function renderMessages(rows) {
       if (url && attachmentMimeIsImage(m.attachment_mime)) {
         mediaHtml = `<a href="${url}" target="_blank" rel="noopener"><img class="chat-img" src="${url}" alt="${escapeHtml(m.attachment_name || '')}" /></a>`;
       } else if (url) {
-        mediaHtml = `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener"><i data-lucide="file-text"></i> ${escapeHtml(m.attachment_name || 'file')}</a>`;
+        mediaHtml = `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener">📄 ${escapeHtml(m.attachment_name || 'file')}</a>`;
       }
     }
     const senderName = isGroup && !mine ? `<div class="chat-bubble-sender">${escapeHtml(m.senderLabel || '')}</div>` : '';
@@ -1774,7 +1759,7 @@ $('chatFileInput').addEventListener('change', () => {
   pendingChatAttachment = file;
   const preview = $('chatAttachPreview');
   preview.style.display = 'flex';
-  preview.innerHTML = `<i data-lucide="paperclip"></i> ${escapeHtml(file.name)} <button type="button" id="chatAttachRemoveBtn"><i data-lucide="x"></i></button>`;
+  preview.innerHTML = `📎 ${escapeHtml(file.name)} <button type="button" id="chatAttachRemoveBtn">✕</button>`;
   $('chatAttachRemoveBtn').addEventListener('click', () => {
     pendingChatAttachment = null;
     $('chatFileInput').value = '';
@@ -1951,11 +1936,11 @@ $('newGroupCreateBtn').addEventListener('click', async () => {
 // QUEUE rendering
 // =====================================================================
 
-const TYPE_ICON = { timesheet: '<i data-lucide="clock"></i>', progress: '<i data-lucide="trending-up"></i>', data: '<i data-lucide="clipboard-list"></i>' };
+const TYPE_ICON = { timesheet: '🕒', progress: '📈', data: '📋' };
 const MODE_ICON = {
-  office: '<i data-lucide="building-2"></i>', site: '<i data-lucide="hard-hat"></i>', driver: '<i data-lucide="car"></i>', wfh: '<i data-lucide="home"></i>', exhibition: '<i data-lucide="tent"></i>',
-  inspection: '<i data-lucide="search"></i>', field_work: '<i data-lucide="wheat"></i>', other: '<i data-lucide="sparkles"></i>', sick_leave: '<i data-lucide="thermometer"></i>',
-  holiday: '<i data-lucide="palmtree"></i>', emergency_leave: '<i data-lucide="siren"></i>', leave: '<i data-lucide="file-text"></i>'
+  office: '🏢', site: '🏗️', driver: '🚗', wfh: '🏠', exhibition: '🎪',
+  inspection: '🔍', field_work: '🌾', other: '✨', sick_leave: '🤒',
+  holiday: '🏖️', emergency_leave: '🚨', leave: '📄'
 };
 
 function escapeHtml(s) {
@@ -2094,7 +2079,7 @@ function speakText(text) {
 function updateVoiceToggleUi() {
   const btn = $('aiVoiceToggle');
   if (!btn) return;
-  btn.innerHTML = voiceOutputEnabled ? '<i data-lucide="volume-2"></i>' : '<i data-lucide="volume-x"></i>';
+  btn.textContent = voiceOutputEnabled ? '🔊' : '🔇';
   btn.title = voiceOutputEnabled ? 'Voice replies on — tap to mute' : 'Voice replies off — tap to unmute';
 }
 if ($('aiVoiceToggle')) {
