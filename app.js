@@ -669,104 +669,6 @@ if ($('addLocationBtn')) {
 // age out of the list naturally.
 // =====================================================================
 
-// =====================================================================
-// DOCUMENT REQUEST — an employee picks a document type and submits a
-// request; admin sees every pending request and marks it issued/declined.
-// Data-only for now (no document is actually generated/attached) — a real
-// request queue that a later round can wire up to produce real files.
-// =====================================================================
-
-const DOCUMENT_TYPES = [
-  'Salary Certificate', 'Leave Letter', 'Experience Certificate', 'Insurance Letter',
-  'NOC (No Objection Certificate)', 'NDA', 'Bank / Salary Statement',
-  'Resignation Letter', 'Maternity Leave Letter', 'Other',
-];
-const DOC_STATUS_LABEL = { pending: 'Pending', issued: 'Issued', declined: 'Declined' };
-
-let docTypesPopulated = false;
-function populateDocRequestTypes() {
-  const select = $('docRequestType');
-  if (!select || docTypesPopulated) return;
-  docTypesPopulated = true;
-  select.innerHTML = DOCUMENT_TYPES.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-}
-
-async function renderMyDocRequests() {
-  const wrap = $('myDocRequestsArea');
-  if (!wrap) return;
-  wrap.innerHTML = '<div class="empty">Loading…</div>';
-  const { data, error } = await sb
-    .from('document_requests')
-    .select('id, document_type, notes, status, requested_at')
-    .eq('person_id', currentUser.id)
-    .order('requested_at', { ascending: false });
-  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load your requests: ${escapeHtml(error.message)}</div>`; return; }
-  if (!data || !data.length) { wrap.innerHTML = '<div class="empty">No requests yet.</div>'; return; }
-  wrap.innerHTML = data.map((r) => `
-    <div class="entry">
-      <span class="type-icon"><i data-lucide="file-text"></i></span>
-      <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(r.document_type)}</div>
-        <div class="entry-meta">${escapeHtml(new Date(r.requested_at).toLocaleDateString())}${r.notes ? ' · ' + escapeHtml(r.notes) : ''}</div>
-      </div>
-      <span class="chip ${r.status === 'issued' ? 'synced' : r.status === 'declined' ? 'pending' : ''}">${DOC_STATUS_LABEL[r.status] || r.status}</span>
-    </div>
-  `).join('');
-}
-
-async function renderAllDocRequests() {
-  const wrap = $('allDocRequestsArea');
-  if (!wrap) return;
-  wrap.innerHTML = '<div class="empty">Loading…</div>';
-  const { data, error } = await sb
-    .from('document_requests')
-    .select('id, document_type, notes, status, requested_at, person_id, profiles!document_requests_person_id_fkey(full_name, email)')
-    .order('requested_at', { ascending: false });
-  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load requests: ${escapeHtml(error.message)}</div>`; return; }
-  if (!data || !data.length) { wrap.innerHTML = '<div class="empty">No document requests yet.</div>'; return; }
-  wrap.innerHTML = data.map((r) => `
-    <div class="entry">
-      <span class="type-icon"><i data-lucide="file-text"></i></span>
-      <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.document_type)}</div>
-        <div class="entry-meta">${escapeHtml(new Date(r.requested_at).toLocaleDateString())}${r.notes ? ' · ' + escapeHtml(r.notes) : ''}</div>
-      </div>
-      ${r.status === 'pending' ? `
-        <button type="button" class="secondary" data-doc-resolve="${r.id}" data-doc-status="issued">Mark issued</button>
-        <button type="button" class="ghost" data-doc-resolve="${r.id}" data-doc-status="declined">Decline</button>
-      ` : `<span class="chip ${r.status === 'issued' ? 'synced' : 'pending'}">${DOC_STATUS_LABEL[r.status] || r.status}</span>`}
-    </div>
-  `).join('');
-  wrap.querySelectorAll('[data-doc-resolve]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const { error: updErr } = await sb.from('document_requests').update({
-        status: btn.dataset.docStatus, resolved_at: new Date().toISOString(), resolved_by: currentUser.id,
-      }).eq('id', btn.dataset.docResolve);
-      if (updErr) { showToast(`Couldn't update: ${updErr.message}`); return; }
-      renderAllDocRequests();
-      showToast('Request updated.');
-    });
-  });
-}
-
-if ($('sendDocRequestBtn')) {
-  $('sendDocRequestBtn').addEventListener('click', async () => {
-    const documentType = $('docRequestType').value;
-    if (!documentType) { showToast('Pick a document type.'); return; }
-    const btn = $('sendDocRequestBtn');
-    btn.disabled = true;
-    const { error } = await sb.from('document_requests').insert({
-      person_id: currentUser.id, document_type: documentType,
-      notes: $('docRequestNotes').value.trim() || null,
-    });
-    btn.disabled = false;
-    if (error) { showToast(`Couldn't send request: ${error.message}`); return; }
-    $('docRequestNotes').value = '';
-    renderMyDocRequests();
-    showToast('Request sent.');
-  });
-}
-
 let assignPeoplePopulated = false;
 
 async function populateAssignPersonPicker() {
@@ -853,7 +755,6 @@ const PANEL_IDS = {
   projectDetail: ['projectDetailOverlay', 'projectDetailOverlayBackdrop'],
   departments: ['departmentsOverlay', 'departmentsOverlayBackdrop'],
   departmentDetail: ['departmentDetailOverlay', 'departmentDetailOverlayBackdrop'],
-  documents: ['documentsOverlay', 'documentsOverlayBackdrop'],
   learning: ['learningOverlay', 'learningOverlayBackdrop'],
   health: ['healthOverlay', 'healthOverlayBackdrop'],
 };
@@ -869,12 +770,6 @@ function openPanel(name) {
   if (name === 'departments') {
     $('newDepartmentCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
     renderDepartmentsList();
-  }
-  if (name === 'documents') {
-    populateDocRequestTypes();
-    renderMyDocRequests();
-    $('allDocRequestsCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
-    if (currentProfile?.role === 'admin') renderAllDocRequests();
   }
 }
 function closePanel(name) {

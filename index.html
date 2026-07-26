@@ -274,7 +274,6 @@
       <div class="card glass admin-more-row" id="adminMoreRow" style="display:none;">
         <button type="button" class="secondary" data-open="projects"><i data-lucide="folder"></i> Projects</button>
         <button type="button" class="secondary" data-open="departments"><i data-lucide="building-2"></i> Departments</button>
-        <button type="button" class="secondary" data-open="documents"><i data-lucide="file-text"></i> Documents</button>
         <button type="button" class="secondary" data-open="learning"><i data-lucide="graduation-cap"></i> Learning</button>
         <button type="button" class="secondary" data-open="health"><i data-lucide="dumbbell"></i> Health Challenges</button>
       </div>
@@ -428,7 +427,6 @@
 <div id="adminRail" class="admin-rail" style="display:none">
   <button type="button" class="admin-rail-btn" data-open="projects" title="Projects"><i data-lucide="folder"></i><span>Projects</span></button>
   <button type="button" class="admin-rail-btn" data-open="departments" title="Departments"><i data-lucide="building-2"></i><span>Departments</span></button>
-  <button type="button" class="admin-rail-btn" data-open="documents" title="Document Request"><i data-lucide="file-text"></i><span>Documents</span></button>
   <button type="button" class="admin-rail-btn" data-open="learning" title="Learning"><i data-lucide="graduation-cap"></i><span>Learning</span></button>
   <button type="button" class="admin-rail-btn" data-open="health" title="Health Challenges"><i data-lucide="dumbbell"></i><span>Health</span></button>
 </div>
@@ -524,36 +522,6 @@
         <strong style="font-size:14px;">People in this department</strong>
         <p class="hint" id="departmentDetailCount" style="margin-top:4px;"></p>
         <div id="departmentMembersArea" style="margin-top:12px;"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- DOCUMENT REQUEST OVERLAY -->
-<div id="documentsOverlayBackdrop" class="panel-overlay-backdrop"></div>
-<div id="documentsOverlay" class="panel-overlay">
-  <div class="panel-shell">
-    <div class="panel-header">
-      <strong>Document Request</strong>
-      <button type="button" class="ghost" data-close="documents">✕</button>
-    </div>
-    <div class="panel-body">
-      <div class="card glass">
-        <strong style="font-size:14px;">Request a document</strong>
-        <p class="hint" style="margin-top:4px;">Pick what you need — HR will issue it and update the status here. This is a request queue for now; documents aren't auto-generated yet.</p>
-        <label for="docRequestType" style="margin-top:10px;">Document type</label>
-        <select id="docRequestType"></select>
-        <label for="docRequestNotes">Notes (optional)</label>
-        <input id="docRequestNotes" type="text" placeholder="Anything HR should know" />
-        <button id="sendDocRequestBtn" class="primary" style="margin-top:12px;">Send request</button>
-      </div>
-      <div class="card glass" style="margin-top:16px;">
-        <strong style="font-size:14px;">Your requests</strong>
-        <div id="myDocRequestsArea" style="margin-top:12px;"></div>
-      </div>
-      <div class="card glass" id="allDocRequestsCard" style="display:none; margin-top:16px;">
-        <strong style="font-size:14px;">Incoming requests</strong>
-        <div id="allDocRequestsArea" style="margin-top:12px;"></div>
       </div>
     </div>
   </div>
