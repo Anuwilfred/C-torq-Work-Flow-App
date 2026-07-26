@@ -423,8 +423,10 @@ async function enterApp() {
   startPresence();
   populateAllowanceDropdown();
   populateJobIdDropdown();
-  $('adminRail').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
-  $('adminMoreRow').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
+  // Projects / Learning / Health Challenges are visible to everyone now —
+  // only creating/deleting projects (and setting positions) stays admin-only.
+  $('adminRail').style.display = 'flex';
+  $('adminMoreRow').style.display = 'flex';
 
   renderQueue();
   syncQueue();
@@ -690,7 +692,10 @@ function openPanel(name) {
   if (!ids) return;
   $(ids[0]).classList.add('show');
   $(ids[1]).classList.add('show');
-  if (name === 'projects') renderProjectsList();
+  if (name === 'projects') {
+    $('newProjectCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    renderProjectsList();
+  }
 }
 function closePanel(name) {
   const ids = PANEL_IDS[name];
@@ -731,7 +736,8 @@ async function renderProjectsList() {
   const wrap = $('projectsListArea');
   if (!wrap) return;
   const rows = await fetchProjects();
-  if (!rows.length) { wrap.innerHTML = '<div class="empty">No projects yet — add one above.</div>'; return; }
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No projects yet' + (currentProfile?.role === 'admin' ? ' — add one above.' : ' yet.') + '</div>'; return; }
+  const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((r) => `
     <div class="entry" data-project-row="${escapeHtml(r.job_id)}" data-project-name="${escapeHtml(r.name || '')}" style="cursor:pointer;">
       <span class="type-icon">📁</span>
@@ -739,7 +745,7 @@ async function renderProjectsList() {
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
         <div class="entry-meta">Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
       </div>
-      <button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-project-row]').forEach((row) => {
@@ -842,11 +848,15 @@ function renderProjectContributors(data) {
   `).join('');
 }
 
+let currentProjectReport = null;
+
 async function openProjectDetail(jobId, name) {
+  currentProjectReport = null;
   $('projectDetailTitle').textContent = name ? `${jobId} — ${name}` : jobId;
   $('projectRingsArea').innerHTML = '<div class="empty">Loading…</div>';
   $('projectContributors').innerHTML = '';
   openPanel('projectDetail');
+  populateShareGroupPicker();
   const { data: { session } } = await sb.auth.getSession();
   const { data, error } = await sb.functions.invoke('get-project-report', {
     body: { jobId },
@@ -856,8 +866,58 @@ async function openProjectDetail(jobId, name) {
     $('projectRingsArea').innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || error.message)}</div>`;
     return;
   }
+  currentProjectReport = data;
   $('projectRingsArea').innerHTML = `<div class="project-rings">${ringCard('Engineer', data.totals.engineerHours, data.project.allocatedEngineer)}${ringCard('Technician', data.totals.technicianHours, data.project.allocatedTechnician)}</div>`;
   renderProjectContributors(data);
+}
+
+// ---------- Share a project's status into one of the viewer's own groups ----------
+async function populateShareGroupPicker() {
+  const select = $('shareProjectGroupSelect');
+  if (!select) return;
+  select.innerHTML = '<option value="">Loading your groups…</option>';
+  const { data, error } = await sb.from('chats').select('id, name').eq('type', 'group');
+  const groups = error ? [] : (data || []);
+  if (!groups.length) {
+    select.innerHTML = '<option value="">You\'re not in any group chats yet</option>';
+    return;
+  }
+  select.innerHTML = groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name || 'Group')}</option>`).join('');
+}
+
+if ($('shareProjectBtn')) {
+  $('shareProjectBtn').addEventListener('click', async () => {
+    const chatId = $('shareProjectGroupSelect').value;
+    if (!chatId) { showToast('Pick a group to share to.'); return; }
+    if (!currentProjectReport) { showToast('Still loading project data — try again in a second.'); return; }
+
+    const { project, totals } = currentProjectReport;
+    const engOver = Math.max(0, Math.round((totals.engineerHours - project.allocatedEngineer) * 100) / 100);
+    const techOver = Math.max(0, Math.round((totals.technicianHours - project.allocatedTechnician) * 100) / 100);
+    const lines = [
+      `📊 Project status: ${project.jobId}${project.name ? ' — ' + project.name : ''}`,
+      `Engineer: ${totals.engineerHours}h / ${project.allocatedEngineer}h${engOver > 0 ? ` (⚠️ ${engOver}h over budget)` : ''}`,
+      `Technician: ${totals.technicianHours}h / ${project.allocatedTechnician}h${techOver > 0 ? ` (⚠️ ${techOver}h over budget)` : ''}`,
+    ];
+    const content = lines.join('\n');
+
+    const btn = $('shareProjectBtn');
+    btn.disabled = true;
+    const { data: newMsg, error } = await sb.from('messages').insert({
+      chat_id: chatId, sender_id: currentUser.id, content,
+    }).select().single();
+    btn.disabled = false;
+    if (error) { showToast(`Couldn't share: ${error.message}`); return; }
+
+    if (newMsg) {
+      const { data: { session } } = await sb.auth.getSession();
+      sb.functions.invoke('send-push', {
+        body: { chatId, messageId: newMsg.id },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      }).catch(() => {});
+    }
+    showToast('Shared to group.');
+  });
 }
 
 // =====================================================================

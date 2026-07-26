@@ -948,12 +948,29 @@ button.ghost:hover { color: var(--text); }
 .ring-center-value.under { color: var(--ok); }
 .ring-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
-.contrib-row { margin-bottom: 12px; }
-.contrib-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
-.contrib-name { font-weight: 600; }
-.contrib-hours { color: var(--text-dim); }
-.contrib-bar-track { height: 8px; border-radius: 999px; background: var(--glass-2); overflow: hidden; }
-.contrib-bar-fill { height: 100%; border-radius: 999px; background: var(--accent); }
+.contrib-row {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: rgba(10, 9, 8, 0.35);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+}
+.contrib-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; margin-bottom: 8px; }
+.contrib-name { font-weight: 700; color: var(--text); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.contrib-hours { color: var(--text); font-weight: 800; font-size: 13.5px; flex: none; }
+.contrib-bar-track {
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+}
+.contrib-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  min-width: 6px;
+}
 @media (max-width: 420px) {
   .chat-orb { left: 16px; bottom: 20px; }
   .chat-orb-label { left: 78px; bottom: 34px; font-size: 11.5px; padding: 6px 12px; }
