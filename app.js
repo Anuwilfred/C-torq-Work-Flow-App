@@ -4,6 +4,21 @@ const sb = window.supabase.createClient(
   window.CTORQ_CONFIG.SUPABASE_ANON_KEY
 );
 
+// ---------- Icons (Lucide) ----------
+// Every icon in this app is a `<i data-lucide="name"></i>` tag rather than
+// an emoji, so it renders as a clean, consistent line-icon set instead of
+// looking like default emoji. Lucide only turns those tags into real SVGs
+// when told to — most of this app's UI is rebuilt via innerHTML on every
+// render (team list, entries, chat, projects, departments, etc.), so a
+// MutationObserver just re-runs it automatically whenever new markup lands
+// in the page, instead of remembering to call it after every single render
+// function by hand.
+function refreshIcons() {
+  if (window.lucide) window.lucide.createIcons();
+}
+if (window.lucide) window.lucide.createIcons();
+new MutationObserver(() => refreshIcons()).observe(document.body, { childList: true, subtree: true });
+
 let currentUser = null;
 let currentProfile = null;
 let selectedMode = null; // mode-of-work chip currently selected
@@ -137,7 +152,7 @@ $('fetchLocationBtn').addEventListener('click', () => {
   }
   const btn = $('fetchLocationBtn');
   btn.disabled = true;
-  btn.textContent = '📍 Locating…';
+  btn.innerHTML = '<i data-lucide="map-pin"></i> Locating…';
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
       const { latitude, longitude } = pos.coords;
@@ -152,13 +167,13 @@ $('fetchLocationBtn').addEventListener('click', () => {
         $('location').value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
       } finally {
         btn.disabled = false;
-        btn.textContent = '📍 Use my location';
+        btn.innerHTML = '<i data-lucide="map-pin"></i> Use my location';
       }
     },
     () => {
       showToast('Could not get location — type it manually.');
       btn.disabled = false;
-      btn.textContent = '📍 Use my location';
+      btn.innerHTML = '<i data-lucide="map-pin"></i> Use my location';
     },
     { enableHighAccuracy: true, timeout: 10000 }
   );
@@ -452,7 +467,7 @@ async function renderMyTodayAssignment() {
   const isTransport = data.assignment_type === 'transportation';
   area.innerHTML = `
     <div class="entry">
-      <span class="type-icon">${isTransport ? '🚕' : '🗓️'}</span>
+      <span class="type-icon">${isTransport ? '<i data-lucide="car-taxi-front"></i>' : '<i data-lucide="calendar"></i>'}</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(data.project || 'No details given')}</div>
         <div class="entry-meta">${data.location ? escapeHtml(data.location) : ''}${data.notes ? (data.location ? ' · ' : '') + escapeHtml(data.notes) : ''}</div>
@@ -556,7 +571,7 @@ async function renderTeamList() {
   const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
   list.innerHTML = data.map(p => `
     <div class="entry">
-      <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
+      <span class="type-icon">${p.role === 'admin' ? '<i data-lucide="crown"></i>' : '<i data-lucide="user"></i>'}</span>
       <div class="entry-body">
         <div class="entry-meta">${escapeHtml(p.full_name || p.email)}</div>
         <div class="entry-desc">${escapeHtml(p.email)}</div>
@@ -615,12 +630,12 @@ async function renderLocationList() {
   if (!rows.length) { list.innerHTML = '<div class="empty">No locations added yet.</div>'; return; }
   list.innerHTML = rows.map((r) => `
     <div class="entry">
-      <span class="type-icon">📍</span>
+      <span class="type-icon"><i data-lucide="map-pin"></i></span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.name)}</div>
         <div class="entry-meta">+${r.extra_hours} hour${Number(r.extra_hours) === 1 ? '' : 's'} allowance</div>
       </div>
-      <button type="button" class="ghost" data-location-id="${r.id}">✕</button>
+      <button type="button" class="ghost" data-location-id="${r.id}"><i data-lucide="x"></i></button>
     </div>
   `).join('');
   list.querySelectorAll('[data-location-id]').forEach((btn) => {
@@ -654,6 +669,104 @@ if ($('addLocationBtn')) {
 // age out of the list naturally.
 // =====================================================================
 
+// =====================================================================
+// DOCUMENT REQUEST — an employee picks a document type and submits a
+// request; admin sees every pending request and marks it issued/declined.
+// Data-only for now (no document is actually generated/attached) — a real
+// request queue that a later round can wire up to produce real files.
+// =====================================================================
+
+const DOCUMENT_TYPES = [
+  'Salary Certificate', 'Leave Letter', 'Experience Certificate', 'Insurance Letter',
+  'NOC (No Objection Certificate)', 'NDA', 'Bank / Salary Statement',
+  'Resignation Letter', 'Maternity Leave Letter', 'Other',
+];
+const DOC_STATUS_LABEL = { pending: 'Pending', issued: 'Issued', declined: 'Declined' };
+
+let docTypesPopulated = false;
+function populateDocRequestTypes() {
+  const select = $('docRequestType');
+  if (!select || docTypesPopulated) return;
+  docTypesPopulated = true;
+  select.innerHTML = DOCUMENT_TYPES.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+}
+
+async function renderMyDocRequests() {
+  const wrap = $('myDocRequestsArea');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data, error } = await sb
+    .from('document_requests')
+    .select('id, document_type, notes, status, requested_at')
+    .eq('person_id', currentUser.id)
+    .order('requested_at', { ascending: false });
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load your requests: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data || !data.length) { wrap.innerHTML = '<div class="empty">No requests yet.</div>'; return; }
+  wrap.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon"><i data-lucide="file-text"></i></span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.document_type)}</div>
+        <div class="entry-meta">${escapeHtml(new Date(r.requested_at).toLocaleDateString())}${r.notes ? ' · ' + escapeHtml(r.notes) : ''}</div>
+      </div>
+      <span class="chip ${r.status === 'issued' ? 'synced' : r.status === 'declined' ? 'pending' : ''}">${DOC_STATUS_LABEL[r.status] || r.status}</span>
+    </div>
+  `).join('');
+}
+
+async function renderAllDocRequests() {
+  const wrap = $('allDocRequestsArea');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data, error } = await sb
+    .from('document_requests')
+    .select('id, document_type, notes, status, requested_at, person_id, profiles!document_requests_person_id_fkey(full_name, email)')
+    .order('requested_at', { ascending: false });
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load requests: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data || !data.length) { wrap.innerHTML = '<div class="empty">No document requests yet.</div>'; return; }
+  wrap.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon"><i data-lucide="file-text"></i></span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.document_type)}</div>
+        <div class="entry-meta">${escapeHtml(new Date(r.requested_at).toLocaleDateString())}${r.notes ? ' · ' + escapeHtml(r.notes) : ''}</div>
+      </div>
+      ${r.status === 'pending' ? `
+        <button type="button" class="secondary" data-doc-resolve="${r.id}" data-doc-status="issued">Mark issued</button>
+        <button type="button" class="ghost" data-doc-resolve="${r.id}" data-doc-status="declined">Decline</button>
+      ` : `<span class="chip ${r.status === 'issued' ? 'synced' : 'pending'}">${DOC_STATUS_LABEL[r.status] || r.status}</span>`}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-doc-resolve]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { error: updErr } = await sb.from('document_requests').update({
+        status: btn.dataset.docStatus, resolved_at: new Date().toISOString(), resolved_by: currentUser.id,
+      }).eq('id', btn.dataset.docResolve);
+      if (updErr) { showToast(`Couldn't update: ${updErr.message}`); return; }
+      renderAllDocRequests();
+      showToast('Request updated.');
+    });
+  });
+}
+
+if ($('sendDocRequestBtn')) {
+  $('sendDocRequestBtn').addEventListener('click', async () => {
+    const documentType = $('docRequestType').value;
+    if (!documentType) { showToast('Pick a document type.'); return; }
+    const btn = $('sendDocRequestBtn');
+    btn.disabled = true;
+    const { error } = await sb.from('document_requests').insert({
+      person_id: currentUser.id, document_type: documentType,
+      notes: $('docRequestNotes').value.trim() || null,
+    });
+    btn.disabled = false;
+    if (error) { showToast(`Couldn't send request: ${error.message}`); return; }
+    $('docRequestNotes').value = '';
+    renderMyDocRequests();
+    showToast('Request sent.');
+  });
+}
+
 let assignPeoplePopulated = false;
 
 async function populateAssignPersonPicker() {
@@ -678,12 +791,12 @@ async function renderAssignmentList() {
   if (error || !data || !data.length) { list.innerHTML = '<div class="empty">No upcoming assignments yet.</div>'; return; }
   list.innerHTML = data.map((r) => `
     <div class="entry">
-      <span class="type-icon">${r.assignment_type === 'transportation' ? '🚕' : '🗓️'}</span>
+      <span class="type-icon">${r.assignment_type === 'transportation' ? '<i data-lucide="car-taxi-front"></i>' : '<i data-lucide="calendar"></i>'}</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.project || 'No job set')}</div>
         <div class="entry-meta">${escapeHtml(r.work_date)}${r.location ? ' · ' + escapeHtml(r.location) : ''}</div>
       </div>
-      <button type="button" class="ghost" data-assignment-id="${r.id}">✕</button>
+      <button type="button" class="ghost" data-assignment-id="${r.id}"><i data-lucide="x"></i></button>
     </div>
   `).join('');
   list.querySelectorAll('[data-assignment-id]').forEach((btn) => {
@@ -740,6 +853,7 @@ const PANEL_IDS = {
   projectDetail: ['projectDetailOverlay', 'projectDetailOverlayBackdrop'],
   departments: ['departmentsOverlay', 'departmentsOverlayBackdrop'],
   departmentDetail: ['departmentDetailOverlay', 'departmentDetailOverlayBackdrop'],
+  documents: ['documentsOverlay', 'documentsOverlayBackdrop'],
   learning: ['learningOverlay', 'learningOverlayBackdrop'],
   health: ['healthOverlay', 'healthOverlayBackdrop'],
 };
@@ -755,6 +869,12 @@ function openPanel(name) {
   if (name === 'departments') {
     $('newDepartmentCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
     renderDepartmentsList();
+  }
+  if (name === 'documents') {
+    populateDocRequestTypes();
+    renderMyDocRequests();
+    $('allDocRequestsCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    if (currentProfile?.role === 'admin') renderAllDocRequests();
   }
 }
 function closePanel(name) {
@@ -815,11 +935,11 @@ async function renderDepartmentsList(isRetry = false) {
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((d) => `
     <div class="entry" data-department-row="${escapeHtml(d.id)}" data-department-name="${escapeHtml(d.name)}" style="cursor:pointer;">
-      <span class="type-icon">🏢</span>
+      <span class="type-icon"><i data-lucide="building-2"></i></span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(d.name)}</div>
       </div>
-      ${isAdmin ? `<button type="button" class="ghost" data-delete-department="${escapeHtml(d.id)}">✕</button>` : ''}
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-department="${escapeHtml(d.id)}"><i data-lucide="x"></i></button>` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-department-row]').forEach((row) => {
@@ -888,11 +1008,11 @@ async function openDepartmentDetail(deptId, deptName) {
     const a = byPerson[p.id];
     const posLabel = POSITION_LABEL[p.position] || p.position;
     const jobText = a
-      ? `${a.assignment_type === 'transportation' ? '🚕 ' : ''}${escapeHtml(a.project || 'Assigned, no details')}${a.location ? ' · ' + escapeHtml(a.location) : ''}`
+      ? `${a.assignment_type === 'transportation' ? '<i data-lucide="car-taxi-front"></i> ' : ''}${escapeHtml(a.project || 'Assigned, no details')}${a.location ? ' · ' + escapeHtml(a.location) : ''}`
       : 'No job allocated today';
     return `
       <div class="entry">
-        <span class="type-icon">🙂</span>
+        <span class="type-icon"><i data-lucide="user"></i></span>
         <div class="entry-body">
           <div class="entry-desc">${escapeHtml(p.full_name || p.email)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(posLabel)}</span></div>
           <div class="entry-meta">${jobText}</div>
@@ -942,12 +1062,12 @@ async function renderProjectsList(isRetry = false) {
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((r) => `
     <div class="entry" data-project-row="${escapeHtml(r.job_id)}" data-project-name="${escapeHtml(r.name || '')}" style="cursor:pointer;">
-      <span class="type-icon">📁</span>
+      <span class="type-icon"><i data-lucide="folder"></i></span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
         <div class="entry-meta">Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
       </div>
-      ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}"><i data-lucide="x"></i></button>` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-project-row]').forEach((row) => {
@@ -1608,7 +1728,7 @@ async function fetchChatList() {
     const m = last?.[0];
     return {
       ...r,
-      lastLine: m ? (m.content || (m.attachment_name ? `📎 ${m.attachment_name}` : '')) : 'No messages yet',
+      lastLine: m ? (m.content || (m.attachment_name ? `<i data-lucide="paperclip"></i> ${m.attachment_name}` : '')) : 'No messages yet',
       lastAt: m?.created_at || null,
     };
   }));
@@ -1622,7 +1742,7 @@ function renderChatList() {
   if (!chatListCache.length) { list.innerHTML = '<div class="empty">No chats yet — start one above.</div>'; return; }
   list.innerHTML = chatListCache.map((c) => {
     const name = chatDisplayName(c);
-    const icon = c.type === 'group' ? '👥' : '🙂';
+    const icon = c.type === 'group' ? '<i data-lucide="users"></i>' : '<i data-lucide="user"></i>';
     let dot = '';
     if (c.type === 'dm') {
       const other = (c.memberProfiles || []).find((p) => p.id !== currentUser.id);
@@ -1674,7 +1794,7 @@ async function renderMessages(rows) {
       if (url && attachmentMimeIsImage(m.attachment_mime)) {
         mediaHtml = `<a href="${url}" target="_blank" rel="noopener"><img class="chat-img" src="${url}" alt="${escapeHtml(m.attachment_name || '')}" /></a>`;
       } else if (url) {
-        mediaHtml = `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener">📄 ${escapeHtml(m.attachment_name || 'file')}</a>`;
+        mediaHtml = `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener"><i data-lucide="file-text"></i> ${escapeHtml(m.attachment_name || 'file')}</a>`;
       }
     }
     const senderName = isGroup && !mine ? `<div class="chat-bubble-sender">${escapeHtml(m.senderLabel || '')}</div>` : '';
@@ -1759,7 +1879,7 @@ $('chatFileInput').addEventListener('change', () => {
   pendingChatAttachment = file;
   const preview = $('chatAttachPreview');
   preview.style.display = 'flex';
-  preview.innerHTML = `📎 ${escapeHtml(file.name)} <button type="button" id="chatAttachRemoveBtn">✕</button>`;
+  preview.innerHTML = `<i data-lucide="paperclip"></i> ${escapeHtml(file.name)} <button type="button" id="chatAttachRemoveBtn"><i data-lucide="x"></i></button>`;
   $('chatAttachRemoveBtn').addEventListener('click', () => {
     pendingChatAttachment = null;
     $('chatFileInput').value = '';
@@ -1936,11 +2056,11 @@ $('newGroupCreateBtn').addEventListener('click', async () => {
 // QUEUE rendering
 // =====================================================================
 
-const TYPE_ICON = { timesheet: '🕒', progress: '📈', data: '📋' };
+const TYPE_ICON = { timesheet: '<i data-lucide="clock"></i>', progress: '<i data-lucide="trending-up"></i>', data: '<i data-lucide="clipboard-list"></i>' };
 const MODE_ICON = {
-  office: '🏢', site: '🏗️', driver: '🚗', wfh: '🏠', exhibition: '🎪',
-  inspection: '🔍', field_work: '🌾', other: '✨', sick_leave: '🤒',
-  holiday: '🏖️', emergency_leave: '🚨', leave: '📄'
+  office: '<i data-lucide="building-2"></i>', site: '<i data-lucide="hard-hat"></i>', driver: '<i data-lucide="car"></i>', wfh: '<i data-lucide="home"></i>', exhibition: '<i data-lucide="tent"></i>',
+  inspection: '<i data-lucide="search"></i>', field_work: '<i data-lucide="wheat"></i>', other: '<i data-lucide="sparkles"></i>', sick_leave: '<i data-lucide="thermometer"></i>',
+  holiday: '<i data-lucide="palmtree"></i>', emergency_leave: '<i data-lucide="siren"></i>', leave: '<i data-lucide="file-text"></i>'
 };
 
 function escapeHtml(s) {
@@ -2079,7 +2199,7 @@ function speakText(text) {
 function updateVoiceToggleUi() {
   const btn = $('aiVoiceToggle');
   if (!btn) return;
-  btn.textContent = voiceOutputEnabled ? '🔊' : '🔇';
+  btn.innerHTML = voiceOutputEnabled ? '<i data-lucide="volume-2"></i>' : '<i data-lucide="volume-x"></i>';
   btn.title = voiceOutputEnabled ? 'Voice replies on — tap to mute' : 'Voice replies off — tap to unmute';
 }
 if ($('aiVoiceToggle')) {
