@@ -756,13 +756,17 @@ const PANEL_IDS = {
   learning: ['learningOverlay', 'learningOverlayBackdrop'],
   health: ['healthOverlay', 'healthOverlayBackdrop'],
 };
-function openPanel(name) {
+function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
   if (!ids) return;
   $(ids[0]).classList.add('show');
   $(ids[1]).classList.add('show');
   if (name === 'projects') {
-    $('newProjectCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    // The Home screen's "Active Projects" tile is a pure browse/view entry
+    // point — no "New project" form there, even for admins. Creating
+    // projects still lives in Admin → Projects, which opens this same
+    // panel without the hideCreate flag.
+    $('newProjectCard').style.display = (currentProfile?.role === 'admin' && !opts.hideCreate) ? 'block' : 'none';
     renderProjectsList();
   }
   if (name === 'departments') {
@@ -777,7 +781,7 @@ function closePanel(name) {
   $(ids[1]).classList.remove('show');
 }
 document.querySelectorAll('[data-open]').forEach((btn) => {
-  btn.addEventListener('click', () => openPanel(btn.dataset.open));
+  btn.addEventListener('click', () => openPanel(btn.dataset.open, { hideCreate: btn.dataset.hideCreate === 'true' }));
 });
 document.querySelectorAll('[data-close]').forEach((btn) => {
   btn.addEventListener('click', () => closePanel(btn.dataset.close));
