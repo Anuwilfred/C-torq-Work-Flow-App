@@ -80,6 +80,18 @@ document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
 });
 
+// Home hub tiles (macOS-style icon grid) — same navigation as the pill
+// tabs above, just a second, more visual way to get to each section.
+document.querySelectorAll('.home-tile[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
+});
+// Chat has no tab/section of its own — it's the existing floating overlay —
+// so its home tile opens that overlay directly instead of switching tabs.
+$('homeChatTile')?.addEventListener('click', () => openChatOverlay());
+// Admin shortcut pinned to the top-right of the header, mirroring the Admin
+// pill tab — same destination, just reachable without opening the tab bar.
+$('adminHomeBtn')?.addEventListener('click', () => setActiveTab('admin'));
+
 function updateOnlineBadge() {
   const badge = $('statusBadge');
   const online = navigator.onLine;
@@ -415,6 +427,7 @@ async function enterApp() {
   $('appShell').style.display = 'block';
   $('accountEmail').textContent = user.email;
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+  $('adminHomeBtn').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
   $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
   $('aiOrb').style.display = 'flex';
   $('aiOrbLabel').style.display = 'block';

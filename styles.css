@@ -153,6 +153,74 @@ section.panel { display: none; }
 section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ---------- Home hub — macOS System Preferences style icon grid.
+   Stroke/glow colour matches the AI widget's teal (see .ai-orb-core). ---------- */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 26px 12px;
+  padding: 10px 6px 14px;
+}
+.home-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-tile-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 27px;
+  background: linear-gradient(160deg, rgba(76, 189, 185, 0.22), rgba(0, 112, 109, 0.12));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1.5px solid rgba(0, 161, 156, 0.5);
+  box-shadow: 0 6px 16px rgba(0, 161, 156, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+}
+.home-tile:hover .home-tile-icon,
+.home-tile:active .home-tile-icon {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 10px 22px rgba(0, 161, 156, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile-label {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ---------- Admin shortcut, pinned top-right of the header (same teal
+   stroke as the home tiles / AI widget) ---------- */
+.admin-corner-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  background: linear-gradient(160deg, rgba(76, 189, 185, 0.22), rgba(0, 112, 109, 0.12));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1.5px solid rgba(0, 161, 156, 0.5);
+  box-shadow: 0 4px 10px rgba(0, 161, 156, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  flex: none;
+  transition: transform 0.18s ease;
+}
+.admin-corner-btn:hover { transform: translateY(-1px); }
+
 .card {
   padding: 20px;
   margin-bottom: 16px;
@@ -352,23 +420,6 @@ button.ghost:hover { color: var(--text); }
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--glass-border);
 }
-
-/* ---------- Lucide icons ---------- */
-/* Every icon in the app is a <i data-lucide="name"> that Lucide swaps for an
-   inline <svg class="lucide">. Default size below matches roughly how big
-   the emoji it replaced used to render; a few contexts need their own size
-   since they don't all share the same font-size. */
-.lucide {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2;
-  vertical-align: -3px;
-  flex: none;
-}
-.type-icon .lucide, .mode-chip .emoji .lucide { width: 20px; height: 20px; }
-.admin-rail-btn .lucide { width: 22px; height: 22px; }
-.chip .lucide { width: 12px; height: 12px; }
-button .lucide { vertical-align: -2px; }
 
 .entry-body { flex: 1; min-width: 0; }
 .entry-meta { font-size: 12px; color: var(--text-muted); }

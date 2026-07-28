@@ -53,20 +53,50 @@
 <div id="appShell" style="display:none">
   <header>
     <h1>C-TORQ Work Flow</h1>
-    <span id="statusBadge">checking…</span>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span id="statusBadge">checking…</span>
+      <button type="button" id="adminHomeBtn" class="admin-corner-btn" style="display:none" title="Admin">⚙️</button>
+    </div>
   </header>
 
   <main>
     <nav class="tabs">
-      <button data-tab="entry" class="active">New Entry</button>
+      <button data-tab="home" class="active">Home</button>
+      <button data-tab="entry">New Entry</button>
       <button data-tab="queue">Queue</button>
       <button data-tab="reports">Reports</button>
       <button data-tab="admin" id="adminTabBtn" style="display:none">Admin</button>
       <button data-tab="settings">Settings</button>
     </nav>
 
+    <!-- HOME — macOS-style icon grid, one tile per section -->
+    <section id="home" class="panel active">
+      <div class="home-grid">
+        <button type="button" class="home-tile" data-tab="entry">
+          <span class="home-tile-icon">📝</span>
+          <span class="home-tile-label">New Entry</span>
+        </button>
+        <button type="button" class="home-tile" data-tab="queue">
+          <span class="home-tile-icon">📋</span>
+          <span class="home-tile-label">Queue</span>
+        </button>
+        <button type="button" class="home-tile" data-tab="reports">
+          <span class="home-tile-icon">📊</span>
+          <span class="home-tile-label">Reports</span>
+        </button>
+        <button type="button" class="home-tile" id="homeChatTile">
+          <span class="home-tile-icon">💬</span>
+          <span class="home-tile-label">Chat</span>
+        </button>
+        <button type="button" class="home-tile" data-tab="settings">
+          <span class="home-tile-icon">⚙️</span>
+          <span class="home-tile-label">Settings</span>
+        </button>
+      </div>
+    </section>
+
     <!-- NEW ENTRY -->
-    <section id="entry" class="panel active">
+    <section id="entry" class="panel">
       <div class="card glass" id="myAssignmentCard" style="display:none;">
         <strong style="font-size:14px;">Today's job</strong>
         <div id="myAssignmentArea" style="margin-top:8px;"></div>
@@ -363,14 +393,14 @@
 
 <div id="aiChatPanel" class="ai-chat-panel">
   <div class="ai-chat-header">
-    <span class="ai-chat-title">✨ AEON Ai</span>
+    <span class="ai-chat-title">AEON Ai</span>
     <div style="display:flex; align-items:center; gap:4px;">
       <button type="button" id="aiVoiceToggle" class="ghost" title="Voice replies on — tap to mute">🔊</button>
       <button type="button" id="aiCloseBtn" class="ghost">✕</button>
     </div>
   </div>
   <div id="aiMessages" class="ai-messages">
-    <div class="ai-msg assistant">Hi, I'm AEON Ai. Ask me things like "what did I work on 23/07/2026?" or "summarize my last report."</div>
+    <div class="ai-msg assistant">How can I help you? I can support you with things like your timesheets, leave, daily progress updates, and reports — or ask me about anything else you need, like what did I work on 23/07/2026 or summarize my last report.</div>
   </div>
   <div class="ai-input-row">
     <button type="button" id="aiMicBtn" class="ai-mic-btn" title="Speak your question">🎙️</button>
