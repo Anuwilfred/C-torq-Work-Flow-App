@@ -1077,6 +1077,138 @@ function renderProjectContributors(data) {
   }).join('');
 }
 
+// =====================================================================
+// PROJECT STAGE TIMELINE — the twin-wire glass ladder shown right under
+// the allocated/used hours rings on the Project Detail screen. Progress
+// is stored per (job_id, stage_key) in the project_stages table; only
+// admins can tap a circle to mark it done/undone, everyone else just
+// views it. Requires the project_stages table + RLS policies (see the SQL
+// migration) to already be set up in Supabase.
+// =====================================================================
+
+const STAGE_NODES = {
+  boq: { x: 150, y: 36, label: 'BOQ and IO confirmation', side: 'r' },
+  arch: { x: 150, y: 120, label: 'Architecture and description', side: 'r' },
+  drawing: { x: 150, y: 204, label: 'Drawing', side: 'r' },
+  programming: { x: 90, y: 300, label: 'Programming', side: 'b' },
+  electrical: { x: 210, y: 300, label: 'Electrical panel build', side: 'b' },
+  fat: { x: 150, y: 396, label: 'FAT with client', side: 'r' },
+  delivery: { x: 150, y: 480, label: 'Delivery and payment confirmation', side: 'r' },
+  commissioning: { x: 150, y: 564, label: 'Commissioning and SAT with client', side: 'r' },
+  closed: { x: 150, y: 648, label: 'Project closed', side: 'r' },
+};
+const STAGE_CONNS = [
+  ['boq', 'arch'], ['arch', 'drawing'], ['drawing', 'programming'], ['drawing', 'electrical'],
+  ['programming', 'fat'], ['electrical', 'fat'], ['fat', 'delivery'], ['delivery', 'commissioning'], ['commissioning', 'closed'],
+];
+const STAGE_KEYS = Object.keys(STAGE_NODES);
+
+async function fetchStageState(jobId) {
+  const state = {};
+  STAGE_KEYS.forEach((k) => { state[k] = false; });
+  const { data, error } = await sb.from('project_stages').select('stage_key, completed').eq('job_id', jobId);
+  if (!error) (data || []).forEach((r) => { state[r.stage_key] = !!r.completed; });
+  return state;
+}
+
+async function toggleStage(jobId, stageKey, wasDone) {
+  await sb.from('project_stages').upsert({
+    job_id: jobId,
+    stage_key: stageKey,
+    completed: !wasDone,
+    completed_at: !wasDone ? new Date().toISOString() : null,
+    completed_by: currentUser?.id || null,
+  }, { onConflict: 'job_id,stage_key' });
+}
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+
+function drawStageLadder(container, state, jobId, isAdmin) {
+  const R = 15, STUB = 13, GAP = 5, WIRE_OFFSET = 2.5;
+  container.innerHTML = '';
+  const svg = svgEl('svg', { width: 300, height: 680, viewBox: '0 0 300 680', style: 'overflow:visible' });
+  const defs = svgEl('defs', {});
+  const gGray = svgEl('radialGradient', { id: 'stageGGray', cx: '35%', cy: '30%', r: '75%' });
+  gGray.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#8a8985', 'stop-opacity': 0.55 }));
+  gGray.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#5f5e5a', 'stop-opacity': 0.4 }));
+  gGray.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#5f5e5a', 'stop-opacity': 0.25 }));
+  const gOrange = svgEl('radialGradient', { id: 'stageGOrange', cx: '35%', cy: '30%', r: '75%' });
+  gOrange.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#e08a5f', 'stop-opacity': 0.9 }));
+  gOrange.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#cc785c', 'stop-opacity': 0.6 }));
+  gOrange.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#cc785c', 'stop-opacity': 0.35 }));
+  defs.appendChild(gGray); defs.appendChild(gOrange);
+  svg.appendChild(defs);
+
+  STAGE_CONNS.forEach(([a, b], i) => {
+    const A = STAGE_NODES[a], B = STAGE_NODES[b];
+    const dx = B.x - A.x, dy = B.y - A.y, len = Math.sqrt(dx * dx + dy * dy), ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+    const pA = { x: A.x + ux * R, y: A.y + uy * R };
+    const stubAend = { x: A.x + ux * (R + STUB), y: A.y + uy * (R + STUB) };
+    const gapAend = { x: A.x + ux * (R + STUB + GAP), y: A.y + uy * (R + STUB + GAP) };
+    const pB = { x: B.x - ux * R, y: B.y - uy * R };
+    const stubBstart = { x: B.x - ux * (R + STUB), y: B.y - uy * (R + STUB) };
+    const gapBstart = { x: B.x - ux * (R + STUB + GAP), y: B.y - uy * (R + STUB + GAP) };
+    const done = state[a] && state[b];
+    const g = svgEl('g', { class: `stage-conn${done ? ' done' : ''}`, id: `stageConn${i}` });
+    const pts = [[pA, stubAend], [gapAend, gapBstart], [stubBstart, pB]];
+    [-1, 1].forEach((side) => {
+      const ox = nx * WIRE_OFFSET * side, oy = ny * WIRE_OFFSET * side;
+      pts.forEach(([p1, p2]) => {
+        g.appendChild(svgEl('line', { x1: p1.x + ox, y1: p1.y + oy, x2: p2.x + ox, y2: p2.y + oy }));
+      });
+    });
+    svg.appendChild(g);
+  });
+
+  STAGE_KEYS.forEach((id) => {
+    const n = STAGE_NODES[id];
+    const done = !!state[id];
+    const g = svgEl('g', { class: `stage-node${done ? ' done' : ''}` });
+    const c = svgEl('circle', { class: 'stage-body', cx: n.x, cy: n.y, r: R });
+    g.appendChild(c);
+    const sh = svgEl('ellipse', { class: 'stage-shine', cx: n.x - 5, cy: n.y - 6, rx: 5, ry: 3 });
+    g.appendChild(sh);
+    const t = svgEl('text', {
+      class: 'stage-lbl',
+      x: n.side === 'r' ? n.x + 22 : n.x,
+      y: n.side === 'r' ? n.y + 4 : n.y + 30,
+      'text-anchor': n.side === 'r' ? 'start' : 'middle',
+    });
+    t.textContent = n.label;
+    g.appendChild(t);
+    if (isAdmin) {
+      g.style.cursor = 'pointer';
+      g.addEventListener('click', async () => {
+        await toggleStage(jobId, id, done);
+        const fresh = await fetchStageState(jobId);
+        drawStageLadder(container, fresh, jobId, isAdmin);
+      });
+    }
+    svg.appendChild(g);
+  });
+
+  container.appendChild(svg);
+}
+
+async function renderProjectStages(jobId) {
+  const area = $('projectStageArea');
+  if (!area) return;
+  const isAdmin = currentProfile?.role === 'admin';
+  area.innerHTML = `
+    <div class="card glass">
+      <strong style="font-size:14px;">Project timeline</strong>
+      ${isAdmin ? '<p class="hint" style="margin-top:4px;">Tap a circle to mark that stage done.</p>' : ''}
+      <div id="stageSvgWrap" style="display:flex; justify-content:center; margin-top:12px;"></div>
+    </div>
+  `;
+  const state = await fetchStageState(jobId);
+  drawStageLadder($('stageSvgWrap'), state, jobId, isAdmin);
+}
+
 let currentProjectReport = null;
 
 async function openProjectDetail(jobId, name) {
@@ -1084,8 +1216,10 @@ async function openProjectDetail(jobId, name) {
   $('projectDetailTitle').textContent = name ? `${jobId} — ${name}` : jobId;
   $('projectRingsArea').innerHTML = '<div class="empty">Loading…</div>';
   $('projectContributors').innerHTML = '';
+  $('projectStageArea').innerHTML = '';
   openPanel('projectDetail');
   populateShareGroupPicker();
+  renderProjectStages(jobId);
   const { data: { session } } = await sb.auth.getSession();
   const { data, error } = await sb.functions.invoke('get-project-report', {
     body: { jobId },

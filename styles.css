@@ -221,6 +221,16 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 }
 .admin-corner-btn:hover { transform: translateY(-1px); }
 
+/* ---------- Project stage timeline (twin-wire glass ladder) ---------- */
+.stage-body { stroke-width: 1.5; transition: fill 0.3s ease, stroke 0.3s ease; }
+.stage-node .stage-body { fill: url(#stageGGray); stroke: rgba(95, 94, 90, 0.55); }
+.stage-node.done .stage-body { fill: url(#stageGOrange); stroke: var(--accent-2); }
+.stage-shine { fill: #fff; opacity: 0.35; pointer-events: none; }
+.stage-lbl { font-size: 11px; fill: var(--text-dim); }
+.stage-node.done .stage-lbl { fill: var(--accent); font-weight: 600; }
+.stage-conn line { stroke: rgba(95, 94, 90, 0.45); stroke-width: 2; transition: stroke 0.3s ease; }
+.stage-conn.done line { stroke: var(--accent); }
+
 .card {
   padding: 20px;
   margin-bottom: 16px;
