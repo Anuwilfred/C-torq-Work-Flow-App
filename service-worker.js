@@ -1,23 +1,25 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.24';
+const CACHE_NAME = 'ctorq-workflow-v3.25';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 
-// RELIABILITY FIX: this used to be one flat ASSETS list cached with
-// cache.addAll(), which is all-or-nothing — if even ONE file failed to
-// load during install (a slow/unreachable CDN request, a brief network
-// blip, anything), the whole install() step rejected and the new service
-// worker was thrown away. The device would then keep running whatever
-// version it had before (or nothing at all), which is exactly why the app
-// felt unpredictable: it opened fine on some devices/sessions and not
-// others, purely depending on whether every single asset happened to
-// succeed on that one attempt. Below, every file is cached individually so
-// one failure can't take down the rest.
+// RELIABILITY FIX #2: the previous version raced every app-shell request
+// against a 4-second timeout and fell back to the cached copy if it lost
+// that race — on an ordinary "just a bit slow" mobile connection (not
+// actually offline), that timeout fires constantly, silently serving an
+// old/possibly-mismatched cached file even though the real, current file
+// was still on its way over the network. That's almost certainly what was
+// causing "click the email link = works, plain refresh = blank": the
+// email link often opens a fresh context, while a refresh in the same tab
+// kept getting raced against that timeout and losing.
+//
+// Below, there is no artificial timeout at all. The app shell (HTML/JS/CSS)
+// always tries the real network first, however long that takes, and only
+// falls back to the cache if the request genuinely fails (actually
+// offline). This matches how an ordinary website behaves — a slow load
+// instead of a broken one — which is what "reliable" actually means here.
 
-// The app shell — HTML/JS/CSS that actually changes when we deploy updates.
 const SHELL_ASSETS = ['./', './index.html', './styles.css', './app.js', './config.js'];
 
-// Static/rarely-changing files — icons, the manifest, and the Supabase SDK
-// (pinned to an exact version number in its URL, so that URL never changes).
 const STATIC_ASSETS = [
   './manifest.json',
   './icon.svg',
@@ -26,8 +28,6 @@ const STATIC_ASSETS = [
   './notify.mp3',
   SUPABASE_SDK_URL,
 ];
-
-const NETWORK_TIMEOUT_MS = 4000;
 
 async function cacheEach(cache, urls) {
   await Promise.allSettled(
@@ -53,16 +53,6 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-function withTimeout(promise, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('network timeout')), ms);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); }
-    );
-  });
-}
-
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const reqUrl = event.request.url;
@@ -86,12 +76,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App shell (HTML/JS/CSS): network-first with a short timeout, so anyone
-  // online always gets the latest deployed version immediately instead of a
-  // possibly-stale or broken cached copy. Falls back to the cached copy only
-  // if the network is slow/unreachable, so the app still opens offline.
+  // App shell (HTML/JS/CSS): always network first, no timeout race. Only
+  // falls back to the cached copy if the fetch genuinely fails (no
+  // connection at all), so a refresh always shows the latest deployed
+  // version whenever there's any network at all, slow or not.
   event.respondWith(
-    withTimeout(fetch(event.request), NETWORK_TIMEOUT_MS)
+    fetch(event.request)
       .then((res) => {
         const clone = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
