@@ -418,8 +418,26 @@ async function loadProfile(user) {
 }
 
 async function enterApp() {
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return;
+  let { data: { user } } = await sb.auth.getUser();
+  if (!user) {
+    // The stored session looked valid locally but the server couldn't
+    // confirm it (expired token, brief network hiccup, etc.). Try once
+    // more after a short pause — most of these are transient — before
+    // giving up. This used to just silently return here, which left BOTH
+    // screens hidden with nothing shown at all: a genuinely blank page
+    // with no error, since nothing actually crashed.
+    await new Promise((r) => setTimeout(r, 1200));
+    ({ data: { user } } = await sb.auth.getUser());
+  }
+  if (!user) {
+    currentUser = null;
+    currentProfile = null;
+    $('appShell').style.display = 'none';
+    $('authScreen').style.display = 'flex';
+    showAuthView('loginView');
+    $('authMsg').textContent = 'Your session expired — please log in again.';
+    return;
+  }
   currentUser = user;
   currentProfile = await loadProfile(user);
 
