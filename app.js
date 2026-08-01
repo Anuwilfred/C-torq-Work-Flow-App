@@ -447,6 +447,7 @@ async function loadProfile(user) {
 }
 
 async function enterApp() {
+ try {
   let result = await withTimeout(sb.auth.getUser(), 6000);
   let user = result.__timedOut ? null : result.data.user;
   if (!user) {
@@ -495,6 +496,20 @@ async function enterApp() {
 
   renderQueue();
   syncQueue();
+ } catch (err) {
+  // Anything unexpected here (a Supabase error, a network hiccup loading
+  // the profile, anything at all) used to leave the page permanently
+  // blank, since nothing ever caught it. Now it always falls back to a
+  // normal, usable login screen instead.
+  console.warn('[Auth] enterApp failed, falling back to login:', err);
+  clearStoredSession();
+  currentUser = null;
+  currentProfile = null;
+  $('appShell').style.display = 'none';
+  $('authScreen').style.display = 'flex';
+  showAuthView('loginView');
+  $('authMsg').textContent = 'Something went wrong loading your session — please log in again.';
+ }
 }
 
 // Shows the signed-in person's own Job Allocation for today, right on the
@@ -566,7 +581,15 @@ sb.auth.onAuthStateChange(async (event, session) => {
   }
 });
 
+// Show the login screen immediately, synchronously, before any async auth
+// check even begins. This guarantees the page can never sit fully blank —
+// worst case, someone briefly sees the login form for a split second before
+// being signed straight in, instead of any future hiccup in the checks
+// below leaving absolutely nothing on screen.
+$('authScreen').style.display = 'flex';
+
 (async () => {
+ try {
   const result = await withTimeout(sb.auth.getSession(), 6000);
   if (result.__timedOut) {
     // getSession() never came back at all — almost certainly a stuck/
@@ -591,6 +614,18 @@ sb.auth.onAuthStateChange(async (event, session) => {
   } else {
     $('authScreen').style.display = 'flex';
   }
+ } catch (err) {
+  // Whatever went wrong (network hiccup, a Supabase error, a corrupted
+  // stored session, anything) — never let it leave the screen blank.
+  // Fall back to a normal, usable login screen every time.
+  console.warn('[Auth] startup check failed, falling back to login:', err);
+  clearStoredSession();
+  currentUser = null;
+  currentProfile = null;
+  $('appShell').style.display = 'none';
+  $('authScreen').style.display = 'flex';
+  showAuthView('loginView');
+ }
 })();
 
 // =====================================================================
