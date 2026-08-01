@@ -448,24 +448,31 @@ async function loadProfile(user) {
 
 async function enterApp() {
  try {
-  let result = await withTimeout(sb.auth.getUser(), 6000);
+  let result = await withTimeout(sb.auth.getUser(), 7000);
   let user = result.__timedOut ? null : result.data.user;
   if (!user) {
-    // Either the check timed out, or the stored session looked valid
-    // locally but the server couldn't confirm it (expired token, brief
-    // network hiccup, etc.). Try once more after a short pause — most of
-    // these are transient — before giving up. This used to just silently
-    // return here, which left BOTH screens hidden with nothing shown at
-    // all: a genuinely blank page with no error, since nothing actually
-    // crashed.
-    await new Promise((r) => setTimeout(r, 1200));
-    result = await withTimeout(sb.auth.getUser(), 6000);
+    // Either the check timed out (likely a slow-to-release internal lock
+    // on a fast refresh, not an actual problem), or the stored session
+    // looked valid locally but the server couldn't confirm it (expired
+    // token, brief network hiccup, etc.). Try once more after a short
+    // pause — most of these are transient — before giving up. This used
+    // to just silently return here, which left BOTH screens hidden with
+    // nothing shown at all: a genuinely blank page with no error, since
+    // nothing actually crashed.
+    await new Promise((r) => setTimeout(r, 1500));
+    result = await withTimeout(sb.auth.getUser(), 7000);
     user = result.__timedOut ? null : result.data.user;
   }
   if (!user) {
     currentUser = null;
     currentProfile = null;
-    clearStoredSession();
+    // Only wipe the stored session if the server actually, confirmedly
+    // said there's no valid user (result.error / null user came back
+    // cleanly) — not if we merely timed out both times. A timeout just
+    // means the check was slow, not that the session is bad; clearing it
+    // in that case would force a real re-login even though the person was
+    // probably fine and the next attempt would have worked.
+    if (!result.__timedOut) clearStoredSession();
     $('appShell').style.display = 'none';
     $('authScreen').style.display = 'flex';
     showAuthView('loginView');
@@ -590,12 +597,25 @@ $('authScreen').style.display = 'flex';
 
 (async () => {
  try {
-  const result = await withTimeout(sb.auth.getSession(), 6000);
+  let result = await withTimeout(sb.auth.getSession(), 7000);
   if (result.__timedOut) {
-    // getSession() never came back at all — almost certainly a stuck/
-    // corrupted stored session. Clear it so the next load isn't stuck the
-    // same way, and show the login screen instead of staying blank forever.
-    clearStoredSession();
+    // This is the "sometimes goes straight in, sometimes doesn't, but a
+    // brand-new tab always works" case: Supabase's client uses an internal
+    // lock to stop two tabs/reloads refreshing the same token at once, and
+    // a fast refresh (as opposed to opening a fresh tab) can briefly land
+    // on that lock while the previous page's copy is still releasing it.
+    // That's slow, not broken — so retry once after a short pause instead
+    // of immediately giving up and wiping out an otherwise perfectly good
+    // session.
+    await new Promise((r) => setTimeout(r, 1500));
+    result = await withTimeout(sb.auth.getSession(), 7000);
+  }
+  if (result.__timedOut) {
+    // Still nothing after the retry. Show the login screen, but do NOT
+    // clear the stored session here — we don't actually know it's invalid,
+    // just that checking it is taking unusually long. Wiping it now would
+    // force a real login even though the session might be perfectly fine a
+    // few seconds later.
     $('authScreen').style.display = 'flex';
     return;
   }
