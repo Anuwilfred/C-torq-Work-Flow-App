@@ -108,6 +108,39 @@
           <span class="home-tile-label">Settings</span>
         </button>
       </div>
+
+      <!-- More tools — same tile style as above, was floating on the right
+           edge before; now it just lives lower on the Home page. -->
+      <div id="adminRail" class="home-grid" style="display:none; margin-top:8px;">
+        <button type="button" class="home-tile" data-open="projects">
+          <span class="home-tile-icon home-tile-icon-projects">📁</span>
+          <span class="home-tile-label">Projects</span>
+        </button>
+        <button type="button" class="home-tile" data-open="departments">
+          <span class="home-tile-icon home-tile-icon-departments">🏢</span>
+          <span class="home-tile-label">Departments</span>
+        </button>
+        <button type="button" class="home-tile" data-open="learning">
+          <span class="home-tile-icon home-tile-icon-learning">🎓</span>
+          <span class="home-tile-label">Learning</span>
+        </button>
+        <button type="button" class="home-tile" data-open="health">
+          <span class="home-tile-icon home-tile-icon-health">💪</span>
+          <span class="home-tile-label">Health</span>
+        </button>
+        <button type="button" class="home-tile" data-open="clients">
+          <span class="home-tile-icon home-tile-icon-clients">🤝</span>
+          <span class="home-tile-label">Clients</span>
+        </button>
+        <button type="button" class="home-tile" data-open="quotations">
+          <span class="home-tile-icon home-tile-icon-quotations">🧾</span>
+          <span class="home-tile-label">Quotations</span>
+        </button>
+        <button type="button" class="home-tile" data-open="tank">
+          <span class="home-tile-icon home-tile-icon-tank">🛢️</span>
+          <span class="home-tile-label">Project Tank</span>
+        </button>
+      </div>
     </section>
 
     <!-- NEW ENTRY -->
@@ -468,14 +501,6 @@
   </div>
 </div>
 
-<!-- ADMIN RIGHT-SIDE RAIL — desktop only, hidden on phones (see #adminMoreRow in the Admin tab) -->
-<div id="adminRail" class="admin-rail" style="display:none">
-  <button type="button" class="admin-rail-btn" data-open="projects" title="Projects">📁<span>Projects</span></button>
-  <button type="button" class="admin-rail-btn" data-open="departments" title="Departments">🏢<span>Departments</span></button>
-  <button type="button" class="admin-rail-btn" data-open="learning" title="Learning">🎓<span>Learning</span></button>
-  <button type="button" class="admin-rail-btn" data-open="health" title="Health Challenges">💪<span>Health</span></button>
-</div>
-
 <!-- PROJECTS OVERLAY -->
 <div id="projectsOverlayBackdrop" class="panel-overlay-backdrop"></div>
 <div id="projectsOverlay" class="panel-overlay">
@@ -520,6 +545,29 @@
     <div class="panel-body">
       <div id="projectRingsArea"></div>
       <div id="projectStageArea" style="margin-top:16px;"></div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Bill of Quantities</strong>
+        <div id="boqListArea" style="margin-top:12px;"></div>
+        <div id="boqTotalRow" style="margin-top:8px;"></div>
+        <div id="newBoqItemCard" style="display:none; margin-top:14px;">
+          <div class="section-divider"></div>
+          <label for="boqItemDescription">Description</label>
+          <input id="boqItemDescription" type="text" placeholder="e.g. Cable tray, galvanized" />
+          <div class="row-2" style="margin-top:6px;">
+            <div>
+              <label for="boqItemUnit">Unit</label>
+              <input id="boqItemUnit" type="text" placeholder="e.g. m, nos, lot" />
+            </div>
+            <div>
+              <label for="boqItemQuantity">Quantity</label>
+              <input id="boqItemQuantity" type="number" min="0" step="0.01" placeholder="0" />
+            </div>
+          </div>
+          <label for="boqItemRate" style="margin-top:6px;">Unit rate</label>
+          <input id="boqItemRate" type="number" min="0" step="0.01" placeholder="0" />
+          <button type="button" id="addBoqItemBtn" class="primary" style="margin-top:12px;">Add item</button>
+        </div>
+      </div>
       <div class="card glass" style="margin-top:16px;">
         <strong style="font-size:14px;">Who worked on this</strong>
         <div id="projectContributors" style="margin-top:12px;"></div>
@@ -568,6 +616,134 @@
         <strong style="font-size:14px;">People in this department</strong>
         <p class="hint" id="departmentDetailCount" style="margin-top:4px;"></p>
         <div id="departmentMembersArea" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENTS OVERLAY -->
+<div id="clientsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="clientsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Clients</strong>
+      <button type="button" class="ghost" data-close="clients">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newClientCard" style="display:none;">
+        <strong style="font-size:14px;">Add client</strong>
+        <label for="newClientName">Company / client name</label>
+        <input id="newClientName" type="text" placeholder="e.g. Falcon Towers LLC" />
+        <label for="newClientContact">Contact person (optional)</label>
+        <input id="newClientContact" type="text" placeholder="e.g. Ahmed Rahman" />
+        <div class="row-2" style="margin-top:6px;">
+          <div>
+            <label for="newClientEmail">Email</label>
+            <input id="newClientEmail" type="email" placeholder="name@example.com" />
+          </div>
+          <div>
+            <label for="newClientPhone">Phone</label>
+            <input id="newClientPhone" type="text" placeholder="+971…" />
+          </div>
+        </div>
+        <label for="newClientNotes">Notes (optional)</label>
+        <textarea id="newClientNotes" placeholder="Anything worth remembering about this client"></textarea>
+        <button id="createClientBtn" class="primary" style="margin-top:12px;">Add client</button>
+      </div>
+      <div id="clientsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- QUOTATIONS OVERLAY -->
+<div id="quotationsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="quotationsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Quotations</strong>
+      <button type="button" class="ghost" data-close="quotations">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newQuotationCard" style="display:none;">
+        <strong style="font-size:14px;">New quotation</strong>
+        <label for="newQuoteNumber">Quote number</label>
+        <input id="newQuoteNumber" type="text" placeholder="e.g. Q-1042" />
+        <label for="newQuoteClient">Client</label>
+        <select id="newQuoteClient"><option value="">Select a client</option></select>
+        <label for="newQuoteJobId">Project / Job ID (optional)</label>
+        <select id="newQuoteJobId"><option value="">No project linked</option></select>
+        <label for="newQuoteTitle">Title</label>
+        <input id="newQuoteTitle" type="text" placeholder="e.g. Fire alarm system upgrade" />
+        <button id="createQuotationBtn" class="primary" style="margin-top:12px;">Create quotation</button>
+      </div>
+      <div id="quotationsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- QUOTATION DETAIL OVERLAY -->
+<div id="quotationDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="quotationDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="quotationDetailBackBtn">‹ Back</button>
+      <strong id="quotationDetailTitle">Quotation</strong>
+      <button type="button" class="ghost" data-close="quotationDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div id="quotationDetailClient" style="font-size:14px; font-weight:600;">—</div>
+            <div id="quotationDetailMeta" class="hint" style="margin-top:2px;">—</div>
+          </div>
+          <div id="quotationStatusBadge"></div>
+        </div>
+        <div class="row-2" id="quotationStatusButtons" style="margin-top:14px; display:none;">
+          <button type="button" class="secondary" data-quote-status="sent">Mark sent</button>
+          <button type="button" class="secondary" data-quote-status="accepted">Mark accepted</button>
+        </div>
+        <button type="button" class="secondary" id="quotationRejectBtn" style="width:100%; margin-top:8px; display:none;">Mark rejected</button>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Line items</strong>
+        <div id="quotationItemsArea" style="margin-top:12px;"></div>
+        <div id="quotationTotalRow" style="margin-top:8px;"></div>
+        <div id="newQuoteItemCard" style="display:none; margin-top:14px;">
+          <div class="section-divider"></div>
+          <label for="quoteItemDescription">Description</label>
+          <input id="quoteItemDescription" type="text" placeholder="e.g. Supply and install smoke detectors" />
+          <div class="row-2" style="margin-top:6px;">
+            <div>
+              <label for="quoteItemQuantity">Quantity</label>
+              <input id="quoteItemQuantity" type="number" min="0" step="0.01" placeholder="1" />
+            </div>
+            <div>
+              <label for="quoteItemUnitPrice">Unit price</label>
+              <input id="quoteItemUnitPrice" type="number" min="0" step="0.01" placeholder="0" />
+            </div>
+          </div>
+          <button type="button" id="addQuoteItemBtn" class="primary" style="margin-top:12px;">Add item</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROJECT TANK OVERLAY -->
+<div id="tankOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="tankOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>CTQ Project Tank</strong>
+      <button type="button" class="ghost" data-close="tank">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" style="text-align:center;">
+        <p class="hint" style="margin-bottom:10px;">How much of the next 12 months is already covered by lined-up work.</p>
+        <div id="tankSvgArea"></div>
+        <div id="tankAlertBanner" style="display:none;"></div>
+        <div id="tankStatsArea" style="margin-top:14px; text-align:left;"></div>
       </div>
     </div>
   </div>

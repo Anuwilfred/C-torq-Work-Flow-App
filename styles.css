@@ -969,38 +969,80 @@ button.ghost:hover { color: var(--text); }
   .panel-shell { border-radius: 0; }
 }
 
-/* Right-side admin quick-launch rail (wide screens only) */
-.admin-rail {
-  position: fixed;
-  right: 22px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 45;
-  flex-direction: column;
-  gap: 14px;
+/* More-tools tiles on the Home page — same shape/size as the top tiles,
+   each with its own tint so they read as distinct at a glance instead of
+   all matching the default teal. */
+.home-tile-icon-projects {
+  background: linear-gradient(160deg, rgba(224, 138, 95, 0.28), rgba(204, 120, 92, 0.14));
+  border-color: rgba(224, 138, 95, 0.55);
+  box-shadow: 0 6px 16px rgba(224, 138, 95, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
-.admin-rail-btn {
+.home-tile-icon-departments {
+  background: linear-gradient(160deg, rgba(94, 150, 224, 0.28), rgba(58, 105, 176, 0.14));
+  border-color: rgba(94, 150, 224, 0.55);
+  box-shadow: 0 6px 16px rgba(94, 150, 224, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile-icon-learning {
+  background: linear-gradient(160deg, rgba(168, 120, 224, 0.28), rgba(124, 82, 176, 0.14));
+  border-color: rgba(168, 120, 224, 0.55);
+  box-shadow: 0 6px 16px rgba(168, 120, 224, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile-icon-health {
+  background: linear-gradient(160deg, rgba(224, 110, 130, 0.28), rgba(176, 68, 88, 0.14));
+  border-color: rgba(224, 110, 130, 0.55);
+  box-shadow: 0 6px 16px rgba(224, 110, 130, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile:hover .home-tile-icon-projects,
+.home-tile:active .home-tile-icon-projects { box-shadow: 0 10px 22px rgba(224, 138, 95, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile:hover .home-tile-icon-departments,
+.home-tile:active .home-tile-icon-departments { box-shadow: 0 10px 22px rgba(94, 150, 224, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile:hover .home-tile-icon-learning,
+.home-tile:active .home-tile-icon-learning { box-shadow: 0 10px 22px rgba(168, 120, 224, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile:hover .home-tile-icon-health,
+.home-tile:active .home-tile-icon-health { box-shadow: 0 10px 22px rgba(224, 110, 130, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile-icon-clients {
+  background: linear-gradient(160deg, rgba(120, 200, 140, 0.28), rgba(70, 150, 96, 0.14));
+  border-color: rgba(120, 200, 140, 0.55);
+  box-shadow: 0 6px 16px rgba(120, 200, 140, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile-icon-quotations {
+  background: linear-gradient(160deg, rgba(224, 190, 90, 0.28), rgba(176, 140, 50, 0.14));
+  border-color: rgba(224, 190, 90, 0.55);
+  box-shadow: 0 6px 16px rgba(224, 190, 90, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile:hover .home-tile-icon-clients,
+.home-tile:active .home-tile-icon-clients { box-shadow: 0 10px 22px rgba(120, 200, 140, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile:hover .home-tile-icon-quotations,
+.home-tile:active .home-tile-icon-quotations { box-shadow: 0 10px 22px rgba(224, 190, 90, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile-icon-tank {
+  background: linear-gradient(160deg, rgba(90, 170, 224, 0.28), rgba(50, 120, 176, 0.14));
+  border-color: rgba(90, 170, 224, 0.55);
+  box-shadow: 0 6px 16px rgba(90, 170, 224, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile:hover .home-tile-icon-tank,
+.home-tile:active .home-tile-icon-tank { box-shadow: 0 10px 22px rgba(90, 170, 224, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+
+/* Project Tank stat rows + low-level alert banner */
+.tank-stat-row {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 64px;
-  padding: 12px 6px;
-  border-radius: 18px;
-  background: var(--glass);
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  border: 1px solid var(--glass-border);
-  color: var(--text);
-  font-size: 10.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--glass-border);
+  font-size: 13.5px;
 }
-.admin-rail-btn span { font-size: 10px; }
-.admin-rail-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
-@media (max-width: 900px) {
-  .admin-rail { display: none !important; }
+.tank-stat-row:last-child { border-bottom: none; }
+.tank-stat-label { color: var(--text-muted); }
+.tank-stat-value { font-weight: 600; }
+.tank-alert-banner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(242, 125, 112, 0.15);
+  border: 1px solid rgba(242, 125, 112, 0.4);
+  color: var(--err);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
 }
 
 .admin-more-row { display: none; flex-wrap: wrap; }
