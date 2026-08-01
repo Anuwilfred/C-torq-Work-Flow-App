@@ -16,7 +16,15 @@ const sb = window.supabase.createClient(
 // brand-new, healthy session and never hits this path).
 // withTimeout forces every one of those calls to give up after a few
 // seconds so the app always ends up showing something instead of hanging.
-function withTimeout(promise, ms) {
+// NOTE: named raceTimeout (not withTimeout) on purpose — this file already
+// had a differently-behaved withTimeout() further down (used by chat
+// send/upload) that REJECTS with a labeled Error on timeout. Two same-named
+// function declarations in one file silently collide (the later one wins
+// everywhere), which — before this rename — meant every call below was
+// unknowingly using that other, reject-based version instead of this one,
+// so the __timedOut checks never worked. Keeping these as two clearly
+// distinct helpers avoids that trap for good.
+function raceTimeout(promise, ms) {
   return Promise.race([
     promise,
     new Promise((resolve) => setTimeout(() => resolve({ __timedOut: true }), ms)),
@@ -448,7 +456,7 @@ async function loadProfile(user) {
 
 async function enterApp() {
  try {
-  let result = await withTimeout(sb.auth.getUser(), 7000);
+  let result = await raceTimeout(sb.auth.getUser(), 7000);
   let user = result.__timedOut ? null : result.data.user;
   if (!user) {
     // Either the check timed out (likely a slow-to-release internal lock
@@ -460,7 +468,7 @@ async function enterApp() {
     // nothing shown at all: a genuinely blank page with no error, since
     // nothing actually crashed.
     await new Promise((r) => setTimeout(r, 1500));
-    result = await withTimeout(sb.auth.getUser(), 7000);
+    result = await raceTimeout(sb.auth.getUser(), 7000);
     user = result.__timedOut ? null : result.data.user;
   }
   if (!user) {
@@ -498,7 +506,7 @@ async function enterApp() {
   renderMyTodayAssignment();
   // Projects / Learning / Health Challenges are visible to everyone now —
   // only creating/deleting projects (and setting positions) stays admin-only.
-  $('adminRail').style.display = 'flex';
+  $('adminRail').style.display = 'grid';
   $('adminMoreRow').style.display = 'flex';
 
   renderQueue();
@@ -597,7 +605,7 @@ $('authScreen').style.display = 'flex';
 
 (async () => {
  try {
-  let result = await withTimeout(sb.auth.getSession(), 7000);
+  let result = await raceTimeout(sb.auth.getSession(), 7000);
   if (result.__timedOut) {
     // This is the "sometimes goes straight in, sometimes doesn't, but a
     // brand-new tab always works" case: Supabase's client uses an internal
@@ -608,7 +616,7 @@ $('authScreen').style.display = 'flex';
     // of immediately giving up and wiping out an otherwise perfectly good
     // session.
     await new Promise((r) => setTimeout(r, 1500));
-    result = await withTimeout(sb.auth.getSession(), 7000);
+    result = await raceTimeout(sb.auth.getSession(), 7000);
   }
   if (result.__timedOut) {
     // Still nothing after the retry. Show the login screen, but do NOT
@@ -870,6 +878,10 @@ const PANEL_IDS = {
   departmentDetail: ['departmentDetailOverlay', 'departmentDetailOverlayBackdrop'],
   learning: ['learningOverlay', 'learningOverlayBackdrop'],
   health: ['healthOverlay', 'healthOverlayBackdrop'],
+  clients: ['clientsOverlay', 'clientsOverlayBackdrop'],
+  quotations: ['quotationsOverlay', 'quotationsOverlayBackdrop'],
+  quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
+  tank: ['tankOverlay', 'tankOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -887,6 +899,19 @@ function openPanel(name, opts = {}) {
   if (name === 'departments') {
     $('newDepartmentCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
     renderDepartmentsList();
+  }
+  if (name === 'clients') {
+    $('newClientCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    renderClientsList();
+  }
+  if (name === 'quotations') {
+    $('newQuotationCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    populateQuoteClientDropdown();
+    populateQuoteJobDropdown();
+    renderQuotationsList();
+  }
+  if (name === 'tank') {
+    renderTank();
   }
 }
 function closePanel(name) {
@@ -910,6 +935,9 @@ if ($('projectDetailBackBtn')) {
 }
 if ($('departmentDetailBackBtn')) {
   $('departmentDetailBackBtn').addEventListener('click', () => { closePanel('departmentDetail'); openPanel('departments'); });
+}
+if ($('quotationDetailBackBtn')) {
+  $('quotationDetailBackBtn').addEventListener('click', () => { closePanel('quotationDetail'); openPanel('quotations'); });
 }
 
 // =====================================================================
@@ -1032,6 +1060,348 @@ async function openDepartmentDetail(deptId, deptName) {
       </div>
     `;
   }).join('');
+}
+
+// =====================================================================
+// CLIENTS — a simple directory. Anyone signed in can browse it; only
+// admins can add/remove entries. Same pattern as Departments above.
+// =====================================================================
+
+let clientsCache = []; // [{id, name}] — reused by the quotation client picker
+
+async function fetchClients() {
+  try {
+    const { data, error } = await sb.from('clients').select('*').order('name', { ascending: true });
+    if (error) { console.error('fetchClients failed:', error); return { rows: [], error }; }
+    return { rows: data || [], error: null };
+  } catch (err) {
+    console.error('fetchClients threw:', err);
+    return { rows: [], error: err };
+  }
+}
+
+async function renderClientsList(isRetry = false) {
+  const wrap = $('clientsListArea');
+  if (!wrap) return;
+  if (!isRetry) wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { rows, error } = await fetchClients();
+  clientsCache = rows;
+  if (error) {
+    if (!isRetry) { await new Promise((r) => setTimeout(r, 400)); return renderClientsList(true); }
+    wrap.innerHTML = `<div class="empty">Couldn't load clients: ${escapeHtml(error.message || String(error))}</div>`;
+    return;
+  }
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No clients yet.</div>'; return; }
+  const isAdmin = currentProfile?.role === 'admin';
+  wrap.innerHTML = rows.map((c) => `
+    <div class="entry">
+      <span class="type-icon">🤝</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(c.name)}</div>
+        <div class="entry-meta">${[c.contact_name, c.email, c.phone].filter(Boolean).map(escapeHtml).join(' · ') || 'No contact details yet'}</div>
+      </div>
+      ${isAdmin ? `<button type="button" class="ghost" data-delete-client="${escapeHtml(c.id)}">✕</button>` : ''}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-delete-client]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await sb.from('clients').delete().eq('id', btn.dataset.deleteClient);
+      renderClientsList();
+    });
+  });
+}
+
+if ($('createClientBtn')) {
+  $('createClientBtn').addEventListener('click', async () => {
+    const name = $('newClientName').value.trim();
+    if (!name) { showToast('Enter a client name.'); return; }
+    const { error } = await sb.from('clients').insert({
+      name,
+      contact_name: $('newClientContact').value.trim() || null,
+      email: $('newClientEmail').value.trim() || null,
+      phone: $('newClientPhone').value.trim() || null,
+      notes: $('newClientNotes').value.trim() || null,
+      created_by: currentUser.id,
+    });
+    if (error) { showToast(`Couldn't add client: ${error.message}`); return; }
+    ['newClientName', 'newClientContact', 'newClientEmail', 'newClientPhone', 'newClientNotes'].forEach((id) => { $(id).value = ''; });
+    renderClientsList();
+    showToast('Client added.');
+  });
+}
+
+// =====================================================================
+// QUOTATIONS — draft/sent/accepted/rejected, each with its own line items.
+// Anyone signed in can browse; only admins can create, add items, or move
+// the status forward.
+// =====================================================================
+
+async function populateQuoteClientDropdown() {
+  const select = $('newQuoteClient');
+  if (!select) return;
+  const { rows } = await fetchClients();
+  clientsCache = rows;
+  select.innerHTML = '<option value="">Select a client</option>' +
+    rows.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+}
+
+async function populateQuoteJobDropdown() {
+  const select = $('newQuoteJobId');
+  if (!select) return;
+  const { data, error } = await sb.from('projects').select('job_id, name').eq('status', 'active').order('job_id');
+  const rows = error ? [] : (data || []);
+  select.innerHTML = '<option value="">No project linked</option>' +
+    rows.map((r) => `<option value="${escapeHtml(r.job_id)}">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</option>`).join('');
+}
+
+const QUOTE_STATUS_LABEL = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', rejected: 'Rejected' };
+const QUOTE_STATUS_CLASS = { draft: 'pending', sent: 'pending', accepted: 'synced', rejected: 'error' };
+
+async function fetchQuotations() {
+  try {
+    const { data, error } = await sb
+      .from('quotations')
+      .select('id, quote_number, title, status, job_id, issue_date, client_id, clients(name)')
+      .order('created_at', { ascending: false });
+    if (error) { console.error('fetchQuotations failed:', error); return { rows: [], error }; }
+    return { rows: data || [], error: null };
+  } catch (err) {
+    console.error('fetchQuotations threw:', err);
+    return { rows: [], error: err };
+  }
+}
+
+async function renderQuotationsList(isRetry = false) {
+  const wrap = $('quotationsListArea');
+  if (!wrap) return;
+  if (!isRetry) wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { rows, error } = await fetchQuotations();
+  if (error) {
+    if (!isRetry) { await new Promise((r) => setTimeout(r, 400)); return renderQuotationsList(true); }
+    wrap.innerHTML = `<div class="empty">Couldn't load quotations: ${escapeHtml(error.message || String(error))}</div>`;
+    return;
+  }
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No quotations yet.</div>'; return; }
+  wrap.innerHTML = rows.map((q) => `
+    <div class="entry" data-quote-row="${escapeHtml(q.id)}" data-quote-title="${escapeHtml(q.title || q.quote_number)}" style="cursor:pointer;">
+      <span class="type-icon">🧾</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(q.quote_number)}${q.title ? ' — ' + escapeHtml(q.title) : ''}</div>
+        <div class="entry-meta">${escapeHtml(q.clients?.name || 'No client set')}${q.job_id ? ' · ' + escapeHtml(q.job_id) : ''}</div>
+      </div>
+      <span class="chip ${QUOTE_STATUS_CLASS[q.status] || ''}">${QUOTE_STATUS_LABEL[q.status] || q.status}</span>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-quote-row]').forEach((row) => {
+    row.addEventListener('click', () => openQuotationDetail(row.dataset.quoteRow));
+  });
+}
+
+if ($('createQuotationBtn')) {
+  $('createQuotationBtn').addEventListener('click', async () => {
+    const quoteNumber = $('newQuoteNumber').value.trim();
+    const clientId = $('newQuoteClient').value;
+    if (!quoteNumber) { showToast('Enter a quote number.'); return; }
+    if (!clientId) { showToast('Select a client.'); return; }
+    const { error } = await sb.from('quotations').insert({
+      quote_number: quoteNumber,
+      client_id: clientId,
+      job_id: $('newQuoteJobId').value || null,
+      title: $('newQuoteTitle').value.trim() || null,
+      created_by: currentUser.id,
+    });
+    if (error) { showToast(`Couldn't create quotation: ${error.message}`); return; }
+    ['newQuoteNumber', 'newQuoteTitle'].forEach((id) => { $(id).value = ''; });
+    renderQuotationsList();
+    showToast('Quotation created.');
+  });
+}
+
+let currentQuotationId = null;
+
+async function openQuotationDetail(quotationId) {
+  currentQuotationId = quotationId;
+  $('quotationDetailTitle').textContent = 'Quotation';
+  $('quotationDetailClient').textContent = '—';
+  $('quotationDetailMeta').textContent = '—';
+  $('quotationStatusBadge').innerHTML = '';
+  $('quotationItemsArea').innerHTML = '<div class="empty">Loading…</div>';
+  $('quotationTotalRow').innerHTML = '';
+  openPanel('quotationDetail');
+
+  const { data: q, error } = await sb
+    .from('quotations')
+    .select('id, quote_number, title, status, job_id, issue_date, clients(name)')
+    .eq('id', quotationId)
+    .single();
+  if (error || !q) {
+    $('quotationItemsArea').innerHTML = `<div class="empty">Couldn't load this quotation: ${escapeHtml(error?.message || 'not found')}</div>`;
+    return;
+  }
+  $('quotationDetailTitle').textContent = q.quote_number;
+  $('quotationDetailClient').textContent = q.title ? `${q.title}` : q.quote_number;
+  $('quotationDetailMeta').textContent = `${q.clients?.name || 'No client set'}${q.job_id ? ' · ' + q.job_id : ''} · ${q.issue_date || ''}`;
+  $('quotationStatusBadge').innerHTML = `<span class="chip ${QUOTE_STATUS_CLASS[q.status] || ''}">${QUOTE_STATUS_LABEL[q.status] || q.status}</span>`;
+
+  const isAdmin = currentProfile?.role === 'admin';
+  $('newQuoteItemCard').style.display = isAdmin ? 'block' : 'none';
+  $('quotationStatusButtons').style.display = (isAdmin && q.status !== 'accepted' && q.status !== 'rejected') ? 'grid' : 'none';
+  $('quotationRejectBtn').style.display = (isAdmin && q.status !== 'accepted' && q.status !== 'rejected') ? 'block' : 'none';
+
+  renderQuotationItems(quotationId);
+}
+
+async function renderQuotationItems(quotationId) {
+  const wrap = $('quotationItemsArea');
+  const { data: items, error } = await sb
+    .from('quotation_items')
+    .select('*')
+    .eq('quotation_id', quotationId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    wrap.innerHTML = `<div class="empty">Couldn't load line items: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  const rows = items || [];
+  const isAdmin = currentProfile?.role === 'admin';
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty">No line items yet.</div>';
+  } else {
+    let total = 0;
+    wrap.innerHTML = rows.map((it) => {
+      const amount = Number(it.quantity) * Number(it.unit_price);
+      total += amount;
+      return `
+        <div class="entry" data-quote-item="${escapeHtml(it.id)}">
+          <div class="entry-body">
+            <div class="entry-desc">${escapeHtml(it.description)}</div>
+            <div class="entry-meta">${it.quantity} × ${it.unit_price} = ${amount.toFixed(2)}</div>
+          </div>
+          ${isAdmin ? `<button type="button" class="ghost" data-delete-quote-item="${escapeHtml(it.id)}">✕</button>` : ''}
+        </div>
+      `;
+    }).join('');
+    $('quotationTotalRow').innerHTML = `<strong style="font-size:14px;">Total: ${total.toFixed(2)}</strong>`;
+    wrap.querySelectorAll('[data-delete-quote-item]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await sb.from('quotation_items').delete().eq('id', btn.dataset.deleteQuoteItem);
+        renderQuotationItems(quotationId);
+      });
+    });
+  }
+  if (!rows.length) $('quotationTotalRow').innerHTML = '';
+}
+
+if ($('addQuoteItemBtn')) {
+  $('addQuoteItemBtn').addEventListener('click', async () => {
+    if (!currentQuotationId) return;
+    const description = $('quoteItemDescription').value.trim();
+    if (!description) { showToast('Enter a description.'); return; }
+    const quantity = parseFloat($('quoteItemQuantity').value) || 1;
+    const unitPrice = parseFloat($('quoteItemUnitPrice').value) || 0;
+    const { error } = await sb.from('quotation_items').insert({
+      quotation_id: currentQuotationId,
+      description,
+      quantity,
+      unit_price: unitPrice,
+    });
+    if (error) { showToast(`Couldn't add item: ${error.message}`); return; }
+    ['quoteItemDescription', 'quoteItemQuantity', 'quoteItemUnitPrice'].forEach((id) => { $(id).value = ''; });
+    renderQuotationItems(currentQuotationId);
+  });
+}
+
+document.querySelectorAll('[data-quote-status]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    if (!currentQuotationId) return;
+    await sb.from('quotations').update({ status: btn.dataset.quoteStatus }).eq('id', currentQuotationId);
+    openQuotationDetail(currentQuotationId);
+    renderQuotationsList();
+  });
+});
+if ($('quotationRejectBtn')) {
+  $('quotationRejectBtn').addEventListener('click', async () => {
+    if (!currentQuotationId) return;
+    await sb.from('quotations').update({ status: 'rejected' }).eq('id', currentQuotationId);
+    openQuotationDetail(currentQuotationId);
+    renderQuotationsList();
+  });
+}
+
+// =====================================================================
+// PROJECT TANK — an animated "how much of the next 12 months is already
+// covered by lined-up work" gauge. See supabase/functions/get-tank-level
+// for the actual calculation (remaining backlog across active projects ÷
+// the team's average monthly pace this calendar year, expressed as a
+// fraction of 12 months). Below 20% shows a low-pipeline warning.
+// =====================================================================
+
+function drawTank(pct) {
+  const area = $('tankSvgArea');
+  if (!area) return;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const tankTop = 20, tankBottom = 240, tankHeight = tankBottom - tankTop;
+  // Keep the wave visibly inside the tank body even at the extremes.
+  const waterY = tankTop + tankHeight * (1 - clamped / 100);
+  const waveY1 = Math.max(tankTop + 6, Math.min(tankBottom - 6, waterY));
+
+  let topColor = '#63d197', bottomColor = '#2f8f63'; // healthy (--ok)
+  if (clamped < 20) { topColor = '#f27d70'; bottomColor = '#b8443a'; } // critical (--err)
+  else if (clamped < 50) { topColor = '#f2b755'; bottomColor = '#b9822c'; } // caution (--warn)
+
+  area.innerHTML = `
+    <svg viewBox="0 0 240 280" width="220" height="256" style="display:block; margin:0 auto;">
+      <defs>
+        <clipPath id="tankClip"><rect x="20" y="${tankTop}" width="200" height="${tankHeight}" rx="26" ry="26" /></clipPath>
+        <linearGradient id="tankWaterGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${topColor}" />
+          <stop offset="100%" stop-color="${bottomColor}" />
+        </linearGradient>
+      </defs>
+      <rect x="20" y="${tankTop}" width="200" height="${tankHeight}" rx="26" ry="26" fill="rgba(255,255,255,0.04)" />
+      <g clip-path="url(#tankClip)">
+        <path fill="url(#tankWaterGrad)" opacity="0.92"
+          d="M -20 ${waveY1 + 6} Q 10 ${waveY1 - 6} 60 ${waveY1} T 160 ${waveY1} T 260 ${waveY1} V 260 H -20 Z">
+          <animate attributeName="d" dur="3.4s" repeatCount="indefinite"
+            values="M -20 ${waveY1 + 6} Q 10 ${waveY1 - 6} 60 ${waveY1} T 160 ${waveY1} T 260 ${waveY1} V 260 H -20 Z;
+                    M -20 ${waveY1 - 6} Q 10 ${waveY1 + 6} 60 ${waveY1} T 160 ${waveY1} T 260 ${waveY1} V 260 H -20 Z;
+                    M -20 ${waveY1 + 6} Q 10 ${waveY1 - 6} 60 ${waveY1} T 160 ${waveY1} T 260 ${waveY1} V 260 H -20 Z" />
+        </path>
+      </g>
+      <rect x="20" y="${tankTop}" width="200" height="${tankHeight}" rx="26" ry="26" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="3" />
+      <rect x="94" y="${tankTop - 14}" width="52" height="16" rx="6" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)" stroke-width="2" />
+      <text x="120" y="140" text-anchor="middle" font-size="36" font-weight="700" fill="#ffffff" stroke="rgba(0,0,0,0.6)" stroke-width="3" paint-order="stroke fill" style="font-family:inherit;">${clamped}%</text>
+    </svg>
+  `;
+}
+
+async function renderTank() {
+  $('tankSvgArea').innerHTML = '<div class="empty">Loading…</div>';
+  $('tankStatsArea').innerHTML = '';
+  $('tankAlertBanner').style.display = 'none';
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const { data, error } = await sb.functions.invoke('get-tank-level', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error || data?.error) {
+      $('tankSvgArea').innerHTML = `<div class="empty">Couldn't load the tank: ${escapeHtml(data?.error || error.message)}</div>`;
+      return;
+    }
+    drawTank(data.tankLevelPct);
+    $('tankStatsArea').innerHTML = `
+      <div class="tank-stat-row"><span class="tank-stat-label">Months of runway</span><span class="tank-stat-value">${data.monthsOfRunway} / 12</span></div>
+      <div class="tank-stat-row"><span class="tank-stat-label">Remaining backlog hours</span><span class="tank-stat-value">${data.remainingBacklogHours}</span></div>
+      <div class="tank-stat-row"><span class="tank-stat-label">Average monthly pace (${data.year} so far)</span><span class="tank-stat-value">${data.avgMonthlyHours} hrs/mo</span></div>
+    `;
+    if (data.lowAlert) {
+      $('tankAlertBanner').className = 'tank-alert-banner';
+      $('tankAlertBanner').style.display = 'block';
+      $('tankAlertBanner').textContent = `Pipeline is running low — only ${data.monthsOfRunway} months of lined-up work left. Time to bring in new jobs to cover the rest of the year.`;
+    }
+  } catch (err) {
+    $('tankSvgArea').innerHTML = `<div class="empty">Couldn't load the tank: ${escapeHtml(err.message || String(err))}</div>`;
+  }
 }
 
 // =====================================================================
@@ -1329,16 +1699,21 @@ async function renderProjectStages(jobId) {
 }
 
 let currentProjectReport = null;
+let currentProjectJobId = null;
 
 async function openProjectDetail(jobId, name) {
   currentProjectReport = null;
+  currentProjectJobId = jobId;
   $('projectDetailTitle').textContent = name ? `${jobId} — ${name}` : jobId;
   $('projectRingsArea').innerHTML = '<div class="empty">Loading…</div>';
   $('projectContributors').innerHTML = '';
   $('projectStageArea').innerHTML = '';
+  $('boqListArea').innerHTML = '';
+  $('boqTotalRow').innerHTML = '';
   openPanel('projectDetail');
   populateShareGroupPicker();
   renderProjectStages(jobId);
+  renderBoq(jobId);
   const { data: { session } } = await sb.auth.getSession();
   const { data, error } = await sb.functions.invoke('get-project-report', {
     body: { jobId },
@@ -1351,6 +1726,71 @@ async function openProjectDetail(jobId, name) {
   currentProjectReport = data;
   $('projectRingsArea').innerHTML = `<div class="project-rings">${ringCard('Engineer', data.totals.engineerHours, data.project.allocatedEngineer)}${ringCard('Technician', data.totals.technicianHours, data.project.allocatedTechnician)}</div>`;
   renderProjectContributors(data);
+}
+
+// ---------- Bill of Quantities (BOQ) — itemized rows per project ----------
+async function renderBoq(jobId) {
+  const wrap = $('boqListArea');
+  const isAdmin = currentProfile?.role === 'admin';
+  $('newBoqItemCard').style.display = isAdmin ? 'block' : 'none';
+  const { data: items, error } = await sb
+    .from('boq_items')
+    .select('*')
+    .eq('job_id', jobId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    wrap.innerHTML = `<div class="empty">Couldn't load the BOQ: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  const rows = items || [];
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty">No items yet.</div>';
+    $('boqTotalRow').innerHTML = '';
+    return;
+  }
+  let total = 0;
+  wrap.innerHTML = rows.map((it) => {
+    const amount = Number(it.quantity) * Number(it.unit_rate);
+    total += amount;
+    return `
+      <div class="entry" data-boq-item="${escapeHtml(it.id)}">
+        <div class="entry-body">
+          <div class="entry-desc">${escapeHtml(it.description)}</div>
+          <div class="entry-meta">${it.quantity} ${escapeHtml(it.unit || '')} × ${it.unit_rate} = ${amount.toFixed(2)}</div>
+        </div>
+        ${isAdmin ? `<button type="button" class="ghost" data-delete-boq-item="${escapeHtml(it.id)}">✕</button>` : ''}
+      </div>
+    `;
+  }).join('');
+  $('boqTotalRow').innerHTML = `<strong style="font-size:14px;">Total: ${total.toFixed(2)}</strong>`;
+  wrap.querySelectorAll('[data-delete-boq-item]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await sb.from('boq_items').delete().eq('id', btn.dataset.deleteBoqItem);
+      renderBoq(jobId);
+    });
+  });
+}
+
+if ($('addBoqItemBtn')) {
+  $('addBoqItemBtn').addEventListener('click', async () => {
+    const jobId = currentProjectJobId;
+    if (!jobId) return;
+    const description = $('boqItemDescription').value.trim();
+    if (!description) { showToast('Enter a description.'); return; }
+    const quantity = parseFloat($('boqItemQuantity').value) || 0;
+    const unitRate = parseFloat($('boqItemRate').value) || 0;
+    const { error } = await sb.from('boq_items').insert({
+      job_id: jobId,
+      description,
+      unit: $('boqItemUnit').value.trim() || null,
+      quantity,
+      unit_rate: unitRate,
+      created_by: currentUser.id,
+    });
+    if (error) { showToast(`Couldn't add item: ${error.message}`); return; }
+    ['boqItemDescription', 'boqItemUnit', 'boqItemQuantity', 'boqItemRate'].forEach((id) => { $(id).value = ''; });
+    renderBoq(jobId);
+  });
 }
 
 // ---------- Share a project's status into one of the viewer's own groups ----------
@@ -2418,10 +2858,19 @@ async function sendAiMessage() {
 
   try {
     const { data: { session } } = await sb.auth.getSession();
-    const { data, error } = await sb.functions.invoke('ai-chat', {
-      body: { message: text, history: aiHistory },
-      headers: { Authorization: `Bearer ${session.access_token}` }
-    });
+    // Same reasoning as chat send/upload above: sb.functions.invoke() has no
+    // built-in ceiling of its own, so if the edge function or the network
+    // ever genuinely hangs instead of erroring, "Thinking…" would sit there
+    // forever with the input still locked. This guarantees a real answer or
+    // a clear failure message within 30s, always — never an endless spinner.
+    const { data, error } = await withTimeout(
+      sb.functions.invoke('ai-chat', {
+        body: { message: text, history: aiHistory },
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      }),
+      30000,
+      'AEON Ai'
+    );
     if (error || data?.error) throw new Error(data?.error || error.message);
     loadingEl.textContent = data.reply;
     loadingEl.className = 'ai-msg assistant';
