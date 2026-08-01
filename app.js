@@ -412,7 +412,19 @@ $('loginBtn').addEventListener('click', async () => {
     // nothing and no message at all — which is exactly what "tried logging
     // in several times and it just won't go in" looks like from the outside.
     const { error } = await withTimeout(sb.auth.signInWithPassword({ email, password }), 20000, 'Sign in');
-    if (error) $('authMsg').textContent = error.message;
+    if (error) {
+      $('authMsg').textContent = error.message;
+    } else {
+      // Normally sb.auth.onAuthStateChange's 'SIGNED_IN' event fires right
+      // after this and calls enterApp() on its own. But on some mobile
+      // browsers that event can be delayed or dropped entirely (backgrounding,
+      // power-saving throttling, etc.) — which looks exactly like "login
+      // screen just sits there and never moves forward" even though signing
+      // in actually worked. Calling enterApp() directly here as well costs
+      // nothing extra (it's a safe no-op if onAuthStateChange already did
+      // it) and closes that gap for good.
+      await enterApp();
+    }
   } catch (err) {
     $('authMsg').textContent = err.message || 'Something went wrong — please try again.';
   } finally {
