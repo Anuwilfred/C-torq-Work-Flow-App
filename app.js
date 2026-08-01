@@ -411,7 +411,7 @@ $('loginBtn').addEventListener('click', async () => {
     // slow/flaky mobile connection just sat there with the button doing
     // nothing and no message at all — which is exactly what "tried logging
     // in several times and it just won't go in" looks like from the outside.
-    const { error } = await withTimeout(sb.auth.signInWithPassword({ email, password }), 20000, 'Sign in');
+    const { data, error } = await withTimeout(sb.auth.signInWithPassword({ email, password }), 20000, 'Sign in');
     if (error) {
       $('authMsg').textContent = error.message;
     } else {
@@ -422,8 +422,11 @@ $('loginBtn').addEventListener('click', async () => {
       // screen just sits there and never moves forward" even though signing
       // in actually worked. Calling enterApp() directly here as well costs
       // nothing extra (it's a safe no-op if onAuthStateChange already did
-      // it) and closes that gap for good.
-      await enterApp();
+      // it) and closes that gap for good. Passing data.user directly (this
+      // sign-in response already confirmed exactly who it is) skips the
+      // redundant getUser() re-check that was itself timing out right after
+      // a fresh, already-successful login.
+      await enterApp(data.user);
     }
   } catch (err) {
     $('authMsg').textContent = err.message || 'Something went wrong — please try again.';
@@ -485,10 +488,21 @@ async function loadProfile(user) {
   return data;
 }
 
-async function enterApp() {
+async function enterApp(knownUser) {
  try {
+  // If the caller already has a just-verified user (e.g. straight off a
+  // successful sign-in response), use it directly instead of asking the
+  // server "who is this?" all over again right afterward. That redundant
+  // re-check is exactly what was causing "login succeeds instantly, then
+  // the button sits on Signing in… forever" — the fresh sign-in and the
+  // immediate follow-up getUser() call can contend over the same internal
+  // auth lock, so the re-check waits out the same multi-second timeout/retry
+  // this function uses for a plain page refresh, even though there was
+  // nothing left to verify.
+  let user = knownUser || null;
+  if (!user) {
   let result = await raceTimeout(sb.auth.getUser(), 7000);
-  let user = result.__timedOut ? null : result.data.user;
+  user = result.__timedOut ? null : result.data.user;
   if (!user) {
     // Either the check timed out (likely a slow-to-release internal lock
     // on a fast refresh, not an actual problem), or the stored session
@@ -517,6 +531,7 @@ async function enterApp() {
     showAuthView('loginView');
     $('authMsg').textContent = 'Your session expired — please log in again.';
     return;
+  }
   }
   currentUser = user;
   currentProfile = await loadProfile(user);
