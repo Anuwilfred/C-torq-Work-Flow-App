@@ -4,6 +4,35 @@ const sb = window.supabase.createClient(
   window.CTORQ_CONFIG.SUPABASE_ANON_KEY
 );
 
+// ---------- Auth-check timeout guard ----------
+// Root cause of the "totally blank page, forever, zero console errors" bug:
+// Supabase's client stores your session in localStorage, and if that stored
+// entry is stale or corrupted (leftover from an old sign-in, a key rotation,
+// a half-finished token refresh, etc.), calls like sb.auth.getSession() or
+// sb.auth.getUser() can hang forever instead of resolving OR throwing. No
+// error ever fires, so nothing ever shows — not the login screen, not the
+// app. That matches exactly what a refresh (which re-reads the stored
+// session) does versus a fresh magic-link click (which always writes a
+// brand-new, healthy session and never hits this path).
+// withTimeout forces every one of those calls to give up after a few
+// seconds so the app always ends up showing something instead of hanging.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve({ __timedOut: true }), ms)),
+  ]);
+}
+
+// If a stored session ever causes a hang like that, wipe it so the *next*
+// load isn't stuck the same way — the person just logs in again normally.
+function clearStoredSession() {
+  try {
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('sb-') && k.includes('-auth-token'))
+      .forEach((k) => localStorage.removeItem(k));
+  } catch (e) { /* ignore */ }
+}
+
 let currentUser = null;
 let currentProfile = null;
 let selectedMode = null; // mode-of-work chip currently selected
@@ -418,20 +447,24 @@ async function loadProfile(user) {
 }
 
 async function enterApp() {
-  let { data: { user } } = await sb.auth.getUser();
+  let result = await withTimeout(sb.auth.getUser(), 6000);
+  let user = result.__timedOut ? null : result.data.user;
   if (!user) {
-    // The stored session looked valid locally but the server couldn't
-    // confirm it (expired token, brief network hiccup, etc.). Try once
-    // more after a short pause — most of these are transient — before
-    // giving up. This used to just silently return here, which left BOTH
-    // screens hidden with nothing shown at all: a genuinely blank page
-    // with no error, since nothing actually crashed.
+    // Either the check timed out, or the stored session looked valid
+    // locally but the server couldn't confirm it (expired token, brief
+    // network hiccup, etc.). Try once more after a short pause — most of
+    // these are transient — before giving up. This used to just silently
+    // return here, which left BOTH screens hidden with nothing shown at
+    // all: a genuinely blank page with no error, since nothing actually
+    // crashed.
     await new Promise((r) => setTimeout(r, 1200));
-    ({ data: { user } } = await sb.auth.getUser());
+    result = await withTimeout(sb.auth.getUser(), 6000);
+    user = result.__timedOut ? null : result.data.user;
   }
   if (!user) {
     currentUser = null;
     currentProfile = null;
+    clearStoredSession();
     $('appShell').style.display = 'none';
     $('authScreen').style.display = 'flex';
     showAuthView('loginView');
@@ -534,7 +567,16 @@ sb.auth.onAuthStateChange(async (event, session) => {
 });
 
 (async () => {
-  const { data: { session } } = await sb.auth.getSession();
+  const result = await withTimeout(sb.auth.getSession(), 6000);
+  if (result.__timedOut) {
+    // getSession() never came back at all — almost certainly a stuck/
+    // corrupted stored session. Clear it so the next load isn't stuck the
+    // same way, and show the login screen instead of staying blank forever.
+    clearStoredSession();
+    $('authScreen').style.display = 'flex';
+    return;
+  }
+  const { data: { session } } = result;
   if (session) {
     const profile = await loadProfile(session.user);
     currentUser = session.user;

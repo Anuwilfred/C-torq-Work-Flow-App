@@ -1,22 +1,20 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.25';
+const CACHE_NAME = 'ctorq-workflow-v3.26';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 
-// RELIABILITY FIX #2: the previous version raced every app-shell request
-// against a 4-second timeout and fell back to the cached copy if it lost
-// that race — on an ordinary "just a bit slow" mobile connection (not
-// actually offline), that timeout fires constantly, silently serving an
-// old/possibly-mismatched cached file even though the real, current file
-// was still on its way over the network. That's almost certainly what was
-// causing "click the email link = works, plain refresh = blank": the
-// email link often opens a fresh context, while a refresh in the same tab
-// kept getting raced against that timeout and losing.
+// RELIABILITY FIX #3: an installed app (tapped from the home screen / Start
+// Menu icon) opens through this service worker on every single launch, not
+// just on refresh. The previous version made every launch wait on the real
+// network before showing anything — fine on good wifi, but on a weaker
+// mobile signal that's exactly "sometimes opens fast, sometimes doesn't":
+// the open time was really just however long that one network request took
+// at that moment, with nothing shown until it finished.
 //
-// Below, there is no artificial timeout at all. The app shell (HTML/JS/CSS)
-// always tries the real network first, however long that takes, and only
-// falls back to the cache if the request genuinely fails (actually
-// offline). This matches how an ordinary website behaves — a slow load
-// instead of a broken one — which is what "reliable" actually means here.
+// Below is stale-while-revalidate for the app shell: if we already have a
+// cached copy, show it INSTANTLY — same speed, every time, on any network —
+// while a fresh copy downloads quietly in the background and replaces the
+// cache for the next launch. Only the very first-ever visit (nothing cached
+// yet) has to wait on the network, same as any ordinary website.
 
 const SHELL_ASSETS = ['./', './index.html', './styles.css', './app.js', './config.js'];
 
@@ -76,18 +74,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App shell (HTML/JS/CSS): always network first, no timeout race. Only
-  // falls back to the cached copy if the fetch genuinely fails (no
-  // connection at all), so a refresh always shows the latest deployed
-  // version whenever there's any network at all, slow or not.
+  // App shell (HTML/JS/CSS): stale-while-revalidate. Cached copy (if any)
+  // is returned immediately so the app opens instantly and consistently;
+  // the network response — whenever it lands — silently updates the cache
+  // for the next launch. If nothing is cached yet (first-ever visit), we
+  // have no choice but to wait for the network.
   event.respondWith(
-    fetch(event.request)
-      .then((res) => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        return res;
-      })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(event.request);
+      const networkUpdate = fetch(event.request)
+        .then((res) => {
+          cache.put(event.request, res.clone());
+          return res;
+        })
+        .catch(() => null);
+      if (cached) {
+        // Don't wait on the network — update the cache in the background
+        // and hand back what we already have right now.
+        event.waitUntil(networkUpdate);
+        return cached;
+      }
+      const fresh = await networkUpdate;
+      return fresh || caches.match('./index.html');
+    })
   );
 });
 
