@@ -398,8 +398,27 @@ $('loginBtn').addEventListener('click', async () => {
   const email = $('loginEmail').value.trim();
   const password = $('loginPassword').value;
   if (!email || !password) return;
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) $('authMsg').textContent = error.message;
+  const btn = $('loginBtn');
+  if (btn.disabled) return; // already trying — a repeat tap on a slow mobile
+                            // connection used to fire a second sign-in on
+                            // top of the first, with nothing shown either way.
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  $('authMsg').textContent = '';
+  try {
+    // Same reasoning as everywhere else this pass: no ceiling here meant a
+    // slow/flaky mobile connection just sat there with the button doing
+    // nothing and no message at all — which is exactly what "tried logging
+    // in several times and it just won't go in" looks like from the outside.
+    const { error } = await withTimeout(sb.auth.signInWithPassword({ email, password }), 20000, 'Sign in');
+    if (error) $('authMsg').textContent = error.message;
+  } catch (err) {
+    $('authMsg').textContent = err.message || 'Something went wrong — please try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
 });
 
 $('sendResetBtn').addEventListener('click', async () => {
