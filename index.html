@@ -7,6 +7,17 @@
 <link rel="manifest" href="./manifest.json" />
 <link rel="icon" href="./icon.svg" />
 <meta name="theme-color" content="#cc785c" />
+
+<!-- iPhone/iPad: Safari mostly ignores manifest.json for "Add to Home
+     Screen" and needs its own tags to behave like a real installed app
+     (full-screen, no address bar, proper icon, matching status bar). -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="C-TORQ WF" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="./icon-512.png" />
+
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
