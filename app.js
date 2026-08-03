@@ -1644,14 +1644,18 @@ if ($('scanImportJobsBtn')) {
     btn.textContent = 'Scanning…';
     $('importJobsResultsArea').innerHTML = '<div class="empty">Reading through the messages…</div>';
     try {
-      const { data, error } = await sb.functions.invoke('import-jobs', { body: { text } });
+      const { data, error } = await withTimeout(
+        sb.functions.invoke('import-jobs', { body: { text } }),
+        35000,
+        'Scan'
+      );
       if (error || data?.error) {
         $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(data?.error || error.message)}</div>`;
         return;
       }
       renderImportJobsResults(data.newJobs || [], data.alreadyExists || []);
     } catch (err) {
-      $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(String(err))}</div>`;
+      $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(String(err?.message || err))}</div>`;
     } finally {
       btn.disabled = false;
       btn.textContent = 'Scan for new jobs';
