@@ -161,9 +161,10 @@
           <!-- ===== TIMESHEET-ONLY FIELDS ===== -->
           <div id="timesheetBlock">
             <label for="jobId">Project / Job ID</label>
-            <select id="jobId">
-              <option value="">No project</option>
-            </select>
+            <div class="job-search-wrap" style="position:relative;">
+              <input id="jobId" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+              <div id="jobIdResults" class="job-search-results" style="display:none;"></div>
+            </div>
 
             <label>Mode of work</label>
             <div id="modeGrid" class="mode-grid">
@@ -216,15 +217,9 @@
                 </div>
               </div>
 
-              <label class="toggle-row" for="lunchBreakToggle">
-                <span>Lunch break</span>
-                <input id="lunchBreakToggle" type="checkbox" />
-              </label>
-              <div id="lunchBreakField" style="display:none">
-                <label for="lunchMinutes">Lunch break length (minutes)</label>
-                <input id="lunchMinutes" type="number" min="0" step="5" value="60" />
-                <p class="hint">This gets subtracted from your total hours for the day.</p>
-              </div>
+              <label for="lunchMinutes">Break / lunch (minutes)</label>
+              <input id="lunchMinutes" type="number" min="0" step="5" value="0" placeholder="e.g. 30 or 60 — leave at 0 if no break" />
+              <p class="hint">If you took a break (e.g. lunch in the afternoon), enter the minutes here — it's automatically subtracted from your total hours for the day. Leave at 0 if you worked straight through.</p>
 
               <label for="workNotes">Notes (optional)</label>
               <textarea id="workNotes" placeholder="Anything worth noting?"></textarea>
@@ -528,6 +523,15 @@
         </div>
         <button id="createProjectBtn" class="primary" style="margin-top:12px;">Create project</button>
       </div>
+
+      <div class="card glass" id="importJobsCard" style="display:none; margin-top:12px;">
+        <strong style="font-size:14px;">Import jobs from WhatsApp</strong>
+        <p class="hint">Paste the job announcement messages below — AEON Ai will pull out every job number, description, and client, skip anything already in your Projects list, and show you just the new ones to confirm.</p>
+        <textarea id="importJobsText" rows="6" placeholder="Paste the WhatsApp messages here..."></textarea>
+        <button id="scanImportJobsBtn" class="secondary" style="margin-top:8px;">Scan for new jobs</button>
+        <div id="importJobsResultsArea" style="margin-top:12px;"></div>
+      </div>
+
       <div id="projectsListArea" style="margin-top:16px;"></div>
     </div>
   </div>

@@ -477,6 +477,31 @@ button.ghost:hover { color: var(--text); }
 
 .empty { color: var(--text-dim); font-size: 13.5px; text-align: center; padding: 28px 0; }
 
+/* ---------- Job ID search-as-you-type dropdown ---------- */
+.job-search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-0);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--r-sm);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.job-search-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--glass-border);
+}
+.job-search-item:last-child { border-bottom: none; }
+.job-search-item:hover, .job-search-item.active { background: var(--glass-strong); }
+.job-search-item .jid { font-size: 13.5px; font-weight: 600; }
+.job-search-item .jdesc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.job-search-empty { padding: 10px 14px; font-size: 12.5px; color: var(--text-dim); }
+
 .hint { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
 .hint.warn { color: var(--warn); }
 

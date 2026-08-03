@@ -167,10 +167,6 @@ document.querySelectorAll('.mode-chip').forEach(chip => {
   });
 });
 
-$('lunchBreakToggle').addEventListener('change', () => {
-  $('lunchBreakField').style.display = $('lunchBreakToggle').checked ? 'block' : 'none';
-});
-
 // Default date fields to today for convenience (still fully editable/manual).
 const today = new Date().toISOString().slice(0, 10);
 $('date').value = today;
@@ -286,7 +282,7 @@ async function buildDraftFromForm() {
     }
 
     if (!$('date').value) { showToast('Pick a date.'); return null; }
-    const lunchMinutes = $('lunchBreakToggle').checked ? (parseInt($('lunchMinutes').value, 10) || 0) : 0;
+    const lunchMinutes = parseInt($('lunchMinutes').value, 10) || 0;
     const allowanceLocation = $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null;
     return {
       ...base,
@@ -601,16 +597,56 @@ async function renderMyTodayAssignment() {
   `;
 }
 
-// Populates the New Entry "Project / Job ID" dropdown for everyone.
+// Loads every active project into memory once, so the New Entry "Project /
+// Job ID" field can search by job number OR description as the person
+// types — with 50+ jobs a plain dropdown is painful to scroll through, this
+// is common for everyone (not just admins).
+let jobSearchOptions = [];
 async function populateJobIdDropdown() {
-  const select = $('jobId');
-  if (!select) return;
-  const { data, error } = await sb.from('projects').select('job_id, name').eq('status', 'active').order('job_id');
-  const rows = error ? [] : (data || []);
-  const current = select.value;
-  select.innerHTML = '<option value="">No project</option>' +
-    rows.map((r) => `<option value="${escapeHtml(r.job_id)}">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</option>`).join('');
-  if (current) select.value = current;
+  const { data, error } = await sb.from('projects').select('job_id, name, client').eq('status', 'active').order('job_id');
+  jobSearchOptions = error ? [] : (data || []);
+}
+
+function renderJobSearchResults(matches) {
+  const box = $('jobIdResults');
+  if (!box) return;
+  if (!matches.length) {
+    box.innerHTML = '<div class="job-search-empty">No matching job found — you can still type a Job ID manually.</div>';
+  } else {
+    box.innerHTML = matches.slice(0, 8).map((r) => `
+      <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
+        <div class="jid">${escapeHtml(r.job_id)}</div>
+        <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
+      </div>
+    `).join('');
+  }
+  box.style.display = 'block';
+  box.querySelectorAll('.job-search-item[data-job-id]').forEach((item) => {
+    item.addEventListener('mousedown', (e) => {
+      // mousedown (not click) so this fires before the input's blur hides the box
+      e.preventDefault();
+      $('jobId').value = item.dataset.jobId;
+      box.style.display = 'none';
+    });
+  });
+}
+
+if ($('jobId')) {
+  $('jobId').addEventListener('input', () => {
+    const q = $('jobId').value.trim().toLowerCase();
+    if (!q) { $('jobIdResults').style.display = 'none'; return; }
+    const matches = jobSearchOptions.filter((r) =>
+      String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
+    );
+    renderJobSearchResults(matches);
+  });
+  $('jobId').addEventListener('focus', () => {
+    if ($('jobId').value.trim()) $('jobId').dispatchEvent(new Event('input'));
+  });
+  $('jobId').addEventListener('blur', () => {
+    // Small delay so a click/mousedown on a result registers first.
+    setTimeout(() => { if ($('jobIdResults')) $('jobIdResults').style.display = 'none'; }, 150);
+  });
 }
 
 sb.auth.onAuthStateChange(async (event, session) => {
@@ -940,6 +976,7 @@ function openPanel(name, opts = {}) {
     // projects still lives in Admin → Projects, which opens this same
     // panel without the hideCreate flag.
     $('newProjectCard').style.display = (currentProfile?.role === 'admin' && !opts.hideCreate) ? 'block' : 'none';
+    if ($('importJobsCard')) $('importJobsCard').style.display = (currentProfile?.role === 'admin' && !opts.hideCreate) ? 'block' : 'none';
     renderProjectsList();
   }
   if (name === 'departments') {
@@ -1534,6 +1571,91 @@ if ($('createProjectBtn')) {
     renderProjectsList();
     populateJobIdDropdown();
     showToast('Project created.');
+  });
+}
+
+// =====================================================================
+// IMPORT JOBS FROM WHATSAPP — admin pastes the raw job-announcement
+// messages, AEON Ai (via the import-jobs Edge Function) extracts every job
+// number/description/client, checks them against Projects already saved,
+// and shows only the genuinely new ones for a one-click confirm — nothing
+// is written to the database until the admin reviews and hits "Add".
+// =====================================================================
+
+let lastScannedJobs = []; // the newJobs array from the last scan, kept so "Add selected" can read it back
+
+function renderImportJobsResults(newJobs, alreadyExists) {
+  const wrap = $('importJobsResultsArea');
+  if (!wrap) return;
+  lastScannedJobs = newJobs;
+  if (!newJobs.length && !alreadyExists.length) {
+    wrap.innerHTML = '<div class="empty">No job numbers found in that text.</div>';
+    return;
+  }
+  const rows = newJobs.map((j, i) => `
+    <label class="entry" style="cursor:pointer;">
+      <input type="checkbox" class="import-job-check" data-idx="${i}" checked style="margin-right:10px;" />
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(j.job_id)}</div>
+        <div class="entry-meta">${escapeHtml(j.description || '—')}${j.client ? ' · ' + escapeHtml(j.client) : ''}</div>
+      </div>
+    </label>
+  `).join('');
+  const existingNote = alreadyExists.length
+    ? `<p class="hint" style="margin-top:10px;">${alreadyExists.length} job(s) already in your Projects list were skipped: ${alreadyExists.map((j) => escapeHtml(j.job_id)).join(', ')}.</p>`
+    : '';
+  wrap.innerHTML = newJobs.length
+    ? `<p class="hint">${newJobs.length} new job(s) found — uncheck any you don't want to add:</p>${rows}
+       <button id="addSelectedJobsBtn" class="primary" style="margin-top:10px;">Add selected jobs</button>${existingNote}`
+    : `<div class="empty">No new jobs — every job number in that text is already saved.</div>${existingNote}`;
+
+  const addBtn = $('addSelectedJobsBtn');
+  if (addBtn) {
+    addBtn.addEventListener('click', async () => {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adding…';
+      const checked = Array.from(wrap.querySelectorAll('.import-job-check:checked')).map((el) => lastScannedJobs[Number(el.dataset.idx)]);
+      if (!checked.length) { showToast('Nothing selected.'); addBtn.disabled = false; addBtn.textContent = 'Add selected jobs'; return; }
+      const rowsToInsert = checked.map((j) => ({
+        job_id: j.job_id,
+        name: j.description || null,
+        client: j.client || null,
+        allocated_hours_engineer: 0,
+        allocated_hours_technician: 0,
+        created_by: currentUser.id,
+      }));
+      const { error } = await sb.from('projects').insert(rowsToInsert);
+      if (error) { showToast(`Couldn't add jobs: ${error.message}`); addBtn.disabled = false; addBtn.textContent = 'Add selected jobs'; return; }
+      showToast(`Added ${rowsToInsert.length} job(s).`);
+      $('importJobsText').value = '';
+      wrap.innerHTML = '';
+      renderProjectsList();
+      populateJobIdDropdown();
+    });
+  }
+}
+
+if ($('scanImportJobsBtn')) {
+  $('scanImportJobsBtn').addEventListener('click', async () => {
+    const text = $('importJobsText').value.trim();
+    if (!text) { showToast('Paste the WhatsApp messages first.'); return; }
+    const btn = $('scanImportJobsBtn');
+    btn.disabled = true;
+    btn.textContent = 'Scanning…';
+    $('importJobsResultsArea').innerHTML = '<div class="empty">Reading through the messages…</div>';
+    try {
+      const { data, error } = await sb.functions.invoke('import-jobs', { body: { text } });
+      if (error || data?.error) {
+        $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(data?.error || error.message)}</div>`;
+        return;
+      }
+      renderImportJobsResults(data.newJobs || [], data.alreadyExists || []);
+    } catch (err) {
+      $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(String(err))}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Scan for new jobs';
+    }
   });
 }
 
