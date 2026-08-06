@@ -184,6 +184,18 @@
             <!-- work-type fields -->
             <div id="workModeFields" class="field-group">
               <div class="section-divider"></div>
+
+              <div class="card glass" id="clockCard" style="margin-bottom:14px;">
+                <strong style="font-size:14px;">Clock</strong>
+                <p class="hint" id="clockStatusLine" style="margin:6px 0 10px;">Not clocked in yet — tap Clock In to start your day.</p>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <button type="button" id="clockInBtn" class="secondary">🟢 Clock In</button>
+                  <button type="button" id="startBreakBtn" class="secondary" style="display:none;">☕ Start Break</button>
+                  <button type="button" id="stopBreakBtn" class="secondary" style="display:none;">▶️ Stop Break</button>
+                  <button type="button" id="clockOutBtn" class="secondary" style="display:none;">🔴 Clock Out</button>
+                </div>
+              </div>
+
               <label for="project">Project</label>
               <input id="project" type="text" placeholder="e.g. Website Redesign" />
 

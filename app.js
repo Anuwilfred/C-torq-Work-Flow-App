@@ -31,6 +31,25 @@ function raceTimeout(promise, ms) {
   ]);
 }
 
+// RELIABILITY: a dozen different panels (Projects, Reports, Chat, BOQ,
+// quotations, AI chat, push notifications...) each call sb.auth.getSession()
+// as their very first step before loading any real data. That call can hang
+// (same internal Supabase auth-lock contention documented above for
+// login/startup) — and since none of these callers had a timeout, a single
+// hang left that one panel stuck on "Loading…" forever, with nothing to do
+// but refresh the whole app. This wraps every one of those calls with the
+// same timeout guard already used at startup, so a hang always resolves
+// (falling back to "no session" for that one attempt) instead of freezing
+// that panel indefinitely.
+async function getSessionSafe(ms = 6000) {
+  const result = await raceTimeout(sb.auth.getSession(), ms);
+  if (result.__timedOut) {
+    console.warn('[Auth] getSession() timed out — treating as no session for this one call.');
+    return { data: { session: null } };
+  }
+  return result;
+}
+
 // If a stored session ever causes a hang like that, wipe it so the *next*
 // load isn't stuck the same way — the person just logs in again normally.
 function clearStoredSession() {
@@ -158,6 +177,114 @@ function refreshModeVisibility() {
   $('leaveModeFields').classList.toggle('active', hasMode && isLeave);
   $('sickDocField').style.display = selectedMode === 'sick_leave' ? 'block' : 'none';
 }
+
+// =====================================================================
+// CLOCK — tap Clock In / Start Break / Stop Break / Clock Out and the
+// device's own clock fills in Date, Start Time, End Time, and Break
+// minutes automatically — no typing times by hand. State is saved to
+// localStorage so it survives closing and reopening the app mid-shift
+// (clock in at 8am, close the app, reopen at lunch — it still remembers).
+// The underlying fields stay visible and editable too, in case someone
+// needs to correct a time or fill one in by hand after the fact.
+// =====================================================================
+
+const CLOCK_KEY = 'ctorq-clock-state';
+
+function getClockState() {
+  try {
+    const raw = localStorage.getItem(CLOCK_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* ignore */ }
+  return { status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0 };
+}
+function saveClockState(state) {
+  try { localStorage.setItem(CLOCK_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+}
+function resetClockState() {
+  saveClockState({ status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0 });
+  renderClockUI();
+}
+function fmtClockTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+function toTimeInputValue(iso) {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function renderClockUI() {
+  const line = $('clockStatusLine');
+  if (!line) return; // clock card not on this page/build
+  const state = getClockState();
+  const inBtn = $('clockInBtn'), startBreakBtn = $('startBreakBtn'), stopBreakBtn = $('stopBreakBtn'), outBtn = $('clockOutBtn');
+
+  inBtn.style.display = state.status === 'idle' ? 'inline-block' : 'none';
+  startBreakBtn.style.display = state.status === 'working' ? 'inline-block' : 'none';
+  stopBreakBtn.style.display = state.status === 'onbreak' ? 'inline-block' : 'none';
+  outBtn.style.display = (state.status === 'working' || state.status === 'onbreak') ? 'inline-block' : 'none';
+  outBtn.disabled = state.status === 'onbreak'; // must stop the break first
+
+  if (state.status === 'working') {
+    line.textContent = `Clocked in at ${fmtClockTime(state.clockInAt)}.` + (state.totalBreakMinutes ? ` Breaks so far: ${state.totalBreakMinutes} min.` : '');
+  } else if (state.status === 'onbreak') {
+    const lastBreak = state.breaks[state.breaks.length - 1];
+    line.textContent = `On break since ${fmtClockTime(lastBreak?.start)} — tap Stop Break when you're back.`;
+  } else if (state.clockOutAt) {
+    line.textContent = `Clocked out at ${fmtClockTime(state.clockOutAt)} (in: ${fmtClockTime(state.clockInAt)}, break: ${state.totalBreakMinutes || 0} min). Fill in the rest below and submit.`;
+  } else {
+    line.textContent = 'Not clocked in yet — tap Clock In to start your day.';
+  }
+}
+
+$('clockInBtn')?.addEventListener('click', () => {
+  const now = new Date();
+  const iso = now.toISOString();
+  saveClockState({ status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0 });
+  $('date').value = iso.slice(0, 10);
+  $('startTime').value = toTimeInputValue(iso);
+  renderClockUI();
+  showToast('Clocked in — have a good shift.');
+});
+
+$('startBreakBtn')?.addEventListener('click', () => {
+  const state = getClockState();
+  if (state.status !== 'working') return;
+  state.breaks.push({ start: new Date().toISOString(), end: null });
+  state.status = 'onbreak';
+  saveClockState(state);
+  renderClockUI();
+  showToast('Break started.');
+});
+
+$('stopBreakBtn')?.addEventListener('click', () => {
+  const state = getClockState();
+  if (state.status !== 'onbreak' || !state.breaks.length) return;
+  const last = state.breaks[state.breaks.length - 1];
+  last.end = new Date().toISOString();
+  const mins = Math.max(0, Math.round((new Date(last.end) - new Date(last.start)) / 60000));
+  state.totalBreakMinutes = (state.totalBreakMinutes || 0) + mins;
+  state.status = 'working';
+  saveClockState(state);
+  if ($('lunchMinutes')) $('lunchMinutes').value = state.totalBreakMinutes;
+  renderClockUI();
+  showToast(`Break ended — ${mins} min added (total ${state.totalBreakMinutes} min).`);
+});
+
+$('clockOutBtn')?.addEventListener('click', () => {
+  const state = getClockState();
+  if (state.status !== 'working') return;
+  const iso = new Date().toISOString();
+  state.clockOutAt = iso;
+  state.status = 'idle';
+  saveClockState(state);
+  $('endTime').value = toTimeInputValue(iso);
+  if ($('lunchMinutes')) $('lunchMinutes').value = state.totalBreakMinutes || 0;
+  renderClockUI();
+  showToast('Clocked out — review the rest of the entry and submit when ready.');
+});
+
+renderClockUI();
 
 document.querySelectorAll('.mode-chip').forEach(chip => {
   chip.addEventListener('click', () => {
@@ -363,6 +490,9 @@ $('reviewBackBtn').addEventListener('click', () => {
 $('reviewConfirmBtn').addEventListener('click', async () => {
   if (!pendingEntryDraft) return;
   await addEntry(pendingEntryDraft);
+  // A submitted work-day entry means today's clock cycle is done — reset it
+  // so tomorrow's Clock In starts fresh instead of showing yesterday's times.
+  if (pendingEntryDraft.category === 'timesheet') resetClockState();
   $('reviewOverlay').classList.remove('show');
   $('entryForm').reset();
   selectedMode = null;
@@ -450,7 +580,7 @@ $('setPasswordBtn').addEventListener('click', async () => {
   if (error) { $('authMsg').textContent = error.message; return; }
   if (currentUser) await sb.from('profiles').update({ status: 'active' }).eq('id', currentUser.id);
   showToast('Password set — welcome in.');
-  await enterApp();
+  await enterApp(currentUser || undefined);
 });
 
 $('logoutBtn').addEventListener('click', async () => {
@@ -479,9 +609,45 @@ $('logoutBtn').addEventListener('click', async () => {
   showAuthView('loginView');
 });
 
+// RELIABILITY: this used to always require a live network round-trip, which
+// meant opening the app with no signal at all (or a very weak one) could
+// fail before the app shell ever showed — even though the person already
+// had a perfectly valid saved session. Now every successful load is cached
+// to localStorage, and if the network call fails (offline, timeout, DNS
+// hiccup, anything), we fall back to that last-known-good copy instead of
+// blocking the whole app. This is exactly what lets someone open the app
+// with zero connectivity, log a timesheet entry, and have it wait in the
+// local queue until they're back online — the app shell itself has to be
+// able to open offline first for that to even be possible.
+function cacheProfile(userId, profile) {
+  try { localStorage.setItem(`ctorq-profile-${userId}`, JSON.stringify(profile)); } catch (e) { /* ignore */ }
+}
+function getCachedProfile(userId) {
+  try {
+    const raw = localStorage.getItem(`ctorq-profile-${userId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
 async function loadProfile(user) {
-  const { data } = await sb.from('profiles').select('*').eq('id', user.id).single();
-  return data;
+  try {
+    const result = await raceTimeout(
+      sb.from('profiles').select('*').eq('id', user.id).single(),
+      6000
+    );
+    if (result.__timedOut) throw new Error('profile lookup timed out');
+    const { data, error } = result;
+    if (error) throw error;
+    if (!data) throw new Error('no profile row');
+    cacheProfile(user.id, data);
+    return data;
+  } catch (err) {
+    const cached = getCachedProfile(user.id);
+    if (cached) {
+      console.warn('[Profile] using cached profile (network unavailable):', err);
+      return cached;
+    }
+    throw err; // no cache to fall back to — caller decides what to do
+  }
 }
 
 async function enterApp(knownUser) {
@@ -557,9 +723,12 @@ async function enterApp(knownUser) {
   // Anything unexpected here (a Supabase error, a network hiccup loading
   // the profile, anything at all) used to leave the page permanently
   // blank, since nothing ever caught it. Now it always falls back to a
-  // normal, usable login screen instead.
+  // normal, usable login screen instead. We deliberately do NOT clear the
+  // stored session here — this only runs when loadProfile() had no cached
+  // fallback to use either (e.g. the very first time this device has ever
+  // loaded a profile), which is a real edge case, but it still isn't proof
+  // the session itself is bad, so we don't force a real re-login over it.
   console.warn('[Auth] enterApp failed, falling back to login:', err);
-  clearStoredSession();
   currentUser = null;
   currentProfile = null;
   $('appShell').style.display = 'none';
@@ -668,7 +837,7 @@ sb.auth.onAuthStateChange(async (event, session) => {
       $('appShell').style.display = 'none';
       showAuthView('setPasswordView');
     } else {
-      await enterApp();
+      await enterApp(session.user);
     }
   }
   if (event === 'SIGNED_OUT') {
@@ -719,7 +888,13 @@ $('authScreen').style.display = 'flex';
       showAuthView('setPasswordView');
       $('authScreen').style.display = 'flex';
     } else {
-      await enterApp();
+      // Pass the already-known session user straight through — this is the
+      // difference between the app requiring a live network round-trip just
+      // to open, and it working offline: getSession() above reads purely
+      // from local storage, so if we hand that user directly to enterApp()
+      // it never needs to ask the server "who is this?" all over again
+      // before showing the app shell.
+      await enterApp(session.user);
     }
   } else {
     $('authScreen').style.display = 'flex';
@@ -727,9 +902,12 @@ $('authScreen').style.display = 'flex';
  } catch (err) {
   // Whatever went wrong (network hiccup, a Supabase error, a corrupted
   // stored session, anything) — never let it leave the screen blank.
-  // Fall back to a normal, usable login screen every time.
+  // Fall back to a normal, usable login screen every time. Note: we do NOT
+  // clear the stored session here — a network hiccup or being offline isn't
+  // proof the session is actually bad, and wiping it would force a real
+  // re-login the next time they open the app even if they were fine, just
+  // briefly offline.
   console.warn('[Auth] startup check failed, falling back to login:', err);
-  clearStoredSession();
   currentUser = null;
   currentProfile = null;
   $('appShell').style.display = 'none';
@@ -746,7 +924,7 @@ $('sendInviteBtn').addEventListener('click', async () => {
   const email = $('inviteEmail').value.trim();
   const fullName = $('inviteName').value.trim();
   if (!email) return;
-  const { data: { session } } = await sb.auth.getSession();
+  const { data: { session } } = await getSessionSafe();
   const { data, error } = await sb.functions.invoke('invite-user', {
     body: { email, fullName },
     headers: { Authorization: `Bearer ${session.access_token}` }
@@ -1463,7 +1641,7 @@ async function renderTank() {
   $('tankStatsArea').innerHTML = '';
   $('tankAlertBanner').style.display = 'none';
   try {
-    const { data: { session } } = await sb.auth.getSession();
+    const { data: { session } } = await getSessionSafe();
     const { data, error } = await sb.functions.invoke('get-tank-level', {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
@@ -1886,7 +2064,7 @@ async function openProjectDetail(jobId, name) {
   populateShareGroupPicker();
   renderProjectStages(jobId);
   renderBoq(jobId);
-  const { data: { session } } = await sb.auth.getSession();
+  const { data: { session } } = await getSessionSafe();
   const { data, error } = await sb.functions.invoke('get-project-report', {
     body: { jobId },
     headers: { Authorization: `Bearer ${session.access_token}` },
@@ -2171,7 +2349,7 @@ if ($('shareProjectBtn')) {
       if (error) throw error;
 
       if (newMsg) {
-        const { data: { session } } = await sb.auth.getSession();
+        const { data: { session } } = await getSessionSafe();
         sb.functions.invoke('send-push', {
           body: { chatId, messageId: newMsg.id },
           headers: { Authorization: `Bearer ${session?.access_token}` },
@@ -2354,7 +2532,7 @@ async function fetchAndRenderReport() {
   $('gaugeGrid').innerHTML = '<div class="empty">Loading…</div>';
   $('reportTableWrap').innerHTML = '';
   try {
-    const { data: { session } } = await sb.auth.getSession();
+    const { data: { session } } = await getSessionSafe();
     const { data, error } = await sb.functions.invoke('get-report', {
       body: { targetEmail: reportTargetEmail, month: reportMonth },
       headers: { Authorization: `Bearer ${session.access_token}` }
@@ -2728,7 +2906,7 @@ async function sendChatMessage() {
     // Best-effort: trigger a real system notification for the other person(s).
     // Never let a push failure interrupt the chat itself.
     if (newMsg) {
-      const { data: { session } } = await sb.auth.getSession();
+      const { data: { session } } = await getSessionSafe();
       sb.functions.invoke('send-push', {
         body: { chatId: activeChatId, messageId: newMsg.id },
         headers: { Authorization: `Bearer ${session?.access_token}` },
@@ -2864,17 +3042,25 @@ async function syncQueue() {
   if (syncing || !navigator.onLine || !currentUser) return;
   syncing = true;
   try {
-    const { data: { session } } = await sb.auth.getSession();
+    const { data: { session } } = await getSessionSafe();
     if (!session) return;
 
     const entries = await getAllEntries();
     const pending = entries.filter(e => e.status !== 'synced');
     for (const entry of pending) {
       try {
-        const { data, error } = await sb.functions.invoke('submit-entry', {
-          body: entry,
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        });
+        // Timeout guard: this runs automatically every few minutes with no
+        // one watching. Without a limit, one hung request here would keep
+        // "syncing" stuck true forever, silently disabling every future
+        // auto-sync until the app was fully reloaded.
+        const { data, error } = await withTimeout(
+          sb.functions.invoke('submit-entry', {
+            body: entry,
+            headers: { Authorization: `Bearer ${session.access_token}` }
+          }),
+          20000,
+          'Submit entry'
+        );
         if (error || data?.error) throw new Error(data?.error || error.message);
         entry.status = 'synced';
         entry.error = null;
@@ -3029,7 +3215,7 @@ async function sendAiMessage() {
   const loadingEl = addAiMessage('assistant loading', 'Thinking…');
 
   try {
-    const { data: { session } } = await sb.auth.getSession();
+    const { data: { session } } = await getSessionSafe();
     // Same reasoning as chat send/upload above: sb.functions.invoke() has no
     // built-in ceiling of its own, so if the edge function or the network
     // ever genuinely hangs instead of erroring, "Thinking…" would sit there
@@ -3067,6 +3253,24 @@ $('aiInput').addEventListener('keydown', (e) => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+  });
+
+  // RELIABILITY: the app shell uses stale-while-revalidate caching for
+  // instant, consistent open speed — but that means a tab that's already
+  // open (or was cached from before) keeps running whatever JS it already
+  // loaded, even after a newer version has finished downloading in the
+  // background; the swap only used to take effect on the NEXT full open.
+  // That's exactly why a normal browser tab could seem "stuck" on an older
+  // version while a brand-new incognito tab (nothing cached yet) always
+  // got the latest. Once a new service worker actually takes control of
+  // THIS page, reload once, automatically — so every device ends up on the
+  // latest, fixed version without anyone needing to know to hard-refresh
+  // or use incognito.
+  let swRefreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swRefreshing) return;
+    swRefreshing = true;
+    location.reload();
   });
 }
 
