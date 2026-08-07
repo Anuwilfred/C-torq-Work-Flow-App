@@ -313,6 +313,17 @@ $('fetchLocationBtn').addEventListener('click', () => {
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
       const { latitude, longitude } = pos.coords;
+
+      // Map preview is purely decorative — never let it block or delay the
+      // location text (which the offline entry flow actually depends on).
+      // If there's no network, the <img> just fails to load and we hide it.
+      const mapImg = $('locationMapImg');
+      if (mapImg) {
+        mapImg.onerror = () => { mapImg.style.display = 'none'; };
+        mapImg.onload = () => { mapImg.style.display = 'block'; };
+        mapImg.src = `https://staticmap.openstreetmap.de/staticmap.php?center=${latitude},${longitude}&zoom=16&size=340x180&maptype=mapnik&markers=${latitude},${longitude},red-dot`;
+      }
+
       try {
         const res = await fetch(
           `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,

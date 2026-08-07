@@ -204,6 +204,7 @@
                 <input id="location" type="text" placeholder="Tap to fetch, or type manually" />
                 <button type="button" id="fetchLocationBtn">📍 Use my location</button>
               </div>
+              <img id="locationMapImg" style="display:none; margin-top:8px; width:100%; max-width:340px; border-radius:14px; border:1px solid var(--glass-border);" alt="Map showing your location" />
 
               <label for="allowanceLocation">Allowance area (optional)</label>
               <select id="allowanceLocation">
@@ -221,13 +222,14 @@
               <div class="row-2">
                 <div>
                   <label for="startTime">Start time</label>
-                  <input id="startTime" type="time" />
+                  <input id="startTime" type="time" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
                 </div>
                 <div>
                   <label for="endTime">End time</label>
-                  <input id="endTime" type="time" />
+                  <input id="endTime" type="time" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
                 </div>
               </div>
+              <p class="hint" style="margin-top:4px;">Filled automatically by Clock In / Clock Out above — no manual typing.</p>
 
               <label for="lunchMinutes">Break / lunch (minutes)</label>
               <input id="lunchMinutes" type="number" min="0" step="5" value="0" placeholder="e.g. 30 or 60 — leave at 0 if no break" />
