@@ -709,6 +709,21 @@ async function enterApp(knownUser) {
   currentUser = user;
   currentProfile = await loadProfile(user);
 
+  // Belt-and-braces: an admin deactivating someone bans their account at
+  // the Auth level (blocks future sign-ins), but a device that was already
+  // signed in might still be holding a short-lived access token. If that
+  // happens, boot them out here too rather than letting the app shell show.
+  if (currentProfile?.status === 'deactivated') {
+    await sb.auth.signOut().catch(() => {});
+    currentUser = null;
+    currentProfile = null;
+    $('appShell').style.display = 'none';
+    $('authScreen').style.display = 'flex';
+    showAuthView('loginView');
+    $('authMsg').textContent = 'Your account has been deactivated. Contact your admin.';
+    return;
+  }
+
   $('authScreen').style.display = 'none';
   $('appShell').style.display = 'block';
   $('accountEmail').textContent = user.email;
@@ -1061,6 +1076,14 @@ async function renderTeamList() {
         ${deptOptions.replace(`value="${p.department_id || ''}"`, `value="${p.department_id || ''}" selected`)}
       </select>
       <button type="button" class="secondary" data-map-access="${p.id}" data-map-access-name="${escapeHtml(p.full_name || p.email)}" ${p.role === 'admin' ? 'disabled title="Admins already see everything"' : ''}>🔐 Map Access</button>
+      ${p.role === 'admin'
+        ? `<button type="button" class="secondary" data-remove-admin="${p.id}" ${p.id === currentUser?.id ? 'disabled title="Can\'t remove your own admin"' : ''}>👑 Remove Admin</button>`
+        : `<button type="button" class="secondary" data-make-admin="${p.id}">👑 Make Admin</button>`}
+      ${p.role === 'admin'
+        ? ''
+        : (p.status === 'deactivated'
+            ? `<button type="button" class="secondary" data-reactivate="${p.id}">✅ Reactivate</button>`
+            : `<button type="button" class="secondary" data-deactivate="${p.id}" ${p.id === currentUser?.id ? 'disabled' : ''}>⛔ Deactivate</button>`)}
       <span class="chip ${p.status === 'active' ? 'synced' : 'pending'}">${p.status}</span>
     </div>
   `).join('');
@@ -1084,6 +1107,51 @@ async function renderTeamList() {
     btn.addEventListener('click', () => {
       const person = data.find((p) => p.id === btn.dataset.mapAccess);
       openMapAccessModal(person);
+    });
+  });
+  list.querySelectorAll('[data-make-admin]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Make this person a full system Admin? They will be able to see and manage everything, bypassing Map Access.')) return;
+      const { error: updErr } = await sb.from('profiles').update({ role: 'admin' }).eq('id', btn.dataset.makeAdmin);
+      if (updErr) { showToast(`Couldn't update: ${updErr.message}`); return; }
+      showToast('They are now an Admin.');
+      renderTeamList();
+    });
+  });
+  list.querySelectorAll('[data-remove-admin]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      if (!confirm('Remove Admin from this person? They will go back to whatever Map Access has ticked for them.')) return;
+      const { error: updErr } = await sb.from('profiles').update({ role: 'member' }).eq('id', btn.dataset.removeAdmin);
+      if (updErr) { showToast(`Couldn't update: ${updErr.message}`); return; }
+      showToast('Admin removed.');
+      renderTeamList();
+    });
+  });
+  list.querySelectorAll('[data-deactivate]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      if (!confirm("Deactivate this person? They won't be able to sign in anymore. Their past entries are kept, and you can reactivate them anytime.")) return;
+      const { data: { session } } = await getSessionSafe();
+      const { data: resData, error: fnErr } = await sb.functions.invoke('manage-team-member', {
+        body: { userId: btn.dataset.deactivate, action: 'deactivate' },
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+      if (fnErr || resData?.error) { showToast(`Couldn't deactivate: ${resData?.error || fnErr.message}`); return; }
+      showToast('Deactivated.');
+      renderTeamList();
+    });
+  });
+  list.querySelectorAll('[data-reactivate]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { data: { session } } = await getSessionSafe();
+      const { data: resData, error: fnErr } = await sb.functions.invoke('manage-team-member', {
+        body: { userId: btn.dataset.reactivate, action: 'reactivate' },
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+      if (fnErr || resData?.error) { showToast(`Couldn't reactivate: ${resData?.error || fnErr.message}`); return; }
+      showToast('Reactivated — they can sign in again.');
+      renderTeamList();
     });
   });
 }
