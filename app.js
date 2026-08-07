@@ -1063,7 +1063,7 @@ async function renderTeamList() {
   const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
   const roleOptions = '<option value="">No role</option>' + roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
   list.innerHTML = data.map(p => `
-    <div class="entry">
+    <div class="entry team-entry">
       <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
       <div class="entry-body">
         <div class="entry-meta">${escapeHtml(p.full_name || p.email)}</div>

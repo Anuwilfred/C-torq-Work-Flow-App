@@ -426,6 +426,26 @@ button.ghost:hover { color: var(--text); }
 }
 .entry:last-child { margin-bottom: 0; }
 
+/* Team rows (Admin → Team) pack a lot more controls per person — role,
+   department, Map Access, Make/Remove Admin, Deactivate, status chip — than
+   a normal entry row. Rather than squeezing them all into one line (which
+   crushes each button down to an unreadable circle on narrower screens),
+   let the name/email sit on its own full-width line and everything else
+   wrap naturally onto however many rows it needs below. */
+.entry.team-entry {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+.entry.team-entry .entry-body {
+  flex: 1 1 100%;
+  min-width: 100%;
+}
+.entry.team-entry .position-select,
+.entry.team-entry button.secondary {
+  flex: none;
+  white-space: nowrap;
+}
+
 .type-icon {
   flex: none;
   width: 36px;
