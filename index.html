@@ -73,37 +73,37 @@
   <main>
     <nav class="tabs">
       <button data-tab="home" class="active">Home</button>
-      <button data-tab="entry">New Entry</button>
-      <button data-tab="queue">Queue</button>
-      <button data-tab="reports">Reports</button>
+      <button data-tab="entry" data-feature="entry">New Entry</button>
+      <button data-tab="queue" data-feature="queue">Queue</button>
+      <button data-tab="reports" data-feature="reports">Reports</button>
       <button data-tab="admin" id="adminTabBtn" style="display:none">Admin</button>
-      <button data-tab="settings">Settings</button>
+      <button data-tab="settings" data-feature="settings">Settings</button>
     </nav>
 
     <!-- HOME — macOS-style icon grid, one tile per section -->
     <section id="home" class="panel active">
       <div class="home-grid">
-        <button type="button" class="home-tile" data-tab="entry">
+        <button type="button" class="home-tile" data-tab="entry" data-feature="entry">
           <span class="home-tile-icon">📝</span>
           <span class="home-tile-label">New Entry</span>
         </button>
-        <button type="button" class="home-tile" data-tab="queue">
+        <button type="button" class="home-tile" data-tab="queue" data-feature="queue">
           <span class="home-tile-icon">📋</span>
           <span class="home-tile-label">Queue</span>
         </button>
-        <button type="button" class="home-tile" data-tab="reports">
+        <button type="button" class="home-tile" data-tab="reports" data-feature="reports">
           <span class="home-tile-icon">📊</span>
           <span class="home-tile-label">Reports</span>
         </button>
-        <button type="button" class="home-tile" data-open="projects" data-hide-create="true">
+        <button type="button" class="home-tile" data-open="projects" data-hide-create="true" data-feature="projects">
           <span class="home-tile-icon">📁</span>
           <span class="home-tile-label">Active Projects</span>
         </button>
-        <button type="button" class="home-tile" id="homeChatTile">
+        <button type="button" class="home-tile" id="homeChatTile" data-feature="chat">
           <span class="home-tile-icon">💬</span>
           <span class="home-tile-label">Chat</span>
         </button>
-        <button type="button" class="home-tile" data-tab="settings">
+        <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
         </button>
@@ -112,31 +112,31 @@
       <!-- More tools — same tile style as above, was floating on the right
            edge before; now it just lives lower on the Home page. -->
       <div id="adminRail" class="home-grid" style="display:none; margin-top:8px;">
-        <button type="button" class="home-tile" data-open="projects">
+        <button type="button" class="home-tile" data-open="projects" data-feature="projects">
           <span class="home-tile-icon home-tile-icon-projects">📁</span>
           <span class="home-tile-label">Projects</span>
         </button>
-        <button type="button" class="home-tile" data-open="departments">
+        <button type="button" class="home-tile" data-open="departments" data-feature="departments">
           <span class="home-tile-icon home-tile-icon-departments">🏢</span>
           <span class="home-tile-label">Departments</span>
         </button>
-        <button type="button" class="home-tile" data-open="learning">
+        <button type="button" class="home-tile" data-open="learning" data-feature="learning">
           <span class="home-tile-icon home-tile-icon-learning">🎓</span>
           <span class="home-tile-label">Learning</span>
         </button>
-        <button type="button" class="home-tile" data-open="health">
+        <button type="button" class="home-tile" data-open="health" data-feature="health">
           <span class="home-tile-icon home-tile-icon-health">💪</span>
           <span class="home-tile-label">Health</span>
         </button>
-        <button type="button" class="home-tile" data-open="clients">
+        <button type="button" class="home-tile" data-open="clients" data-feature="clients">
           <span class="home-tile-icon home-tile-icon-clients">🤝</span>
           <span class="home-tile-label">Clients</span>
         </button>
-        <button type="button" class="home-tile" data-open="quotations">
+        <button type="button" class="home-tile" data-open="quotations" data-feature="quotations">
           <span class="home-tile-icon home-tile-icon-quotations">🧾</span>
           <span class="home-tile-label">Quotations</span>
         </button>
-        <button type="button" class="home-tile" data-open="tank">
+        <button type="button" class="home-tile" data-open="tank" data-feature="tank">
           <span class="home-tile-icon home-tile-icon-tank">🛢️</span>
           <span class="home-tile-label">Project Tank</span>
         </button>
@@ -369,8 +369,19 @@
         <input id="inviteEmail" type="email" placeholder="name@example.com" />
         <label for="inviteName">Full name (optional)</label>
         <input id="inviteName" type="text" placeholder="e.g. Priya" />
+        <label for="inviteRole">Role</label>
+        <select id="inviteRole">
+          <option value="">No role yet</option>
+        </select>
         <button id="sendInviteBtn" class="primary">Send invite</button>
-        <p class="hint">They'll get an email to confirm and set their own password. Once accepted, they show up as "active" below.</p>
+        <p class="hint">They'll get an email to confirm and set their own password. Once accepted, they show up as "active" below. They'll start with basic access (New Entry, Queue, Chat) — use Map Access below to open up more.</p>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">Roles</strong>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newRoleName" type="text" placeholder="Add a new role (e.g. Quality Inspector)" />
+          <button type="button" id="addRoleBtn" class="secondary">+ Add Role</button>
+        </div>
       </div>
       <div class="card glass">
         <strong style="font-size:14px;">Team</strong>
@@ -777,6 +788,22 @@
     </div>
     <div class="panel-body">
       <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAP ACCESS OVERLAY — admin ticks which dashboard features one person can see -->
+<div id="mapAccessOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="mapAccessOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Map Access — <span id="mapAccessPersonName">—</span></strong>
+      <button type="button" class="ghost" data-close="mapAccess">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Tick what this person is allowed to see on their dashboard. Untick everything else to hide it.</p>
+      <div id="mapAccessList" style="display:flex; flex-direction:column; gap:8px; margin:10px 0;"></div>
+      <button type="button" id="mapAccessSaveBtn" class="primary">Save access</button>
     </div>
   </div>
 </div>

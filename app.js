@@ -715,10 +715,7 @@ async function enterApp(knownUser) {
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   $('adminHomeBtn').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
   $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
-  $('aiOrb').style.display = 'flex';
-  $('aiOrbLabel').style.display = 'block';
-  $('chatOrb').style.display = 'flex';
-  $('chatOrbLabel').style.display = 'block';
+  applyFeatureAccess();
   startPresence();
   populateAllowanceDropdown();
   populateJobIdDropdown();
@@ -934,10 +931,11 @@ $('authScreen').style.display = 'flex';
 $('sendInviteBtn').addEventListener('click', async () => {
   const email = $('inviteEmail').value.trim();
   const fullName = $('inviteName').value.trim();
+  const roleId = $('inviteRole').value || null;
   if (!email) return;
   const { data: { session } } = await getSessionSafe();
   const { data, error } = await sb.functions.invoke('invite-user', {
-    body: { email, fullName },
+    body: { email, fullName, roleId },
     headers: { Authorization: `Bearer ${session.access_token}` }
   });
   if (error || data?.error) {
@@ -952,15 +950,103 @@ $('sendInviteBtn').addEventListener('click', async () => {
 
 const POSITION_LABEL = { engineer: 'Engineer', technician: 'Technician', other: 'Other' };
 
+// Dashboard feature keys — must match the data-feature attributes on the
+// home tiles / nav tabs in index.html, plus the two floating orbs (chat, ai)
+// which are gated by id directly in applyFeatureAccess() below.
+const FEATURE_LIST = [
+  { key: 'entry', label: 'New Entry (timesheet & leave submission)' },
+  { key: 'queue', label: 'Queue (their own submitted entries)' },
+  { key: 'reports', label: 'Reports' },
+  { key: 'projects', label: 'Projects' },
+  { key: 'chat', label: 'Team Chat' },
+  { key: 'ai', label: 'AEON Ai Assistant' },
+  { key: 'settings', label: 'Settings' },
+  { key: 'departments', label: 'Departments' },
+  { key: 'learning', label: 'Learning' },
+  { key: 'health', label: 'Health Challenges' },
+  { key: 'clients', label: 'Clients' },
+  { key: 'quotations', label: 'Quotations' },
+  { key: 'tank', label: 'Project Tank' },
+];
+
+// Hides every dashboard element tagged data-feature="X" (nav tabs, home
+// tiles) plus the two floating orbs (chat, ai) unless X is in this person's
+// allowed_features — a system admin (profiles.role === 'admin') always sees
+// everything, regardless of what's ticked in Map Access.
+function applyFeatureAccess() {
+  const isAdmin = currentProfile?.role === 'admin';
+  const allowed = Array.isArray(currentProfile?.allowed_features) ? currentProfile.allowed_features : [];
+  const has = (key) => isAdmin || allowed.includes(key);
+
+  document.querySelectorAll('[data-feature]').forEach((el) => {
+    el.style.display = has(el.dataset.feature) ? '' : 'none';
+  });
+
+  const chatOn = has('chat');
+  $('chatOrb').style.display = chatOn ? 'flex' : 'none';
+  $('chatOrbLabel').style.display = chatOn ? 'block' : 'none';
+
+  const aiOn = has('ai');
+  $('aiOrb').style.display = aiOn ? 'flex' : 'none';
+  $('aiOrbLabel').style.display = aiOn ? 'block' : 'none';
+
+  // If the person's current tab just got hidden out from under them (e.g.
+  // an admin revoked Reports while they were on it), send them back Home
+  // rather than leaving a blank/inaccessible panel showing.
+  const activeTabBtn = document.querySelector('nav.tabs button.active');
+  const activeTab = activeTabBtn?.dataset.tab;
+  if (activeTab && activeTab !== 'home' && activeTab !== 'admin' && !has(activeTab)) {
+    document.querySelector('nav.tabs [data-tab="home"]')?.click();
+  }
+}
+
+// This person's job-title role decides which internal budget bucket
+// ('engineer' | 'technician' | 'other') their hours count toward in Reports
+// — same two buckets that already existed, just now driven by the richer
+// role list instead of a hardcoded dropdown.
+function positionForRoleName(name) {
+  const n = (name || '').toLowerCase();
+  if (n === 'engineer') return 'engineer';
+  if (n === 'technician') return 'technician';
+  return 'other';
+}
+
+async function fetchRoles() {
+  const { data, error } = await sb.from('roles').select('id, name').order('name');
+  return error ? [] : (data || []);
+}
+
+async function populateInviteRoleDropdown() {
+  const sel = $('inviteRole');
+  if (!sel) return;
+  const roles = await fetchRoles();
+  sel.innerHTML = '<option value="">No role yet</option>' +
+    roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
+}
+populateInviteRoleDropdown();
+
+$('addRoleBtn')?.addEventListener('click', async () => {
+  const name = $('newRoleName').value.trim();
+  if (!name) return;
+  const { error } = await sb.from('roles').insert({ name });
+  if (error) { showToast(`Couldn't add role: ${error.message}`); return; }
+  $('newRoleName').value = '';
+  showToast('Role added.');
+  populateInviteRoleDropdown();
+  renderTeamList();
+});
+
 async function renderTeamList() {
   const list = $('teamList');
-  const [{ data, error }, { rows: depts }] = await Promise.all([
-    sb.from('profiles').select('id, email, full_name, role, status, position, department_id, created_at').order('created_at', { ascending: false }),
+  const [{ data, error }, { rows: depts }, roles] = await Promise.all([
+    sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at').order('created_at', { ascending: false }),
     fetchDepartments(),
+    fetchRoles(),
   ]);
   if (error) { list.innerHTML = `<div class="empty">Couldn't load team list.</div>`; return; }
   if (!data.length) { list.innerHTML = '<div class="empty">No one invited yet.</div>'; return; }
   const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+  const roleOptions = '<option value="">No role</option>' + roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
   list.innerHTML = data.map(p => `
     <div class="entry">
       <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
@@ -968,20 +1054,23 @@ async function renderTeamList() {
         <div class="entry-meta">${escapeHtml(p.full_name || p.email)}</div>
         <div class="entry-desc">${escapeHtml(p.email)}</div>
       </div>
-      <select class="position-select" data-position-user="${p.id}" ${p.role === 'admin' ? 'disabled' : ''}>
-        ${Object.entries(POSITION_LABEL).map(([val, label]) => `<option value="${val}" ${p.position === val ? 'selected' : ''}>${label}</option>`).join('')}
+      <select class="position-select" data-role-user="${p.id}">
+        ${roleOptions.replace(`value="${p.role_id || ''}"`, `value="${p.role_id || ''}" selected`)}
       </select>
       <select class="position-select" data-department-user="${p.id}">
         ${deptOptions.replace(`value="${p.department_id || ''}"`, `value="${p.department_id || ''}" selected`)}
       </select>
+      <button type="button" class="secondary" data-map-access="${p.id}" data-map-access-name="${escapeHtml(p.full_name || p.email)}" ${p.role === 'admin' ? 'disabled title="Admins already see everything"' : ''}>🔐 Map Access</button>
       <span class="chip ${p.status === 'active' ? 'synced' : 'pending'}">${p.status}</span>
     </div>
   `).join('');
-  list.querySelectorAll('[data-position-user]').forEach((sel) => {
+  list.querySelectorAll('[data-role-user]').forEach((sel) => {
     sel.addEventListener('change', async () => {
-      const { error: updErr } = await sb.from('profiles').update({ position: sel.value }).eq('id', sel.dataset.positionUser);
-      if (updErr) { showToast(`Couldn't update position: ${updErr.message}`); return; }
-      showToast('Position updated.');
+      const roleName = sel.options[sel.selectedIndex]?.textContent || '';
+      const position = positionForRoleName(roleName);
+      const { error: updErr } = await sb.from('profiles').update({ role_id: sel.value || null, position }).eq('id', sel.dataset.roleUser);
+      if (updErr) { showToast(`Couldn't update role: ${updErr.message}`); return; }
+      showToast('Role updated.');
     });
   });
   list.querySelectorAll('[data-department-user]').forEach((sel) => {
@@ -991,7 +1080,42 @@ async function renderTeamList() {
       showToast('Department updated.');
     });
   });
+  list.querySelectorAll('[data-map-access]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const person = data.find((p) => p.id === btn.dataset.mapAccess);
+      openMapAccessModal(person);
+    });
+  });
 }
+
+// =====================================================================
+// MAP ACCESS — admin ticks which dashboard features one person can see.
+// =====================================================================
+
+let mapAccessUserId = null;
+
+function openMapAccessModal(person) {
+  mapAccessUserId = person.id;
+  $('mapAccessPersonName').textContent = person.full_name || person.email;
+  const current = Array.isArray(person.allowed_features) ? person.allowed_features : [];
+  $('mapAccessList').innerHTML = FEATURE_LIST.map((f) => `
+    <label style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" value="${f.key}" ${current.includes(f.key) ? 'checked' : ''} />
+      ${escapeHtml(f.label)}
+    </label>
+  `).join('');
+  openPanel('mapAccess');
+}
+
+$('mapAccessSaveBtn').addEventListener('click', async () => {
+  if (!mapAccessUserId) return;
+  const checked = [...$('mapAccessList').querySelectorAll('input[type="checkbox"]:checked')].map((i) => i.value);
+  const { error } = await sb.from('profiles').update({ allowed_features: checked }).eq('id', mapAccessUserId);
+  if (error) { showToast(`Couldn't save access: ${error.message}`); return; }
+  showToast('Access updated.');
+  closePanel('mapAccess');
+  renderTeamList();
+});
 
 // =====================================================================
 // LOCATIONS & ALLOWANCES — admin-managed list; used to auto-add extra hours
@@ -1153,6 +1277,7 @@ const PANEL_IDS = {
   quotations: ['quotationsOverlay', 'quotationsOverlayBackdrop'],
   quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
+  mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
