@@ -329,6 +329,19 @@ button.secondary {
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+button.secondary.active { border-color: var(--accent); color: var(--accent); background: var(--glass-strong); }
+
+/* Job Allocation — draft-then-publish planner */
+.alloc-job-card { border: 1px solid var(--glass-border-strong); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--glass); }
+.alloc-job-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.alloc-job-card .alloc-remove-job { background: none; border: none; color: var(--danger, #e05d5d); font-size: 12px; cursor: pointer; padding: 4px; }
+.alloc-person-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12.5px; }
+.alloc-person-row.conflict { opacity: 0.45; }
+.alloc-person-row .alloc-person-name { flex: 1; }
+.alloc-person-row .alloc-conflict-note { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.alloc-manage-card { border: 1px solid var(--glass-border-strong); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--glass); }
+.alloc-manage-card .entry { padding: 6px 0; }
+.alloc-manage-remove { background: none; border: none; color: var(--danger, #e05d5d); font-size: 14px; cursor: pointer; padding: 2px 6px; }
 
 button.ghost {
   padding: 9px 16px;

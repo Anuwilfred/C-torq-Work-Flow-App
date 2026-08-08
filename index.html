@@ -865,30 +865,35 @@
       <button type="button" class="ghost" data-close="allocation">✕</button>
     </div>
     <div class="panel-body">
-      <label for="allocationDate">Date</label>
-      <input id="allocationDate" type="date" />
-
-      <label for="allocationJobSearch">Job number</label>
-      <div class="job-search-wrap" style="position:relative;">
-        <input id="allocationJobSearch" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
-        <div id="allocationJobResults" class="job-search-results" style="display:none;"></div>
+      <div style="display:flex; gap:8px; margin-bottom:14px;">
+        <button type="button" class="secondary" id="allocPlanTabBtn">📝 Plan &amp; Publish</button>
+        <button type="button" class="secondary" id="allocManageTabBtn">📋 Manage</button>
       </div>
 
-      <div id="allocationSelectedJobCard" class="card glass" style="display:none; margin-top:14px;">
-        <strong id="allocationSelectedJobTitle" style="font-size:14px;">—</strong>
-        <p class="hint" id="allocationSelectedJobSub" style="margin-top:2px;"></p>
+      <!-- PLAN — build up any number of jobs (each with its own people +
+           one driver) before anything is saved. Nothing here touches the
+           database until Publish is tapped. -->
+      <div id="allocPlanView">
+        <label for="allocationDate">Date</label>
+        <input id="allocationDate" type="date" />
 
-        <label for="allocationLocation">Location / pickup (optional, applied to anyone you tick)</label>
+        <label for="allocationJobSearch">Add a job</label>
         <div class="job-search-wrap" style="position:relative;">
-          <input id="allocationLocation" type="text" placeholder="Type an address, or search..." autocomplete="off" />
-          <div id="allocationLocationResults" class="job-search-results" style="display:none;"></div>
+          <input id="allocationJobSearch" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+          <div id="allocationJobResults" class="job-search-results" style="display:none;"></div>
         </div>
 
-        <div style="margin-top:14px;">
-          <strong style="font-size:13px;">Tick everyone on this job (on this date)</strong>
-          <p class="hint" style="margin-top:2px;">Tick "On job" for regular workers, or "Driver" if they're driving for this job — no limit on how many people. Ticking one clears the other for that person.</p>
-          <div id="allocationPeopleList" style="margin-top:8px; max-height:360px; overflow-y:auto;"><div class="empty">Pick a job above first.</div></div>
-        </div>
+        <div id="allocationDraftList" style="margin-top:14px;"><div class="empty">No jobs added yet — search above to add one.</div></div>
+
+        <button type="button" id="allocationPublishBtn" class="primary" style="margin-top:18px;">🚀 Publish <span id="allocationPublishCount"></span></button>
+        <p class="hint">Nothing is saved or visible to anyone until you tap Publish.</p>
+      </div>
+
+      <!-- MANAGE — everything already published; edit or delete directly. -->
+      <div id="allocManageView" style="display:none;">
+        <label for="allocManageDate">Date</label>
+        <input id="allocManageDate" type="date" />
+        <div id="allocManageList" style="margin-top:14px;"></div>
       </div>
 
       <div class="section-divider"></div>
