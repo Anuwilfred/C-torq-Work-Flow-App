@@ -1481,17 +1481,23 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 14px 12px;
+  padding: 18px 16px 14px;
 }
-.chat-new-buttons { display: flex; gap: 6px; }
+.chat-sidebar-header strong { font-size: 17px; }
+.chat-new-buttons { display: flex; gap: 8px; }
 .chat-new-buttons button {
-  padding: 6px 9px;
-  border-radius: 10px;
+  padding: 9px 13px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 12px;
   border: 1px solid var(--glass-border-strong);
   background: var(--glass);
   color: var(--text);
-  font-size: 12px;
+  font-size: 15px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .chat-new-buttons button:hover { border-color: var(--accent); }
 
