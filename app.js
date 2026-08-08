@@ -1754,6 +1754,10 @@ function allocPersonDisplay(p) {
 }
 
 function removeJobFromDraft(idx) {
+  const job = allocationDraftJobs.find((j) => j.idx === idx);
+  if (!job) return;
+  const peopleCount = job.workers.size + (job.driverId ? 1 : 0);
+  if (peopleCount > 0 && !confirm(`Remove job ${job.jobId}? This clears the ${peopleCount} ${peopleCount === 1 ? 'person' : 'people'} ticked for it — nothing has been published yet, so this can't be undone.`)) return;
   allocationDraftJobs = allocationDraftJobs.filter((j) => j.idx !== idx);
   renderAllocationDraft();
 }
@@ -2690,7 +2694,7 @@ async function fetchProjects() {
   try {
     const { data, error } = await sb
       .from('projects')
-      .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status')
+      .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status, received_date')
       .order('created_at', { ascending: false });
     if (error) { console.error('fetchProjects failed:', error); return { rows: [], error }; }
     return { rows: data || [], error: null };
@@ -2722,7 +2726,7 @@ async function renderProjectsList(isRetry = false) {
       <span class="type-icon">📁</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
-        <div class="entry-meta">Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
+        <div class="entry-meta">${r.received_date ? escapeHtml(r.received_date) + ' · ' : ''}Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
       </div>
       ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
     </div>
@@ -2788,7 +2792,7 @@ function renderImportJobsResults(newJobs, alreadyExists) {
     <label class="entry" style="cursor:pointer;">
       <input type="checkbox" class="import-job-check" data-idx="${i}" checked style="margin-right:10px;" />
       <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(j.job_id)}</div>
+        <div class="entry-desc">${escapeHtml(j.job_id)}${j.date ? ` <span style="color:var(--text-dim); font-weight:400; font-size:11.5px;">— ${escapeHtml(j.date)}</span>` : ''}</div>
         <div class="entry-meta">${escapeHtml(j.description || '—')}${j.client ? ' · ' + escapeHtml(j.client) : ''}</div>
       </div>
     </label>
@@ -2812,6 +2816,7 @@ function renderImportJobsResults(newJobs, alreadyExists) {
         job_id: j.job_id,
         name: j.description || null,
         client: j.client || null,
+        received_date: j.date || null,
         allocated_hours_engineer: 0,
         allocated_hours_technician: 0,
         created_by: currentUser.id,
