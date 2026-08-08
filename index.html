@@ -879,7 +879,10 @@
         <p class="hint" id="allocationSelectedJobSub" style="margin-top:2px;"></p>
 
         <label for="allocationLocation">Location / pickup (optional, applied to anyone you tick)</label>
-        <input id="allocationLocation" type="text" placeholder="e.g. Site address or pickup point" />
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="allocationLocation" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+          <div id="allocationLocationResults" class="job-search-results" style="display:none;"></div>
+        </div>
 
         <div style="margin-top:14px;">
           <strong style="font-size:13px;">Tick everyone on this job (on this date)</strong>

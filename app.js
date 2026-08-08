@@ -1711,6 +1711,7 @@ async function openAllocationPanel() {
   wireAllocationJobSearch();
   wireAddressSearch('tripFrom', 'tripFromResults');
   wireAddressSearch('tripTo', 'tripToResults');
+  wireAddressSearch('allocationLocation', 'allocationLocationResults');
 }
 
 async function populateDriverSelects() {
