@@ -899,6 +899,7 @@ async function enterApp(knownUser) {
   startPresence();
   populateAllowanceDropdown();
   populateJobIdDropdown().then(renderMyTodayAssignment);
+  renderMyTripsToday();
   // Projects / Learning / Health Challenges are visible to everyone now —
   // only creating/deleting projects (and setting positions) stays admin-only.
   $('adminRail').style.display = 'grid';
@@ -1663,11 +1664,154 @@ async function populateAllocationPersonSelect() {
 
 async function openAllocationPanel() {
   if (!$('allocationDate').value) $('allocationDate').value = new Date().toISOString().slice(0, 10);
+  if (!$('tripDate').value) $('tripDate').value = new Date().toISOString().slice(0, 10);
+  if (!$('activityDate').value) $('activityDate').value = new Date().toISOString().slice(0, 10);
   allocationSelectedJobId = null;
   $('allocationSelectedJobCard').style.display = 'none';
   $('allocationJobSearch').value = '';
-  await Promise.all([populateAllocationPersonSelect(), populateJobIdDropdown()]);
+  await Promise.all([populateAllocationPersonSelect(), populateJobIdDropdown(), populateDriverSelects()]);
   wireAllocationJobSearch();
+  wireAddressSearch('tripFrom', 'tripFromResults');
+  wireAddressSearch('tripTo', 'tripToResults');
+}
+
+async function populateDriverSelects() {
+  const { data, error } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
+  const people = error ? [] : (data || []);
+  const options = people.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+  if ($('tripDriverSelect')) $('tripDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
+  if ($('activityDriverSelect')) $('activityDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
+}
+
+// Free, no-API-key forward address search (Nominatim) — debounced so typing
+// doesn't hammer the public API. Picking a result fills the field with the
+// full address and stashes lat/lon on the input for saving; typing without
+// picking a result still works, it's just plain text with no coordinates.
+let addressSearchTimer = null;
+function wireAddressSearch(inputId, resultsId) {
+  const input = $(inputId);
+  const box = $(resultsId);
+  if (!input || !box || input.dataset.wired) return;
+  input.dataset.wired = 'true';
+  input.addEventListener('input', () => {
+    input.dataset.lat = '';
+    input.dataset.lon = '';
+    clearTimeout(addressSearchTimer);
+    const q = input.value.trim();
+    if (q.length < 3) { box.style.display = 'none'; return; }
+    addressSearchTimer = setTimeout(async () => {
+      let results = [];
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`, { headers: { Accept: 'application/json' } });
+        results = await res.json();
+      } catch { /* offline/unreachable — plain typed text still works */ }
+      box.innerHTML = results.length
+        ? results.map((r, i) => `
+            <div class="job-search-item" data-idx="${i}">
+              <div class="jid">${escapeHtml(String(r.display_name).split(',')[0])}</div>
+              <div class="jdesc">${escapeHtml(r.display_name)}</div>
+            </div>
+          `).join('')
+        : '<div class="job-search-empty">No matching address — your typed text will still be saved.</div>';
+      box.style.display = 'block';
+      box.querySelectorAll('.job-search-item[data-idx]').forEach((item) => {
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const r = results[Number(item.dataset.idx)];
+          input.value = r.display_name;
+          input.dataset.lat = r.lat;
+          input.dataset.lon = r.lon;
+          box.style.display = 'none';
+        });
+      });
+    }, 400);
+  });
+  input.addEventListener('blur', () => { setTimeout(() => { box.style.display = 'none'; }, 150); });
+}
+
+$('addTripBtn')?.addEventListener('click', async () => {
+  const driverId = $('tripDriverSelect').value;
+  const workDate = $('tripDate').value;
+  const fromLabel = $('tripFrom').value.trim();
+  const toLabel = $('tripTo').value.trim();
+  if (!driverId || !workDate || !fromLabel || !toLabel) { showToast('Pick a driver, date, from and to.'); return; }
+  const { error } = await sb.from('driver_trips').insert({
+    driver_id: driverId,
+    work_date: workDate,
+    trip_time: $('tripTime').value || null,
+    job_id: $('tripJobId').value.trim() || null,
+    from_label: fromLabel,
+    from_lat: $('tripFrom').dataset.lat ? parseFloat($('tripFrom').dataset.lat) : null,
+    from_lon: $('tripFrom').dataset.lon ? parseFloat($('tripFrom').dataset.lon) : null,
+    to_label: toLabel,
+    to_lat: $('tripTo').dataset.lat ? parseFloat($('tripTo').dataset.lat) : null,
+    to_lon: $('tripTo').dataset.lon ? parseFloat($('tripTo').dataset.lon) : null,
+    km: $('tripKm').value ? parseFloat($('tripKm').value) : null,
+    created_by: currentUser.id,
+  });
+  if (error) { showToast(`Couldn't add trip: ${error.message}`); return; }
+  $('tripFrom').value = '';
+  $('tripTo').value = '';
+  $('tripTime').value = '';
+  $('tripKm').value = '';
+  $('tripJobId').value = '';
+  showToast('Trip added.');
+});
+
+$('viewActivityBtn')?.addEventListener('click', async () => {
+  const driverId = $('activityDriverSelect').value;
+  const date = $('activityDate').value;
+  if (!driverId || !date) { showToast('Pick a driver and a date.'); return; }
+  const { data, error } = await sb
+    .from('driver_trips')
+    .select('id, trip_time, job_id, from_label, to_label, km')
+    .eq('driver_id', driverId)
+    .eq('work_date', date)
+    .order('trip_time', { ascending: true });
+  if (error) { showToast(`Couldn't load activity: ${error.message}`); return; }
+  const rows = data || [];
+  const totalKm = rows.reduce((sum, r) => sum + (parseFloat(r.km) || 0), 0);
+  $('activitySummary').style.display = 'block';
+  $('activityTotalKm').textContent = `${totalKm.toFixed(1)} km`;
+  $('activityTripCount').textContent = String(rows.length);
+  const list = $('activityTripList');
+  if (!rows.length) { list.innerHTML = '<div class="empty">No trips logged for this date.</div>'; return; }
+  list.innerHTML = rows.map((r) => `
+    <div class="entry">
+      <span class="type-icon">🚗</span>
+      <div class="entry-body">
+        <div class="entry-desc">${r.trip_time ? escapeHtml(String(r.trip_time).slice(0, 5)) + ' — ' : ''}${escapeHtml(r.from_label || '?')} → ${escapeHtml(r.to_label || '?')}</div>
+        <div class="entry-meta">${r.job_id ? 'Job ' + escapeHtml(r.job_id) : 'No job linked'}${r.km ? ' · ' + r.km + ' km' : ''}</div>
+      </div>
+    </div>
+  `).join('');
+});
+
+// Shows the signed-in driver's own trips for today — separate from the
+// single "today's job" card, since a driver can have several trips in one
+// day, each with its own from/to and time.
+async function renderMyTripsToday() {
+  const card = $('myTripsCard');
+  const area = $('myTripsArea');
+  if (!card || !area || !currentUser) return;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb
+    .from('driver_trips')
+    .select('trip_time, job_id, from_label, to_label')
+    .eq('driver_id', currentUser.id)
+    .eq('work_date', todayKey)
+    .order('trip_time', { ascending: true });
+  if (error || !data || !data.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  area.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon">🚗</span>
+      <div class="entry-body">
+        <div class="entry-desc">${r.trip_time ? escapeHtml(String(r.trip_time).slice(0, 5)) + ' — ' : ''}${escapeHtml(r.from_label || '?')} → ${escapeHtml(r.to_label || '?')}</div>
+        <div class="entry-meta">${r.job_id ? 'Job ' + escapeHtml(r.job_id) : ''}</div>
+      </div>
+    </div>
+  `).join('');
 }
 
 async function loadAllocationPeople() {

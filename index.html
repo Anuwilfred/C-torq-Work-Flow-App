@@ -153,6 +153,10 @@
         <strong style="font-size:14px;">Today's job</strong>
         <div id="myAssignmentArea" style="margin-top:8px;"></div>
       </div>
+      <div class="card glass" id="myTripsCard" style="display:none;">
+        <strong style="font-size:14px;">🚗 Today's trips</strong>
+        <div id="myTripsArea" style="margin-top:8px;"></div>
+      </div>
       <div class="card glass">
         <form id="entryForm">
           <label for="type">Type</label>
@@ -890,6 +894,67 @@
         <label for="allocationLocation">Location / pickup (optional)</label>
         <input id="allocationLocation" type="text" placeholder="e.g. Site address or pickup point" />
         <button type="button" id="allocationAddBtn" class="primary">Add to job</button>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">🚗 Assign a driver trip</strong>
+        <p class="hint" style="margin-top:2px;">For any pick-up/drop-off — site visits or office runs. Doesn't need a job picked above.</p>
+
+        <label for="tripDriverSelect">Driver</label>
+        <select id="tripDriverSelect">
+          <option value="">Choose a driver</option>
+        </select>
+
+        <label for="tripDate">Date</label>
+        <input id="tripDate" type="date" />
+
+        <label for="tripTime">Time</label>
+        <input id="tripTime" type="time" />
+
+        <label for="tripFrom">From</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="tripFrom" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+          <div id="tripFromResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <label for="tripTo">To</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="tripTo" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+          <div id="tripToResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <label for="tripKm">Distance in KM (optional)</label>
+        <input id="tripKm" type="number" min="0" step="0.1" placeholder="e.g. 18.5" />
+
+        <label for="tripJobId">Link to a job (optional)</label>
+        <input id="tripJobId" type="text" placeholder="Leave blank for office runs / non-job trips" />
+
+        <button type="button" id="addTripBtn" class="primary">Add trip</button>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">👁 Driver Activity</strong>
+        <p class="hint" style="margin-top:2px;">Pick a driver and a date to see every trip they ran and the total distance.</p>
+
+        <label for="activityDriverSelect">Driver</label>
+        <select id="activityDriverSelect">
+          <option value="">Choose a driver</option>
+        </select>
+
+        <label for="activityDate">Date</label>
+        <input id="activityDate" type="date" />
+
+        <button type="button" id="viewActivityBtn" class="secondary" style="margin-top:8px;">View activity</button>
+
+        <div id="activitySummary" style="margin-top:14px; display:none;">
+          <div class="tank-stat-row"><span class="tank-stat-label">Total distance</span><span class="tank-stat-value" id="activityTotalKm">0 km</span></div>
+          <div class="tank-stat-row"><span class="tank-stat-label">Trips</span><span class="tank-stat-value" id="activityTripCount">0</span></div>
+        </div>
+        <div id="activityTripList" style="margin-top:10px;"></div>
       </div>
     </div>
   </div>
