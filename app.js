@@ -1674,14 +1674,19 @@ function wireAllocationJobSearch() {
   const input = $('allocationJobSearch');
   const box = $('allocationJobResults');
   if (!input || !box) return;
-  input.addEventListener('input', () => {
+
+  // Tapping the field opens the FULL job list right away (no typing
+  // required) — typing then narrows it down. This is a "tap to browse,
+  // type to filter" field rather than a search-only one.
+  function showAllocJobMatches() {
     const q = input.value.trim().toLowerCase();
-    if (!q) { box.style.display = 'none'; return; }
-    const matches = jobSearchOptions.filter((r) =>
-      String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
-    ).slice(0, 8);
+    const already = new Set(allocationDraftJobs.map((j) => j.jobId));
+    const pool = jobSearchOptions.filter((r) => !already.has(String(r.job_id)));
+    const matches = q
+      ? pool.filter((r) => String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q))
+      : pool;
     if (!matches.length) {
-      box.innerHTML = '<div class="job-search-empty">No matching job found.</div>';
+      box.innerHTML = `<div class="job-search-empty">${q ? 'No matching job found.' : (jobSearchOptions.length ? 'All jobs are already in your draft.' : 'No active jobs yet — add one under Admin → Projects.')}</div>`;
     } else {
       box.innerHTML = matches.map((r) => `
         <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}" data-job-name="${escapeHtml(r.name || '')}" data-job-client="${escapeHtml(r.client || '')}">
@@ -1699,7 +1704,10 @@ function wireAllocationJobSearch() {
         input.value = '';
       });
     });
-  });
+  }
+  input.addEventListener('focus', showAllocJobMatches);
+  input.addEventListener('click', showAllocJobMatches);
+  input.addEventListener('input', showAllocJobMatches);
   input.addEventListener('blur', () => { setTimeout(() => { box.style.display = 'none'; }, 150); });
 
   $('allocationDate').addEventListener('change', async () => {
