@@ -1124,7 +1124,7 @@ $('authScreen').style.display = 'flex';
 // =====================================================================
 
 async function fetchNews() {
-  const { data, error } = await sb.from('news').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(50);
+  const { data, error } = await sb.from('news').select('id, title, body, created_at, attachment_path, attachment_name, attachment_mime').order('created_at', { ascending: false }).limit(50);
   return error ? [] : (data || []);
 }
 
@@ -1133,13 +1133,40 @@ async function renderNewsList() {
   if (!list) return;
   const rows = await fetchNews();
   if (!rows.length) { list.innerHTML = '<div class="empty">No news yet.</div>'; return; }
-  list.innerHTML = rows.map((n) => `
+  const isAdmin = currentProfile?.role === 'admin';
+  list.innerHTML = rows.map((n) => {
+    let attachmentHtml = '';
+    if (n.attachment_path) {
+      const { data: pub } = sb.storage.from('news-attachments').getPublicUrl(n.attachment_path);
+      const url = pub?.publicUrl;
+      attachmentHtml = (n.attachment_mime || '').startsWith('image/')
+        ? `<img src="${url}" class="chat-img" alt="${escapeHtml(n.attachment_name || 'Attachment')}" style="margin-top:8px;" />`
+        : `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener" style="margin-top:8px;">📎 ${escapeHtml(n.attachment_name || 'Attachment')}</a>`;
+    }
+    return `
     <div class="news-item">
-      <div class="news-item-title">${escapeHtml(n.title)}</div>
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+        <div class="news-item-title">${escapeHtml(n.title)}</div>
+        ${isAdmin ? `<button type="button" class="ghost" data-delete-news="${n.id}" data-attachment="${escapeHtml(n.attachment_path || '')}" title="Delete" style="flex:none; padding:2px 8px;">✕</button>` : ''}
+      </div>
       <div class="news-item-body">${escapeHtml(n.body)}</div>
+      ${attachmentHtml}
       <div class="news-item-date">${new Date(n.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
+  list.querySelectorAll('[data-delete-news]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this news post?')) return;
+      const { error } = await sb.from('news').delete().eq('id', btn.dataset.deleteNews);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      if (btn.dataset.attachment) {
+        sb.storage.from('news-attachments').remove([btn.dataset.attachment]).catch(() => {});
+      }
+      showToast('Deleted.');
+      renderNewsList();
+    });
+  });
   if (rows[0]) {
     try { localStorage.setItem('ctorq-news-last-seen', rows[0].created_at); } catch (e) { /* ignore */ }
   }
@@ -1173,12 +1200,33 @@ $('postNewsBtn')?.addEventListener('click', async () => {
   const title = $('newsTitle').value.trim();
   const body = $('newsBody').value.trim();
   if (!title || !body) { showToast('Add a title and a message.'); return; }
-  const { error } = await sb.from('news').insert({ title, body, created_by: currentUser.id });
-  if (error) { showToast(`Couldn't post: ${error.message}`); return; }
-  $('newsTitle').value = '';
-  $('newsBody').value = '';
-  showToast('Posted.');
-  renderNewsList();
+  const btn = $('postNewsBtn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = 'Posting…';
+  try {
+    let attachment_path = null, attachment_name = null, attachment_mime = null;
+    const file = $('newsFile')?.files?.[0];
+    if (file) {
+      const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+      const { error: upErr } = await sb.storage.from('news-attachments').upload(path, file);
+      if (upErr) { showToast(`Couldn't upload attachment: ${upErr.message}`); return; }
+      attachment_path = path;
+      attachment_name = file.name;
+      attachment_mime = file.type || 'application/octet-stream';
+    }
+    const { error } = await sb.from('news').insert({ title, body, attachment_path, attachment_name, attachment_mime, created_by: currentUser.id });
+    if (error) { showToast(`Couldn't post: ${error.message}`); return; }
+    $('newsTitle').value = '';
+    $('newsBody').value = '';
+    if ($('newsFile')) $('newsFile').value = '';
+    showToast('Posted.');
+    renderNewsList();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
 });
 
 // Swipe-to-open: a touch starting within 24px of the left edge that moves
@@ -1641,7 +1689,6 @@ function wireAllocationJobSearch() {
   $('allocationDate').addEventListener('change', () => {
     if (allocationSelectedJobId) loadAllocationPeople();
   });
-  $('allocationAddBtn').addEventListener('click', addAllocationPerson);
 }
 
 function selectAllocationJob(jobId, jobName) {
@@ -1653,15 +1700,6 @@ function selectAllocationJob(jobId, jobName) {
   loadAllocationPeople();
 }
 
-async function populateAllocationPersonSelect() {
-  const select = $('allocationPersonSelect');
-  if (!select) return;
-  const { data, error } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
-  const people = error ? [] : (data || []);
-  select.innerHTML = '<option value="">Choose a person</option>' +
-    people.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
-}
-
 async function openAllocationPanel() {
   if (!$('allocationDate').value) $('allocationDate').value = new Date().toISOString().slice(0, 10);
   if (!$('tripDate').value) $('tripDate').value = new Date().toISOString().slice(0, 10);
@@ -1669,7 +1707,7 @@ async function openAllocationPanel() {
   allocationSelectedJobId = null;
   $('allocationSelectedJobCard').style.display = 'none';
   $('allocationJobSearch').value = '';
-  await Promise.all([populateAllocationPersonSelect(), populateJobIdDropdown(), populateDriverSelects()]);
+  await Promise.all([populateJobIdDropdown(), populateDriverSelects()]);
   wireAllocationJobSearch();
   wireAddressSearch('tripFrom', 'tripFromResults');
   wireAddressSearch('tripTo', 'tripToResults');
@@ -1814,53 +1852,69 @@ async function renderMyTripsToday() {
   `).join('');
 }
 
+// Tick-list: shows EVERY active person, not just those already on this
+// job — ticking "On job" or "Driver" immediately adds them (no separate Add
+// button, no limit on how many people). The two checkboxes per person are
+// mutually exclusive because the data model still only allows one
+// assignment per person per day; ticking one clears the other for them.
 async function loadAllocationPeople() {
   const list = $('allocationPeopleList');
   if (!allocationSelectedJobId || !$('allocationDate').value) return;
-  const { data, error } = await sb
-    .from('daily_assignments')
-    .select('id, person_id, assignment_type, location, profiles!daily_assignments_person_id_fkey(full_name, email)')
-    .eq('project', allocationSelectedJobId)
-    .eq('work_date', $('allocationDate').value);
-  if (error) { list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
-  if (!data || !data.length) { list.innerHTML = '<div class="empty">No one allocated yet.</div>'; return; }
-  list.innerHTML = data.map((r) => `
-    <div class="entry">
-      <span class="type-icon">${r.assignment_type === 'transportation' ? '🚗' : '🙂'}</span>
-      <div class="entry-body">
-        <div class="entry-meta">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')}${r.assignment_type === 'transportation' ? ' · Driver' : ''}</div>
-        <div class="entry-desc">${escapeHtml(r.location || '')}</div>
+  const [{ data: people, error: peopleErr }, { data: assigned, error: assignErr }] = await Promise.all([
+    sb.from('profiles').select('id, full_name, email').eq('status', 'active').order('full_name', { ascending: true }),
+    sb.from('daily_assignments').select('person_id, assignment_type')
+      .eq('project', allocationSelectedJobId).eq('work_date', $('allocationDate').value),
+  ]);
+  if (peopleErr || assignErr) { list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml((peopleErr || assignErr).message)}</div>`; return; }
+  const assignedMap = new Map((assigned || []).map((a) => [a.person_id, a.assignment_type]));
+  list.innerHTML = (people || []).map((p) => {
+    const type = assignedMap.get(p.id);
+    return `
+      <div class="entry">
+        <span class="type-icon">${type === 'transportation' ? '🚗' : '🙂'}</span>
+        <div class="entry-body">
+          <div class="entry-desc">${escapeHtml(p.full_name || p.email)}</div>
+        </div>
+        <label style="display:flex; align-items:center; gap:4px; font-size:11px; white-space:nowrap;">
+          <input type="checkbox" class="alloc-onjob" data-person="${p.id}" ${type === 'job' ? 'checked' : ''} /> On job
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; font-size:11px; white-space:nowrap;">
+          <input type="checkbox" class="alloc-driver" data-person="${p.id}" ${type === 'transportation' ? 'checked' : ''} /> 🚗 Driver
+        </label>
       </div>
-      <button type="button" class="ghost" data-remove-allocation="${r.id}">✕</button>
-    </div>
-  `).join('');
-  list.querySelectorAll('[data-remove-allocation]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await sb.from('daily_assignments').delete().eq('id', btn.dataset.removeAllocation);
-      loadAllocationPeople();
+    `;
+  }).join('');
+  list.querySelectorAll('.alloc-onjob').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      if (cb.checked) await setAllocation(cb.dataset.person, 'job');
+      else await clearAllocation(cb.dataset.person);
+    });
+  });
+  list.querySelectorAll('.alloc-driver').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      if (cb.checked) await setAllocation(cb.dataset.person, 'transportation');
+      else await clearAllocation(cb.dataset.person);
     });
   });
 }
 
-async function addAllocationPerson() {
-  const personId = $('allocationPersonSelect').value;
-  const workDate = $('allocationDate').value;
-  if (!allocationSelectedJobId) { showToast('Pick a job first.'); return; }
-  if (!personId || !workDate) { showToast('Pick a person and a date.'); return; }
-  const isDriver = $('allocationIsDriver').checked;
+async function setAllocation(personId, type) {
   const { error } = await sb.from('daily_assignments').upsert({
     person_id: personId,
-    work_date: workDate,
+    work_date: $('allocationDate').value,
     project: allocationSelectedJobId,
     location: $('allocationLocation').value.trim() || null,
-    assignment_type: isDriver ? 'transportation' : 'job',
+    assignment_type: type,
     created_by: currentUser.id,
   }, { onConflict: 'person_id,work_date' });
-  if (error) { showToast(`Couldn't allocate: ${error.message}`); return; }
-  $('allocationPersonSelect').value = '';
-  $('allocationIsDriver').checked = false;
-  $('allocationLocation').value = '';
-  showToast('Allocated.');
+  if (error) showToast(`Couldn't update: ${error.message}`);
+  loadAllocationPeople();
+}
+
+async function clearAllocation(personId) {
+  const { error } = await sb.from('daily_assignments').delete()
+    .eq('person_id', personId).eq('work_date', $('allocationDate').value).eq('project', allocationSelectedJobId);
+  if (error) showToast(`Couldn't update: ${error.message}`);
   loadAllocationPeople();
 }
 

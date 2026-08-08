@@ -534,6 +534,8 @@
     <input id="newsTitle" type="text" placeholder="e.g. New safety policy" />
     <label for="newsBody">Message</label>
     <textarea id="newsBody" placeholder="What's the news?"></textarea>
+    <label for="newsFile">Attach a PDF or image (optional)</label>
+    <input id="newsFile" type="file" accept="application/pdf,image/*" />
     <button type="button" id="postNewsBtn" class="primary">Post news</button>
   </div>
   <div id="newsList" class="news-list"></div>
@@ -876,24 +878,14 @@
         <strong id="allocationSelectedJobTitle" style="font-size:14px;">—</strong>
         <p class="hint" id="allocationSelectedJobSub" style="margin-top:2px;"></p>
 
-        <div style="margin-top:14px;">
-          <strong style="font-size:13px;">People allocated for this job on this date</strong>
-          <div id="allocationPeopleList" style="margin-top:8px;"><div class="empty">No one allocated yet.</div></div>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <label for="allocationPersonSelect">Add a person</label>
-        <select id="allocationPersonSelect">
-          <option value="">Choose a person</option>
-        </select>
-        <label class="toggle-row" style="margin-top:10px;">
-          <span>🚗 Assign as driver for this job</span>
-          <input id="allocationIsDriver" type="checkbox" />
-        </label>
-        <label for="allocationLocation">Location / pickup (optional)</label>
+        <label for="allocationLocation">Location / pickup (optional, applied to anyone you tick)</label>
         <input id="allocationLocation" type="text" placeholder="e.g. Site address or pickup point" />
-        <button type="button" id="allocationAddBtn" class="primary">Add to job</button>
+
+        <div style="margin-top:14px;">
+          <strong style="font-size:13px;">Tick everyone on this job (on this date)</strong>
+          <p class="hint" style="margin-top:2px;">Tick "On job" for regular workers, or "Driver" if they're driving for this job — no limit on how many people. Ticking one clears the other for that person.</p>
+          <div id="allocationPeopleList" style="margin-top:8px; max-height:360px; overflow-y:auto;"><div class="empty">Pick a job above first.</div></div>
+        </div>
       </div>
 
       <div class="section-divider"></div>
