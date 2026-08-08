@@ -31,6 +31,29 @@ function raceTimeout(promise, ms) {
   ]);
 }
 
+// supabase-js's sb.functions.invoke() sets error.message to a fixed, useless
+// string — "Edge Function returned a non-2xx status code" — no matter what
+// our own function actually sent back. The real reason (e.g. "AI service
+// timed out", "Admin only", the actual Anthropic error) is only reachable by
+// reading the raw response body off error.context. This digs that out so
+// error messages shown to the user are actually the real ones.
+async function readFunctionsError(error) {
+  if (!error) return 'Unknown error';
+  try {
+    if (error.context && typeof error.context.json === 'function') {
+      const body = await error.context.clone().json();
+      if (body?.error) return body.error;
+    }
+  } catch (e) { /* body wasn't JSON — fall through */ }
+  try {
+    if (error.context && typeof error.context.text === 'function') {
+      const text = await error.context.clone().text();
+      if (text) return text.slice(0, 300);
+    }
+  } catch (e) { /* ignore */ }
+  return error.message || String(error);
+}
+
 // RELIABILITY: a dozen different panels (Projects, Reports, Chat, BOQ,
 // quotations, AI chat, push notifications...) each call sb.auth.getSession()
 // as their very first step before loading any real data. That call can hang
@@ -1128,23 +1151,89 @@ async function fetchNews() {
   return error ? [] : (data || []);
 }
 
+// In-memory model for likes/comments, keyed by news id, so liking or
+// commenting can patch just that one post's DOM instead of re-rendering
+// (and losing) every expanded comment thread on the page.
+let newsState = new Map(); // id -> { likes: Set<personId>, comments: [{id, person_id, body, created_at}] }
+let newsPeopleCache = new Map(); // person_id -> {full_name, email}
+
+async function loadNewsPeopleCache() {
+  if (newsPeopleCache.size) return;
+  const { data } = await sb.from('profiles').select('id, full_name, email');
+  (data || []).forEach((p) => newsPeopleCache.set(p.id, p));
+}
+function newsPersonName(id) {
+  const p = newsPeopleCache.get(id);
+  if (!p) return id === currentUser?.id ? 'You' : 'Someone';
+  return p.full_name || p.email;
+}
+
+function newsCommentRowHtml(c) {
+  const mine = c.person_id === currentUser?.id;
+  const isAdmin = currentProfile?.role === 'admin';
+  return `
+    <div class="news-comment-row" data-comment-id="${c.id}">
+      <div class="news-comment-body-wrap">
+        <div class="news-comment-name">${escapeHtml(newsPersonName(c.person_id))}</div>
+        <div class="news-comment-text">${escapeHtml(c.body)}</div>
+        <div class="news-comment-time">${new Date(c.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div>
+      </div>
+      ${(mine || isAdmin) ? `<button type="button" class="news-comment-del" data-delete-comment="${c.id}" title="Delete comment">✕</button>` : ''}
+    </div>
+  `;
+}
+
+function wireNewsCommentDelete(scopeEl) {
+  scopeEl.querySelectorAll('[data-delete-comment]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this comment?')) return;
+      const commentId = btn.dataset.deleteComment;
+      const { error } = await sb.from('news_comments').delete().eq('id', commentId);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      const row = scopeEl.querySelector(`[data-comment-id="${commentId}"]`);
+      const newsId = row?.closest('[data-news-id]')?.dataset.newsId;
+      row?.remove();
+      if (newsId && newsState.has(newsId)) {
+        const state = newsState.get(newsId);
+        state.comments = state.comments.filter((c) => c.id !== commentId);
+        const countEl = document.querySelector(`[data-comment-count="${newsId}"]`);
+        if (countEl) countEl.textContent = state.comments.length ? String(state.comments.length) : '';
+      }
+    });
+  });
+}
+
 async function renderNewsList() {
   const list = $('newsList');
   if (!list) return;
   const rows = await fetchNews();
   if (!rows.length) { list.innerHTML = '<div class="empty">No news yet.</div>'; return; }
   const isAdmin = currentProfile?.role === 'admin';
+  const ids = rows.map((n) => n.id);
+  await loadNewsPeopleCache();
+  const [{ data: likeRows }, { data: commentRows }] = await Promise.all([
+    sb.from('news_likes').select('news_id, person_id').in('news_id', ids),
+    sb.from('news_comments').select('id, news_id, person_id, body, created_at').in('news_id', ids).order('created_at', { ascending: true }),
+  ]);
+  newsState = new Map(rows.map((n) => [n.id, { likes: new Set(), comments: [] }]));
+  (likeRows || []).forEach((r) => newsState.get(r.news_id)?.likes.add(r.person_id));
+  (commentRows || []).forEach((c) => newsState.get(c.news_id)?.comments.push(c));
+
   list.innerHTML = rows.map((n) => {
     let attachmentHtml = '';
     if (n.attachment_path) {
       const { data: pub } = sb.storage.from('news-attachments').getPublicUrl(n.attachment_path);
       const url = pub?.publicUrl;
       attachmentHtml = (n.attachment_mime || '').startsWith('image/')
-        ? `<img src="${url}" class="chat-img" alt="${escapeHtml(n.attachment_name || 'Attachment')}" style="margin-top:8px;" />`
+        ? `<div class="news-item-media"><img src="${url}" alt="${escapeHtml(n.attachment_name || 'Attachment')}" onclick="window.open(this.src, '_blank')" /></div>`
         : `<a class="chat-file-chip" href="${url}" target="_blank" rel="noopener" style="margin-top:8px;">📎 ${escapeHtml(n.attachment_name || 'Attachment')}</a>`;
     }
+    const state = newsState.get(n.id);
+    const likeCount = state.likes.size;
+    const iLiked = currentUser && state.likes.has(currentUser.id);
+    const commentCount = state.comments.length;
     return `
-    <div class="news-item">
+    <div class="news-item" data-news-id="${n.id}">
       <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
         <div class="news-item-title">${escapeHtml(n.title)}</div>
         ${isAdmin ? `<button type="button" class="ghost" data-delete-news="${n.id}" data-attachment="${escapeHtml(n.attachment_path || '')}" title="Delete" style="flex:none; padding:2px 8px;">✕</button>` : ''}
@@ -1152,9 +1241,25 @@ async function renderNewsList() {
       <div class="news-item-body">${escapeHtml(n.body)}</div>
       ${attachmentHtml}
       <div class="news-item-date">${new Date(n.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div>
+      <div class="news-item-actions">
+        <button type="button" class="news-action-btn${iLiked ? ' liked' : ''}" data-like-btn="${n.id}">
+          <span data-like-icon="${n.id}">${iLiked ? '👍' : '👍🏻'}</span> Like <span data-like-count="${n.id}">${likeCount || ''}</span>
+        </button>
+        <button type="button" class="news-action-btn" data-toggle-comments="${n.id}">
+          💬 Comment <span data-comment-count="${n.id}">${commentCount || ''}</span>
+        </button>
+      </div>
+      <div class="news-comments" data-comments-for="${n.id}">
+        <div class="news-comment-list" data-comment-list="${n.id}">${state.comments.map(newsCommentRowHtml).join('')}</div>
+        <div class="news-comment-input-row">
+          <input type="text" placeholder="Write a comment…" data-comment-input="${n.id}" />
+          <button type="button" class="secondary" data-comment-send="${n.id}">Send</button>
+        </div>
+      </div>
     </div>
   `;
   }).join('');
+
   list.querySelectorAll('[data-delete-news]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('Delete this news post?')) return;
@@ -1167,6 +1272,62 @@ async function renderNewsList() {
       renderNewsList();
     });
   });
+
+  list.querySelectorAll('[data-like-btn]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const newsId = btn.dataset.likeBtn;
+      const state = newsState.get(newsId);
+      if (!state || !currentUser) return;
+      const alreadyLiked = state.likes.has(currentUser.id);
+      btn.disabled = true;
+      if (alreadyLiked) {
+        const { error } = await sb.from('news_likes').delete().eq('news_id', newsId).eq('person_id', currentUser.id);
+        if (!error) state.likes.delete(currentUser.id);
+      } else {
+        const { error } = await sb.from('news_likes').insert({ news_id: newsId, person_id: currentUser.id });
+        if (!error) state.likes.add(currentUser.id);
+      }
+      btn.disabled = false;
+      const nowLiked = state.likes.has(currentUser.id);
+      btn.classList.toggle('liked', nowLiked);
+      document.querySelector(`[data-like-icon="${newsId}"]`).textContent = nowLiked ? '👍' : '👍🏻';
+      document.querySelector(`[data-like-count="${newsId}"]`).textContent = state.likes.size || '';
+    });
+  });
+
+  list.querySelectorAll('[data-toggle-comments]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const el = document.querySelector(`[data-comments-for="${btn.dataset.toggleComments}"]`);
+      el?.classList.toggle('show');
+    });
+  });
+
+  list.querySelectorAll('[data-comment-send]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const newsId = btn.dataset.commentSend;
+      const input = list.querySelector(`[data-comment-input="${newsId}"]`);
+      const body = input.value.trim();
+      if (!body || !currentUser) return;
+      btn.disabled = true;
+      const { data, error } = await sb.from('news_comments').insert({ news_id: newsId, person_id: currentUser.id, body }).select().single();
+      btn.disabled = false;
+      if (error) { showToast(`Couldn't post comment: ${error.message}`); return; }
+      input.value = '';
+      newsState.get(newsId)?.comments.push(data);
+      const listEl = list.querySelector(`[data-comment-list="${newsId}"]`);
+      listEl.insertAdjacentHTML('beforeend', newsCommentRowHtml(data));
+      wireNewsCommentDelete(listEl.lastElementChild);
+      const countEl = list.querySelector(`[data-comment-count="${newsId}"]`);
+      countEl.textContent = String(newsState.get(newsId).comments.length);
+    });
+  });
+  list.querySelectorAll('[data-comment-input]').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') list.querySelector(`[data-comment-send="${input.dataset.commentInput}"]`)?.click();
+    });
+  });
+  wireNewsCommentDelete(list);
+
   if (rows[0]) {
     try { localStorage.setItem('ctorq-news-last-seen', rows[0].created_at); } catch (e) { /* ignore */ }
   }
@@ -1216,13 +1377,20 @@ $('postNewsBtn')?.addEventListener('click', async () => {
       attachment_name = file.name;
       attachment_mime = file.type || 'application/octet-stream';
     }
-    const { error } = await sb.from('news').insert({ title, body, attachment_path, attachment_name, attachment_mime, created_by: currentUser.id });
+    const { data: newRow, error } = await sb.from('news').insert({ title, body, attachment_path, attachment_name, attachment_mime, created_by: currentUser.id }).select().single();
     if (error) { showToast(`Couldn't post: ${error.message}`); return; }
     $('newsTitle').value = '';
     $('newsBody').value = '';
     if ($('newsFile')) $('newsFile').value = '';
     showToast('Posted.');
     renderNewsList();
+    if (newRow) {
+      const { data: { session } } = await getSessionSafe();
+      sb.functions.invoke('send-push', {
+        body: { kind: 'news', newsId: newRow.id },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      }).catch(() => {});
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = originalLabel;
@@ -1263,7 +1431,7 @@ $('sendInviteBtn').addEventListener('click', async () => {
     headers: { Authorization: `Bearer ${session.access_token}` }
   });
   if (error || data?.error) {
-    showToast(`Invite failed: ${data?.error || error.message}`);
+    showToast(`Invite failed: ${data?.error || await readFunctionsError(error)}`);
     return;
   }
   showToast(`Invite sent to ${email}.`);
@@ -1447,7 +1615,7 @@ async function renderTeamList() {
         body: { userId: btn.dataset.deactivate, action: 'deactivate' },
         headers: { Authorization: `Bearer ${session.access_token}` }
       });
-      if (fnErr || resData?.error) { showToast(`Couldn't deactivate: ${resData?.error || fnErr.message}`); return; }
+      if (fnErr || resData?.error) { showToast(`Couldn't deactivate: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
       showToast('Deactivated.');
       renderTeamList();
     });
@@ -1459,7 +1627,7 @@ async function renderTeamList() {
         body: { userId: btn.dataset.reactivate, action: 'reactivate' },
         headers: { Authorization: `Bearer ${session.access_token}` }
       });
-      if (fnErr || resData?.error) { showToast(`Couldn't reactivate: ${resData?.error || fnErr.message}`); return; }
+      if (fnErr || resData?.error) { showToast(`Couldn't reactivate: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
       showToast('Reactivated — they can sign in again.');
       renderTeamList();
     });
@@ -1787,16 +1955,23 @@ function renderAllocationDraft() {
         const publishedElsewhere = published && published.project !== job.jobId;
         const disabled = (!!usedElsewhereInDraft || !!publishedElsewhere) && !inThisJobAsWorker;
         let note = '';
-        if (usedElsewhereInDraft) note = `already on job ${usedElsewhereInDraft} (this draft)`;
-        else if (publishedElsewhere) note = `already assigned to job ${published.project}`;
-        else if (isThisJobsDriver) note = '🚗 driver for this job';
+        let freeUpBtn = '';
+        if (usedElsewhereInDraft) {
+          note = `already on job ${usedElsewhereInDraft} (this draft)`;
+          freeUpBtn = `<button type="button" class="alloc-free-up" data-free-draft="${p.id}" title="Untick them from ${escapeHtml(usedElsewhereInDraft)} so they can be ticked here instead">Free up</button>`;
+        } else if (publishedElsewhere) {
+          note = `already assigned to job ${published.project}`;
+          freeUpBtn = `<button type="button" class="alloc-free-up" data-free-published="${p.id}" data-free-job="${escapeHtml(published.project)}" title="Delete their already-published entry on ${escapeHtml(published.project)} for this date, so they can be ticked here instead">Free up</button>`;
+        } else if (isThisJobsDriver) {
+          note = '🚗 driver for this job';
+        }
         return `
           <label class="alloc-person-row${disabled ? ' conflict' : ''}">
             <span class="alloc-person-name">
               <span class="apn-main">${escapeHtml(p.full_name || p.email)}</span>
               ${p.full_name ? `<span class="apn-sub">${escapeHtml(p.email)}</span>` : ''}
             </span>
-            ${note ? `<span class="alloc-conflict-note">${escapeHtml(note)}</span>` : ''}
+            ${note ? `<span class="alloc-conflict-note">${escapeHtml(note)}</span>${freeUpBtn}` : ''}
             <input type="checkbox" class="alloc-worker-cb" data-job-idx="${job.idx}" data-person="${p.id}" ${inThisJobAsWorker ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
           </label>
         `;
@@ -1867,6 +2042,36 @@ function renderAllocationDraft() {
     box.querySelectorAll('[data-remove-job]').forEach((btn) => {
       btn.addEventListener('click', () => removeJobFromDraft(Number(btn.dataset.removeJob)));
     });
+    // "Free up" — clears whatever is blocking this person so they can be
+    // ticked on the job you're actually looking at right now.
+    box.querySelectorAll('[data-free-draft]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const personId = btn.dataset.freeDraft;
+        allocationDraftJobs.forEach((j) => {
+          j.workers.delete(personId);
+          if (j.driverId === personId) j.driverId = '';
+        });
+        renderAllocationDraft();
+      });
+    });
+    box.querySelectorAll('[data-free-published]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const personId = btn.dataset.freePublished;
+        const jobId = btn.dataset.freeJob;
+        const date = $('allocationDate').value;
+        if (!confirm(`Delete their already-published entry on job ${jobId} for this date? This can't be undone.`)) return;
+        const { error } = await sb.from('daily_assignments').delete()
+          .eq('person_id', personId).eq('work_date', date).eq('project', jobId);
+        if (error) { showToast(`Couldn't free them up: ${error.message}`); return; }
+        allocationPublishedMap.delete(personId);
+        showToast('Freed up — you can tick them here now.');
+        renderAllocationDraft();
+      });
+    });
   }
 
   const totalPeople = allocationDraftJobs.reduce((sum, j) => sum + j.workers.size + (j.driverId ? 1 : 0), 0);
@@ -1897,6 +2102,15 @@ async function publishAllocationDraft() {
   allocationDraftJobs = [];
   await loadAllocationPublishedForDate();
   renderAllocationDraft();
+
+  // Notify each assigned person with their own job — never lets a push
+  // failure interrupt the publish itself, since the data is already saved.
+  getSessionSafe().then(({ data: { session } }) => {
+    sb.functions.invoke('send-push', {
+      body: { kind: 'allocation', workDate: date, assignments: rows.map((r) => ({ personId: r.person_id, project: r.project })) },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    }).catch(() => {});
+  });
 }
 
 // ---- MANAGE tab: view/edit/delete already-published allocations ----
@@ -2664,7 +2878,7 @@ async function renderTank() {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
     if (error || data?.error) {
-      $('tankSvgArea').innerHTML = `<div class="empty">Couldn't load the tank: ${escapeHtml(data?.error || error.message)}</div>`;
+      $('tankSvgArea').innerHTML = `<div class="empty">Couldn't load the tank: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
       return;
     }
     drawTank(data.tankLevelPct);
@@ -2847,7 +3061,8 @@ if ($('scanImportJobsBtn')) {
         'Scan'
       );
       if (error || data?.error) {
-        $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(data?.error || error.message)}</div>`;
+        const message = data?.error || await readFunctionsError(error);
+        $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(message)}</div>`;
         return;
       }
       renderImportJobsResults(data.newJobs || [], data.alreadyExists || []);
@@ -3089,7 +3304,7 @@ async function openProjectDetail(jobId, name) {
     headers: { Authorization: `Bearer ${session.access_token}` },
   });
   if (error || data?.error) {
-    $('projectRingsArea').innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || error.message)}</div>`;
+    $('projectRingsArea').innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
     return;
   }
   currentProjectReport = data;
@@ -3556,7 +3771,7 @@ async function fetchAndRenderReport() {
       body: { targetEmail: reportTargetEmail, month: reportMonth },
       headers: { Authorization: `Bearer ${session.access_token}` }
     });
-    if (error || data?.error) throw new Error(data?.error || error.message);
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     renderReport(data);
   } catch (err) {
     $('gaugeGrid').innerHTML = `<div class="empty">Couldn't load report: ${escapeHtml(String(err.message || err))}</div>`;
@@ -3692,6 +3907,21 @@ async function fetchChatList() {
   return withPreview;
 }
 
+// WhatsApp-style relative time for the chat list: just the time for
+// today, "Yesterday" for the day before, short weekday for the last week,
+// and a short date beyond that.
+function chatListTimeLabel(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  if (diffDays === 0) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString([], { weekday: 'short' });
+  return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
+
 function renderChatList() {
   const list = $('chatList');
   if (!chatListCache.length) { list.innerHTML = '<div class="empty">No chats yet — start one above.</div>'; return; }
@@ -3708,7 +3938,10 @@ function renderChatList() {
       <div class="chat-list-item ${c.id === activeChatId ? 'active' : ''}" data-chat-id="${c.id}">
         <span class="chat-list-avatar">${icon}${dot}</span>
         <div class="chat-list-body">
-          <div class="chat-list-name">${escapeHtml(name)}</div>
+          <div class="chat-list-row1">
+            <div class="chat-list-name">${escapeHtml(name)}</div>
+            <div class="chat-list-time">${escapeHtml(chatListTimeLabel(c.lastAt))}</div>
+          </div>
           <div class="chat-list-preview">${escapeHtml(c.lastLine)}</div>
         </div>
       </div>
@@ -4080,7 +4313,7 @@ async function syncQueue() {
           20000,
           'Submit entry'
         );
-        if (error || data?.error) throw new Error(data?.error || error.message);
+        if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
         entry.status = 'synced';
         entry.error = null;
       } catch (err) {
@@ -4248,7 +4481,7 @@ async function sendAiMessage() {
       30000,
       'AEON Ai'
     );
-    if (error || data?.error) throw new Error(data?.error || error.message);
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     loadingEl.textContent = data.reply;
     loadingEl.className = 'ai-msg assistant';
     aiHistory.push({ role: 'user', text }, { role: 'assistant', text: data.reply });

@@ -379,6 +379,19 @@ button.secondary.active { border-color: var(--accent); color: var(--accent); bac
 .alloc-person-row .apn-main { color: var(--text); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .alloc-person-row .apn-sub { color: var(--text-dim); font-size: 11px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .alloc-person-row .alloc-conflict-note { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.alloc-free-up {
+  background: none;
+  border: 1px solid var(--glass-border-strong);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+.alloc-free-up:hover { background: var(--glass-strong); }
 .alloc-person-row input[type="checkbox"] { flex: none; }
 .alloc-manage-card { border: 1px solid var(--glass-border-strong); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--glass); }
 .alloc-manage-card .entry { padding: 6px 0; }
@@ -1011,11 +1024,62 @@ button.ghost:hover { color: var(--text); }
 .news-item-body { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; white-space: pre-wrap; }
 .news-item-date { font-size: 10.5px; color: var(--text-dim); margin-top: 6px; }
 
-/* ---------- Quick Job Switch ring — floating right side, clocked-in only ---------- */
+/* LinkedIn-style card: contained media, then a like/comment action bar,
+   then an optional expanded comment thread. */
+.news-item-media {
+  margin-top: 10px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-2);
+}
+.news-item-media img { width: 100%; max-height: 320px; object-fit: contain; display: block; margin: 0; border-radius: 0; cursor: pointer; }
+.news-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-border);
+}
+.news-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 999px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.news-action-btn:hover { background: var(--glass-strong); color: var(--text); }
+.news-action-btn.liked { color: var(--accent); }
+.news-comments { margin-top: 8px; display: none; }
+.news-comments.show { display: block; }
+.news-comment-row { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--glass-border); }
+.news-comment-row:last-child { border-bottom: none; }
+.news-comment-body-wrap { flex: 1; min-width: 0; }
+.news-comment-name { font-size: 11.5px; font-weight: 700; color: var(--text); }
+.news-comment-text { font-size: 12px; color: var(--text-muted); white-space: pre-wrap; word-break: break-word; }
+.news-comment-time { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.news-comment-del { background: none; border: none; color: var(--text-dim); font-size: 11px; cursor: pointer; flex: none; padding: 2px 4px; }
+.news-comment-input-row { display: flex; gap: 6px; margin-top: 8px; }
+.news-comment-input-row input { flex: 1; padding: 8px 10px; font-size: 12px; }
+.news-comment-input-row button { flex: none; padding: 8px 12px; font-size: 12px; }
+
+/* ---------- Quick Job Switch ring — clocked-in only. Desktop: docked to
+   the right edge, vertically centered. Mobile: docked to the bottom,
+   horizontally centered (see media query below), so it doesn't sit under
+   a thumb reaching for the edge on a phone. ---------- */
 .quick-switch-ring {
   position: fixed;
   right: 16px;
-  bottom: 140px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 148px;
   height: 148px;
   z-index: 58;
@@ -1043,7 +1107,17 @@ button.ghost:hover { color: var(--text); }
   border: 1px solid var(--glass-border);
   color: var(--text-muted);
 }
-.qsr-top { grid-column: 2; grid-row: 1; color: var(--text); font-weight: 700; font-size: 10px; overflow: hidden; }
+.qsr-top {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  user-select: none;
+}
 .qsr-bottom { grid-column: 2; grid-row: 3; color: var(--text-dim); }
 .qsr-left { grid-column: 1; grid-row: 2; }
 .qsr-right { grid-column: 3; grid-row: 2; }
@@ -1078,7 +1152,17 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
 }
 
 @media (max-width: 420px) {
-  .quick-switch-ring { right: 10px; bottom: 128px; width: 128px; height: 128px; }
+  /* On phones, dock it to the bottom-center instead of the right edge —
+     easier to reach with a thumb and doesn't crowd the side of the screen. */
+  .quick-switch-ring {
+    right: auto;
+    left: 50%;
+    top: auto;
+    bottom: 128px;
+    transform: translateX(-50%);
+    width: 128px;
+    height: 128px;
+  }
   .qsr-center { width: 40px; height: 40px; font-size: 15px; }
 }
 
@@ -1169,8 +1253,10 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
 .chat-thread-status.online { color: var(--ok); }
 .chat-list-avatar .presence-dot {
   position: absolute;
-  right: -1px;
-  bottom: -1px;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
 }
 
 @media (max-width: 640px) {
@@ -1413,8 +1499,8 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
 .chat-list-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 8px;
+  gap: 12px;
+  padding: 12px 10px;
   border-radius: var(--r-md);
   cursor: pointer;
   margin-bottom: 4px;
@@ -1425,19 +1511,21 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
 .chat-list-avatar {
   position: relative;
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 22px;
   background: linear-gradient(160deg, rgba(224,138,95,0.3), rgba(94,128,148,0.25));
   border: 1px solid var(--glass-border);
 }
 .chat-list-body { flex: 1; min-width: 0; }
-.chat-list-name { font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-list-preview { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.chat-list-row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.chat-list-name { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-list-time { flex: none; font-size: 11px; color: var(--text-dim); font-weight: 550; }
+.chat-list-preview { font-size: 13.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
 
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .chat-empty {
@@ -1490,7 +1578,8 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
   border-bottom-left-radius: 4px;
 }
 .chat-bubble-sender { font-size: 10.5px; color: var(--text-muted); margin-bottom: 3px; font-weight: 650; }
-.chat-bubble img.chat-img { max-width: 220px; border-radius: 10px; display: block; margin-top: 4px; }
+img.chat-img { max-width: 100%; height: auto; border-radius: 10px; display: block; margin-top: 4px; }
+.chat-bubble img.chat-img { max-width: 220px; }
 .chat-bubble .chat-file-chip {
   display: flex;
   align-items: center;
@@ -1574,10 +1663,15 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
 
 .report-layout {
   display: grid;
-  grid-template-columns: 1fr 92px;
+  grid-template-columns: minmax(0, 1fr) 92px;
   gap: 14px;
   align-items: start;
 }
+/* Grid items default to a min-width equal to their own content's natural
+   width, which can make them refuse to shrink to their track and spill
+   out past the card edge, overlapping the month list next to it. Forcing
+   min-width: 0 here lets this column actually shrink to fit. */
+.report-main { min-width: 0; }
 @media (max-width: 480px) {
   .report-layout { grid-template-columns: 1fr; }
   .month-strip { flex-direction: row; overflow-x: auto; max-height: none; }
@@ -1618,7 +1712,7 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
 /* Gauge grid */
 .gauge-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 @media (max-width: 480px) {
@@ -1628,6 +1722,7 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 0;
   padding: 10px 6px 12px;
   border-radius: var(--r-md);
   border: 1px solid var(--glass-border);
@@ -1635,6 +1730,7 @@ button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(-
   backdrop-filter: blur(var(--blur-soft));
   -webkit-backdrop-filter: blur(var(--blur-soft));
 }
+.gauge-label { overflow-wrap: break-word; }
 .gauge-svg { width: 100%; max-width: 120px; height: auto; }
 .gauge-track { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 9; stroke-linecap: round; }
 .gauge-fill { fill: none; stroke-width: 9; stroke-linecap: round; transition: d 0.3s ease; }
