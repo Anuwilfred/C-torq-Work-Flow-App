@@ -140,6 +140,10 @@
           <span class="home-tile-icon home-tile-icon-tank">🛢️</span>
           <span class="home-tile-label">Project Tank</span>
         </button>
+        <button type="button" class="home-tile" data-open="allocation" data-feature="allocation">
+          <span class="home-tile-icon home-tile-icon-allocation">🚚</span>
+          <span class="home-tile-label">Job Allocation</span>
+        </button>
       </div>
     </section>
 
@@ -477,6 +481,60 @@
   </div>
 </div>
 
+<!-- QUICK JOB SWITCH RING — floating on the right, only shown while clocked
+     in. Tap the center to arm it, then Start (pick a different job — this
+     closes out whatever's running and starts the new one) or Stop (close
+     out the current job without starting another). Each close auto-saves
+     that stretch of time as its own entry, same as filling the form and
+     submitting normally. -->
+<div id="quickSwitchRing" class="quick-switch-ring" style="display:none;">
+  <div class="qsr-slot qsr-top" id="qsrJobLabel">No job yet</div>
+  <button type="button" class="qsr-slot qsr-side qsr-left" id="qsrStartBtn" disabled>▶<br>Start</button>
+  <button type="button" class="qsr-center" id="qsrArmBtn" title="Tap to enable Start/Stop">🔒</button>
+  <button type="button" class="qsr-slot qsr-side qsr-right" id="qsrStopBtn" disabled>⏹<br>Stop</button>
+  <div class="qsr-slot qsr-bottom" id="qsrElapsed">0m</div>
+</div>
+
+<!-- QUICK JOB SWITCH — job picker popover, opened by the Start button -->
+<div id="qsrPickerBackdrop" class="panel-overlay-backdrop"></div>
+<div id="qsrPickerOverlay" class="panel-overlay">
+  <div class="panel-shell" style="max-width:420px; margin:auto; max-height:60vh; align-self:center;">
+    <div class="panel-header">
+      <strong>Switch to a job</strong>
+      <button type="button" class="ghost" id="qsrPickerCloseBtn">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="job-search-wrap" style="position:relative;">
+        <input id="qsrJobSearch" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+        <div id="qsrJobResults" class="job-search-results" style="display:none; position:static; margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NEWS ROOM — left-edge pull handle + sliding glass drawer. Tap the handle,
+     or swipe right starting from the very left edge, to open it. Admins get
+     a small compose card at the top; everyone can read. -->
+<button type="button" id="newsHandle" class="news-handle" title="News">
+  <span id="newsHandleDot" class="news-handle-dot" style="display:none;"></span>
+  📰
+</button>
+<div id="newsDrawerBackdrop" class="chat-overlay-backdrop"></div>
+<div id="newsDrawer" class="news-drawer">
+  <div class="news-drawer-header">
+    <strong>News Room</strong>
+    <button type="button" class="ghost" id="newsCloseBtn">✕</button>
+  </div>
+  <div id="newsComposeCard" class="card glass" style="display:none; margin:12px 14px 0;">
+    <label for="newsTitle">Title</label>
+    <input id="newsTitle" type="text" placeholder="e.g. New safety policy" />
+    <label for="newsBody">Message</label>
+    <textarea id="newsBody" placeholder="What's the news?"></textarea>
+    <button type="button" id="postNewsBtn" class="primary">Post news</button>
+  </div>
+  <div id="newsList" class="news-list"></div>
+</div>
+
 <!-- AEON TEAMS CHAT — floating icon, bottom-left, mirrors the AEON Ai orb -->
 <span id="chatOrbLabel" class="chat-orb-label" style="display:none">Aeon Teams Chat</span>
 <button id="chatOrb" class="chat-orb" aria-label="Open Aeon Teams Chat" title="Aeon Teams Chat" style="display:none">💬</button>
@@ -788,6 +846,51 @@
     </div>
     <div class="panel-body">
       <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
+    </div>
+  </div>
+</div>
+
+<!-- JOB ALLOCATION OVERLAY — pick a job, see/add/remove who's on it today -->
+<div id="allocationOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="allocationOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Job Allocation</strong>
+      <button type="button" class="ghost" data-close="allocation">✕</button>
+    </div>
+    <div class="panel-body">
+      <label for="allocationDate">Date</label>
+      <input id="allocationDate" type="date" />
+
+      <label for="allocationJobSearch">Job number</label>
+      <div class="job-search-wrap" style="position:relative;">
+        <input id="allocationJobSearch" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+        <div id="allocationJobResults" class="job-search-results" style="display:none;"></div>
+      </div>
+
+      <div id="allocationSelectedJobCard" class="card glass" style="display:none; margin-top:14px;">
+        <strong id="allocationSelectedJobTitle" style="font-size:14px;">—</strong>
+        <p class="hint" id="allocationSelectedJobSub" style="margin-top:2px;"></p>
+
+        <div style="margin-top:14px;">
+          <strong style="font-size:13px;">People allocated for this job on this date</strong>
+          <div id="allocationPeopleList" style="margin-top:8px;"><div class="empty">No one allocated yet.</div></div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <label for="allocationPersonSelect">Add a person</label>
+        <select id="allocationPersonSelect">
+          <option value="">Choose a person</option>
+        </select>
+        <label class="toggle-row" style="margin-top:10px;">
+          <span>🚗 Assign as driver for this job</span>
+          <input id="allocationIsDriver" type="checkbox" />
+        </label>
+        <label for="allocationLocation">Location / pickup (optional)</label>
+        <input id="allocationLocation" type="text" placeholder="e.g. Site address or pickup point" />
+        <button type="button" id="allocationAddBtn" class="primary">Add to job</button>
+      </div>
     </div>
   </div>
 </div>

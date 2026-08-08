@@ -201,8 +201,9 @@ function saveClockState(state) {
   try { localStorage.setItem(CLOCK_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
 }
 function resetClockState() {
-  saveClockState({ status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0 });
+  saveClockState({ status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: null });
   renderClockUI();
+  renderQuickSwitchRing();
 }
 function fmtClockTime(iso) {
   if (!iso) return '';
@@ -240,10 +241,11 @@ function renderClockUI() {
 $('clockInBtn')?.addEventListener('click', () => {
   const now = new Date();
   const iso = now.toISOString();
-  saveClockState({ status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0 });
+  saveClockState({ status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: iso });
   $('date').value = iso.slice(0, 10);
   $('startTime').value = toTimeInputValue(iso);
   renderClockUI();
+  renderQuickSwitchRing();
   showToast('Clocked in — have a good shift.');
 });
 
@@ -268,6 +270,7 @@ $('stopBreakBtn')?.addEventListener('click', () => {
   saveClockState(state);
   if ($('lunchMinutes')) $('lunchMinutes').value = state.totalBreakMinutes;
   renderClockUI();
+  renderQuickSwitchRing();
   showToast(`Break ended — ${mins} min added (total ${state.totalBreakMinutes} min).`);
 });
 
@@ -281,10 +284,170 @@ $('clockOutBtn')?.addEventListener('click', () => {
   $('endTime').value = toTimeInputValue(iso);
   if ($('lunchMinutes')) $('lunchMinutes').value = state.totalBreakMinutes || 0;
   renderClockUI();
+  renderQuickSwitchRing();
   showToast('Clocked out — review the rest of the entry and submit when ready.');
 });
 
+// =====================================================================
+// QUICK JOB SWITCH RING — only shown while clocked in ("working" or
+// "onbreak"). Tap the center to arm it (auto-disarms after 8s or after one
+// use, so a pocket-tap can't accidentally fire it), then:
+//   - Start: opens a job picker. Picking a job closes out whatever segment
+//     is currently running (auto-saved as its own entry, exactly like
+//     filling the form and submitting) and begins timing the new job.
+//   - Stop: closes out the current segment without starting another —
+//     for when someone's done with a job but isn't switching to a new one
+//     yet (they can still Start again later, or use the normal Clock Out
+//     to end their whole day).
+// The very last open segment is always left for the normal Clock Out +
+// Review & Submit flow — so if this is never touched, behavior is exactly
+// what it was before (one entry, clock-in to clock-out).
+// =====================================================================
+
+let qsrArmed = false;
+let qsrDisarmTimer = null;
+
+function renderQuickSwitchRing() {
+  const ring = $('quickSwitchRing');
+  if (!ring) return;
+  const state = getClockState();
+  const clockedIn = state.status === 'working' || state.status === 'onbreak';
+  ring.style.display = clockedIn ? 'grid' : 'none';
+  if (!clockedIn) return;
+
+  $('qsrJobLabel').textContent = state.segmentStart ? ($('jobId').value.trim() || 'Untitled job') : 'No job yet';
+  $('qsrStartBtn').disabled = !qsrArmed || state.status === 'onbreak';
+  $('qsrStopBtn').disabled = !qsrArmed || !state.segmentStart || state.status === 'onbreak';
+  if (state.segmentStart) {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(state.segmentStart)) / 60000));
+    $('qsrElapsed').textContent = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  } else {
+    $('qsrElapsed').textContent = '—';
+  }
+  $('qsrArmBtn').classList.toggle('armed', qsrArmed);
+  $('qsrArmBtn').textContent = qsrArmed ? '🔓' : '🔒';
+}
+setInterval(renderQuickSwitchRing, 60000);
+
+// Closes whatever job segment is currently running: saves it as its own
+// timesheet entry (using the CURRENT form's Job ID/project/location/mode —
+// whatever was active for that stretch) from segmentStart to now, straight
+// into the same offline-tolerant queue every other entry uses.
+async function closeCurrentSegmentAndSubmit(now) {
+  const state = getClockState();
+  if (!state.segmentStart) return false;
+  if (!selectedMode) { showToast('Pick a mode of work first.'); return false; }
+  const draft = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'timesheet',
+    userLabel: currentProfile?.full_name || currentUser.email,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    error: null,
+    category: 'timesheet',
+    mode: selectedMode,
+    jobId: $('jobId').value.trim() || null,
+    project: $('project').value.trim(),
+    location: $('location').value.trim(),
+    allowanceLocation: $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null,
+    date: $('date').value || new Date().toISOString().slice(0, 10),
+    startTime: toTimeInputValue(state.segmentStart),
+    endTime: toTimeInputValue(now),
+    lunchMinutes: 0,
+    description: $('workNotes').value.trim(),
+    attachments: [],
+  };
+  await addEntry(draft);
+  syncQueue();
+  state.segmentStart = null;
+  saveClockState(state);
+  // Reset the form's own startTime marker to right now — otherwise a plain
+  // Clock Out later (without ever tapping Start again) would double-count
+  // this stretch of time that's already been saved above.
+  $('startTime').value = toTimeInputValue(now);
+  showToast(`${draft.jobId || 'That job'} logged for this stretch.`);
+  return true;
+}
+
+async function qsrStop() {
+  if (!qsrArmed) return;
+  const state = getClockState();
+  if (!state.segmentStart) { showToast('No job currently running.'); qsrArmed = false; renderQuickSwitchRing(); return; }
+  await closeCurrentSegmentAndSubmit(new Date());
+  qsrArmed = false;
+  renderQuickSwitchRing();
+}
+
+async function qsrSwitchTo(jobId, jobName) {
+  const now = new Date();
+  const state = getClockState();
+  if (state.segmentStart) await closeCurrentSegmentAndSubmit(now);
+  const fresh = getClockState();
+  fresh.segmentStart = now.toISOString();
+  saveClockState(fresh);
+  $('jobId').value = jobId;
+  $('startTime').value = toTimeInputValue(now);
+  showToast(`Now working: ${jobId}${jobName ? ' — ' + jobName : ''}`);
+  qsrArmed = false;
+  renderQuickSwitchRing();
+}
+
+$('qsrArmBtn')?.addEventListener('click', () => {
+  qsrArmed = !qsrArmed;
+  clearTimeout(qsrDisarmTimer);
+  if (qsrArmed) qsrDisarmTimer = setTimeout(() => { qsrArmed = false; renderQuickSwitchRing(); }, 8000);
+  renderQuickSwitchRing();
+});
+
+function closeQsrPicker() {
+  $('qsrPickerBackdrop').classList.remove('show');
+  $('qsrPickerOverlay').classList.remove('show');
+}
+
+$('qsrStartBtn')?.addEventListener('click', () => {
+  if ($('qsrStartBtn').disabled) return;
+  qsrArmed = false;
+  renderQuickSwitchRing();
+  $('qsrJobSearch').value = '';
+  $('qsrJobResults').style.display = 'none';
+  $('qsrPickerBackdrop').classList.add('show');
+  $('qsrPickerOverlay').classList.add('show');
+  $('qsrJobSearch').focus();
+});
+$('qsrStopBtn')?.addEventListener('click', () => {
+  if ($('qsrStopBtn').disabled) return;
+  qsrStop();
+});
+$('qsrPickerCloseBtn')?.addEventListener('click', closeQsrPicker);
+$('qsrPickerBackdrop')?.addEventListener('click', closeQsrPicker);
+
+$('qsrJobSearch')?.addEventListener('input', () => {
+  const q = $('qsrJobSearch').value.trim().toLowerCase();
+  const box = $('qsrJobResults');
+  if (!q) { box.style.display = 'none'; return; }
+  const matches = jobSearchOptions.filter((r) =>
+    String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
+  ).slice(0, 8);
+  box.innerHTML = matches.length
+    ? matches.map((r) => `
+        <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}" data-job-name="${escapeHtml(r.name || '')}">
+          <div class="jid">${escapeHtml(r.job_id)}</div>
+          <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
+        </div>
+      `).join('')
+    : '<div class="job-search-empty">No matching job found.</div>';
+  box.style.display = 'block';
+  box.querySelectorAll('.job-search-item[data-job-id]').forEach((item) => {
+    item.addEventListener('mousedown', async (e) => {
+      e.preventDefault();
+      closeQsrPicker();
+      await qsrSwitchTo(item.dataset.jobId, item.dataset.jobName);
+    });
+  });
+});
+
 renderClockUI();
+renderQuickSwitchRing();
 
 document.querySelectorAll('.mode-chip').forEach(chip => {
   chip.addEventListener('click', () => {
@@ -730,11 +893,12 @@ async function enterApp(knownUser) {
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   $('adminHomeBtn').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
   $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
+  if ($('newsComposeCard')) $('newsComposeCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+  checkForUnreadNews();
   applyFeatureAccess();
   startPresence();
   populateAllowanceDropdown();
-  populateJobIdDropdown();
-  renderMyTodayAssignment();
+  populateJobIdDropdown().then(renderMyTodayAssignment);
   // Projects / Learning / Health Challenges are visible to everyone now —
   // only creating/deleting projects (and setting positions) stays admin-only.
   $('adminRail').style.display = 'grid';
@@ -778,11 +942,26 @@ async function renderMyTodayAssignment() {
   if (error || !data) { card.style.display = 'none'; return; }
   card.style.display = 'block';
   const isTransport = data.assignment_type === 'transportation';
-  area.innerHTML = `
-    <div class="entry">
-      <span class="type-icon">${isTransport ? '🚕' : '🗓️'}</span>
+  // The job may have been allocated via Job Allocation (data.project holds a
+  // real Job ID) — look up its description if we already have it cached, so
+  // this reads as "TVD/26/00229 — Site inspection" instead of just a code.
+  const jobMatch = jobSearchOptions.find((r) => r.job_id === data.project);
+  const jobLine = jobMatch ? `${data.project} — ${jobMatch.name || ''}` : (data.project || 'No details given');
+  area.innerHTML = isTransport ? `
+    <div class="entry" style="border-color: rgba(224,190,90,0.45);">
+      <span class="type-icon" style="font-size:20px;">🚗</span>
       <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(data.project || 'No details given')}</div>
+        <div class="entry-meta" style="color: var(--warn); font-weight:700; text-transform:uppercase; font-size:11px; letter-spacing:0.3px;">You're driving today</div>
+        <div class="entry-desc" style="font-size:14.5px; font-weight:650; margin-top:2px;">${escapeHtml(jobLine)}</div>
+        ${data.location ? `<div class="entry-meta" style="margin-top:2px;">📍 Pickup: ${escapeHtml(data.location)}</div>` : ''}
+        ${data.notes ? `<div class="entry-meta" style="margin-top:2px;">${escapeHtml(data.notes)}</div>` : ''}
+      </div>
+    </div>
+  ` : `
+    <div class="entry">
+      <span class="type-icon">🗓️</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(jobLine)}</div>
         <div class="entry-meta">${data.location ? escapeHtml(data.location) : ''}${data.notes ? (data.location ? ' · ' : '') + escapeHtml(data.notes) : ''}</div>
       </div>
     </div>
@@ -940,6 +1119,87 @@ $('authScreen').style.display = 'flex';
 })();
 
 // =====================================================================
+// NEWS ROOM — left-edge drawer. Everyone can read; only admins can post.
+// =====================================================================
+
+async function fetchNews() {
+  const { data, error } = await sb.from('news').select('id, title, body, created_at').order('created_at', { ascending: false }).limit(50);
+  return error ? [] : (data || []);
+}
+
+async function renderNewsList() {
+  const list = $('newsList');
+  if (!list) return;
+  const rows = await fetchNews();
+  if (!rows.length) { list.innerHTML = '<div class="empty">No news yet.</div>'; return; }
+  list.innerHTML = rows.map((n) => `
+    <div class="news-item">
+      <div class="news-item-title">${escapeHtml(n.title)}</div>
+      <div class="news-item-body">${escapeHtml(n.body)}</div>
+      <div class="news-item-date">${new Date(n.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div>
+    </div>
+  `).join('');
+  if (rows[0]) {
+    try { localStorage.setItem('ctorq-news-last-seen', rows[0].created_at); } catch (e) { /* ignore */ }
+  }
+  if ($('newsHandleDot')) $('newsHandleDot').style.display = 'none';
+}
+
+async function checkForUnreadNews() {
+  const rows = await fetchNews();
+  if (!rows.length || !$('newsHandleDot')) return;
+  let lastSeen = null;
+  try { lastSeen = localStorage.getItem('ctorq-news-last-seen'); } catch (e) { /* ignore */ }
+  if (!lastSeen || new Date(rows[0].created_at) > new Date(lastSeen)) {
+    $('newsHandleDot').style.display = 'block';
+  }
+}
+
+function openNewsDrawer() {
+  $('newsDrawerBackdrop').classList.add('show');
+  $('newsDrawer').classList.add('show');
+  renderNewsList();
+}
+function closeNewsDrawer() {
+  $('newsDrawerBackdrop').classList.remove('show');
+  $('newsDrawer').classList.remove('show');
+}
+$('newsHandle')?.addEventListener('click', openNewsDrawer);
+$('newsCloseBtn')?.addEventListener('click', closeNewsDrawer);
+$('newsDrawerBackdrop')?.addEventListener('click', closeNewsDrawer);
+
+$('postNewsBtn')?.addEventListener('click', async () => {
+  const title = $('newsTitle').value.trim();
+  const body = $('newsBody').value.trim();
+  if (!title || !body) { showToast('Add a title and a message.'); return; }
+  const { error } = await sb.from('news').insert({ title, body, created_by: currentUser.id });
+  if (error) { showToast(`Couldn't post: ${error.message}`); return; }
+  $('newsTitle').value = '';
+  $('newsBody').value = '';
+  showToast('Posted.');
+  renderNewsList();
+});
+
+// Swipe-to-open: a touch starting within 24px of the left edge that moves
+// right by 40px or more opens the drawer, same destination as tapping the
+// handle — the "drag the shutter open" gesture the handle alone doesn't
+// cover on touch devices.
+let newsDragStartX = null;
+document.addEventListener('touchstart', (e) => {
+  const t = e.touches[0];
+  if (t && t.clientX < 24) newsDragStartX = t.clientX;
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (newsDragStartX === null) return;
+  const t = e.touches[0];
+  if (t && t.clientX - newsDragStartX > 40) {
+    openNewsDrawer();
+    newsDragStartX = null;
+  }
+}, { passive: true });
+document.addEventListener('touchend', () => { newsDragStartX = null; });
+
+// =====================================================================
 // ADMIN — invite teammates by email
 // =====================================================================
 
@@ -982,6 +1242,7 @@ const FEATURE_LIST = [
   { key: 'clients', label: 'Clients' },
   { key: 'quotations', label: 'Quotations' },
   { key: 'tank', label: 'Project Tank' },
+  { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -1330,6 +1591,136 @@ if ($('saveAssignmentBtn')) {
 }
 
 // =====================================================================
+// JOB ALLOCATION PANEL — job-first view for people with the 'allocation'
+// feature (typically Operations): search a real job number, pick a date,
+// see everyone already allocated to that job that day, add more people
+// (optionally flagging one as the driver), or remove someone. Multiple
+// people can be allocated to the same job/date — the only hard rule (same
+// as before) is one job per person per day, enforced by the upsert below.
+// =====================================================================
+
+let allocationSelectedJobId = null;
+let allocationSelectedJobLabel = '';
+let allocationWired = false;
+
+function wireAllocationJobSearch() {
+  if (allocationWired) return;
+  allocationWired = true;
+  const input = $('allocationJobSearch');
+  const box = $('allocationJobResults');
+  if (!input || !box) return;
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { box.style.display = 'none'; return; }
+    const matches = jobSearchOptions.filter((r) =>
+      String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
+    ).slice(0, 8);
+    if (!matches.length) {
+      box.innerHTML = '<div class="job-search-empty">No matching job found.</div>';
+    } else {
+      box.innerHTML = matches.map((r) => `
+        <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}" data-job-name="${escapeHtml(r.name || '')}" data-job-client="${escapeHtml(r.client || '')}">
+          <div class="jid">${escapeHtml(r.job_id)}</div>
+          <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
+        </div>
+      `).join('');
+    }
+    box.style.display = 'block';
+    box.querySelectorAll('.job-search-item[data-job-id]').forEach((item) => {
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        selectAllocationJob(item.dataset.jobId, item.dataset.jobName);
+        box.style.display = 'none';
+        input.value = '';
+      });
+    });
+  });
+  input.addEventListener('blur', () => { setTimeout(() => { box.style.display = 'none'; }, 150); });
+
+  $('allocationDate').addEventListener('change', () => {
+    if (allocationSelectedJobId) loadAllocationPeople();
+  });
+  $('allocationAddBtn').addEventListener('click', addAllocationPerson);
+}
+
+function selectAllocationJob(jobId, jobName) {
+  allocationSelectedJobId = jobId;
+  allocationSelectedJobLabel = jobName || '';
+  $('allocationSelectedJobTitle').textContent = jobId;
+  $('allocationSelectedJobSub').textContent = jobName || '';
+  $('allocationSelectedJobCard').style.display = 'block';
+  loadAllocationPeople();
+}
+
+async function populateAllocationPersonSelect() {
+  const select = $('allocationPersonSelect');
+  if (!select) return;
+  const { data, error } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
+  const people = error ? [] : (data || []);
+  select.innerHTML = '<option value="">Choose a person</option>' +
+    people.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+}
+
+async function openAllocationPanel() {
+  if (!$('allocationDate').value) $('allocationDate').value = new Date().toISOString().slice(0, 10);
+  allocationSelectedJobId = null;
+  $('allocationSelectedJobCard').style.display = 'none';
+  $('allocationJobSearch').value = '';
+  await Promise.all([populateAllocationPersonSelect(), populateJobIdDropdown()]);
+  wireAllocationJobSearch();
+}
+
+async function loadAllocationPeople() {
+  const list = $('allocationPeopleList');
+  if (!allocationSelectedJobId || !$('allocationDate').value) return;
+  const { data, error } = await sb
+    .from('daily_assignments')
+    .select('id, person_id, assignment_type, location, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .eq('project', allocationSelectedJobId)
+    .eq('work_date', $('allocationDate').value);
+  if (error) { list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data || !data.length) { list.innerHTML = '<div class="empty">No one allocated yet.</div>'; return; }
+  list.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon">${r.assignment_type === 'transportation' ? '🚗' : '🙂'}</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')}${r.assignment_type === 'transportation' ? ' · Driver' : ''}</div>
+        <div class="entry-desc">${escapeHtml(r.location || '')}</div>
+      </div>
+      <button type="button" class="ghost" data-remove-allocation="${r.id}">✕</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-remove-allocation]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await sb.from('daily_assignments').delete().eq('id', btn.dataset.removeAllocation);
+      loadAllocationPeople();
+    });
+  });
+}
+
+async function addAllocationPerson() {
+  const personId = $('allocationPersonSelect').value;
+  const workDate = $('allocationDate').value;
+  if (!allocationSelectedJobId) { showToast('Pick a job first.'); return; }
+  if (!personId || !workDate) { showToast('Pick a person and a date.'); return; }
+  const isDriver = $('allocationIsDriver').checked;
+  const { error } = await sb.from('daily_assignments').upsert({
+    person_id: personId,
+    work_date: workDate,
+    project: allocationSelectedJobId,
+    location: $('allocationLocation').value.trim() || null,
+    assignment_type: isDriver ? 'transportation' : 'job',
+    created_by: currentUser.id,
+  }, { onConflict: 'person_id,work_date' });
+  if (error) { showToast(`Couldn't allocate: ${error.message}`); return; }
+  $('allocationPersonSelect').value = '';
+  $('allocationIsDriver').checked = false;
+  $('allocationLocation').value = '';
+  showToast('Allocated.');
+  loadAllocationPeople();
+}
+
+// =====================================================================
 // GENERIC FULL-SCREEN PANEL OVERLAYS — Projects / Project detail / Learning
 // / Health Challenges all share the same open/close plumbing.
 // =====================================================================
@@ -1346,6 +1737,7 @@ const PANEL_IDS = {
   quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
+  allocation: ['allocationOverlay', 'allocationOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -1377,6 +1769,9 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'tank') {
     renderTank();
+  }
+  if (name === 'allocation') {
+    openAllocationPanel();
   }
 }
 function closePanel(name) {
