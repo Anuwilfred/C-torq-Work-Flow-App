@@ -263,6 +263,19 @@ label:first-child { margin-top: 0; }
 .toggle-row span { color: var(--text); font-size: 13px; font-weight: 600; }
 .toggle-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 
+.map-access-row {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--glass-border);
+  cursor: pointer;
+  margin: 0 !important;
+}
+.map-access-row:last-child { border-bottom: none; }
+.map-access-row input[type="checkbox"] { width: 19px; height: 19px; min-width: 19px; }
+.map-access-row span { color: var(--text); font-size: 13.5px; font-weight: 550; line-height: 1.4; }
+
 input, select, textarea {
   width: 100%;
   padding: 12px 14px;
@@ -282,6 +295,20 @@ input:focus, select:focus, textarea:focus {
 }
 input[type="file"] { padding: 9px 10px; font-size: 12.5px; }
 textarea { min-height: 78px; resize: vertical; }
+
+/* Checkboxes/radios must NOT inherit the full-width input styling above —
+   that was stretching every checkbox to fill its row, shoving its label
+   text far off to the side (seen in Map Access and any tick-list). */
+input[type="checkbox"], input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  flex: none;
+  padding: 0;
+  border-radius: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 /* Every dropdown gets the same liquid-glass treatment as cards/inputs — the
    closed select box is blurred/translucent like everything else, while the

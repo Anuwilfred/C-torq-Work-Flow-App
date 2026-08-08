@@ -1477,9 +1477,9 @@ function openMapAccessModal(person) {
   $('mapAccessPersonName').textContent = person.full_name || person.email;
   const current = Array.isArray(person.allowed_features) ? person.allowed_features : [];
   $('mapAccessList').innerHTML = FEATURE_LIST.map((f) => `
-    <label style="display:flex; align-items:center; gap:8px;">
+    <label class="map-access-row">
       <input type="checkbox" value="${f.key}" ${current.includes(f.key) ? 'checked' : ''} />
-      ${escapeHtml(f.label)}
+      <span>${escapeHtml(f.label)}</span>
     </label>
   `).join('');
   openPanel('mapAccess');
