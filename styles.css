@@ -362,13 +362,28 @@ button.secondary.active { border-color: var(--accent); color: var(--accent); bac
 .alloc-job-card { border: 1px solid var(--glass-border-strong); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--glass); }
 .alloc-job-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .alloc-job-card .alloc-remove-job { background: none; border: none; color: var(--danger, #e05d5d); font-size: 12px; cursor: pointer; padding: 4px; }
-.alloc-person-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12.5px; }
-.alloc-person-row.conflict { opacity: 0.45; }
-.alloc-person-row .alloc-person-name { flex: 1; }
-.alloc-person-row .alloc-conflict-note { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.alloc-person-row {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--glass-border);
+  cursor: pointer;
+  margin: 0 !important;
+}
+.alloc-person-row:last-child { border-bottom: none; }
+.alloc-person-row:hover { background: var(--glass-strong); }
+.alloc-person-row.conflict { opacity: 0.45; cursor: not-allowed; }
+.alloc-person-row .alloc-person-name { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.alloc-person-row .apn-main { color: var(--text); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alloc-person-row .apn-sub { color: var(--text-dim); font-size: 11px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alloc-person-row .alloc-conflict-note { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.alloc-person-row input[type="checkbox"] { flex: none; }
 .alloc-manage-card { border: 1px solid var(--glass-border-strong); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--glass); }
 .alloc-manage-card .entry { padding: 6px 0; }
 .alloc-manage-remove { background: none; border: none; color: var(--danger, #e05d5d); font-size: 14px; cursor: pointer; padding: 2px 6px; }
+.alloc-manage-time { width: auto !important; flex: none; padding: 6px 8px !important; font-size: 12px !important; }
 
 button.ghost {
   padding: 9px 16px;

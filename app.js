@@ -1665,7 +1665,7 @@ let allocDraftIdxCounter = 0;
 
 function allocPersonLabel(id) {
   const p = allocationPeopleCache.find((x) => x.id === id);
-  return p ? (p.full_name || p.email) : id;
+  return p ? allocPersonDisplay(p) : id;
 }
 
 function wireAllocationJobSearch() {
@@ -1680,13 +1680,14 @@ function wireAllocationJobSearch() {
   // type to filter" field rather than a search-only one.
   function showAllocJobMatches() {
     const q = input.value.trim().toLowerCase();
-    const already = new Set(allocationDraftJobs.map((j) => j.jobId));
-    const pool = jobSearchOptions.filter((r) => !already.has(String(r.job_id)));
+    // Every active job is always listed here, even ones already in the
+    // draft — picking one again just shows a reminder toast instead of
+    // vanishing from the list, so nothing ever looks "lost".
     const matches = q
-      ? pool.filter((r) => String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q))
-      : pool;
+      ? jobSearchOptions.filter((r) => String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q))
+      : jobSearchOptions;
     if (!matches.length) {
-      box.innerHTML = `<div class="job-search-empty">${q ? 'No matching job found.' : (jobSearchOptions.length ? 'All jobs are already in your draft.' : 'No active jobs yet — add one under Admin → Projects.')}</div>`;
+      box.innerHTML = `<div class="job-search-empty">${q ? 'No matching job found.' : 'No active jobs yet — add one under Admin → Projects.'}</div>`;
     } else {
       box.innerHTML = matches.map((r) => `
         <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}" data-job-name="${escapeHtml(r.name || '')}" data-job-client="${escapeHtml(r.client || '')}">
@@ -1742,9 +1743,14 @@ function draftUsageFor(personId, excludeIdx) {
 }
 
 function addJobToDraft(jobId, jobName) {
-  if (allocationDraftJobs.some((j) => j.jobId === jobId)) { showToast('That job is already in your draft.'); return; }
-  allocationDraftJobs.push({ idx: allocDraftIdxCounter++, jobId, jobName: jobName || '', location: '', driverId: '', workers: new Set() });
+  if (allocationDraftJobs.some((j) => j.jobId === jobId)) { showToast('That job is already in your draft — scroll down to it below.'); return; }
+  allocationDraftJobs.push({ idx: allocDraftIdxCounter++, jobId, jobName: jobName || '', location: '', attendanceTime: '', driverId: '', workers: new Set() });
   renderAllocationDraft();
+}
+
+// "Wilfred — anu@tv-me.com" when a name is set, or just the email if not.
+function allocPersonDisplay(p) {
+  return p.full_name ? `${p.full_name} — ${p.email}` : p.email;
 }
 
 function removeJobFromDraft(idx) {
@@ -1779,13 +1785,16 @@ function renderAllocationDraft() {
         let note = '';
         if (usedElsewhereInDraft) note = `already on job ${usedElsewhereInDraft} (this draft)`;
         else if (publishedElsewhere) note = `already assigned to job ${published.project}`;
+        else if (isThisJobsDriver) note = '🚗 driver for this job';
         return `
-          <div class="alloc-person-row${disabled ? ' conflict' : ''}">
-            <input type="checkbox" class="alloc-worker-cb" data-job-idx="${job.idx}" data-person="${p.id}" ${inThisJobAsWorker ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
-            <span class="alloc-person-name">${escapeHtml(p.full_name || p.email)}</span>
-            ${isThisJobsDriver ? '<span class="alloc-conflict-note">🚗 driver for this job</span>' : ''}
+          <label class="alloc-person-row${disabled ? ' conflict' : ''}">
+            <span class="alloc-person-name">
+              <span class="apn-main">${escapeHtml(p.full_name || p.email)}</span>
+              ${p.full_name ? `<span class="apn-sub">${escapeHtml(p.email)}</span>` : ''}
+            </span>
             ${note ? `<span class="alloc-conflict-note">${escapeHtml(note)}</span>` : ''}
-          </div>
+            <input type="checkbox" class="alloc-worker-cb" data-job-idx="${job.idx}" data-person="${p.id}" ${inThisJobAsWorker ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
+          </label>
         `;
       }).join('');
       const driverOptions = allocationPeopleCache.filter((p) => {
@@ -1794,7 +1803,7 @@ function renderAllocationDraft() {
         const published = allocationPublishedMap.get(p.id);
         const publishedElsewhere = published && published.project !== job.jobId;
         return !usedElsewhereInDraft && !publishedElsewhere && !job.workers.has(p.id);
-      }).map((p) => `<option value="${p.id}" ${job.driverId === p.id ? 'selected' : ''}>${escapeHtml(p.full_name || p.email)}</option>`).join('');
+      }).map((p) => `<option value="${p.id}" ${job.driverId === p.id ? 'selected' : ''}>${escapeHtml(allocPersonDisplay(p))}</option>`).join('');
       return `
         <div class="alloc-job-card">
           <div class="alloc-job-card-head">
@@ -1811,14 +1820,17 @@ function renderAllocationDraft() {
             <div id="${locResultsId}" class="job-search-results" style="display:none;"></div>
           </div>
 
-          <label style="margin-top:10px;">🚗 Assign a driver for this job (pick-up/drop-off)</label>
-          <select data-driver-select="${job.idx}"><option value="">No driver for this job</option>${driverOptions}</select>
+          <label for="allocDraftTime_${job.idx}" style="margin-top:10px;">Attendance / report time (optional)</label>
+          <input id="allocDraftTime_${job.idx}" type="time" data-attendance-time="${job.idx}" value="${escapeHtml(job.attendanceTime || '')}" />
 
-          <div style="margin-top:12px;">
+          <div style="margin-top:14px;">
             <strong style="font-size:13px;">Workers on this job</strong>
-            <p class="hint" style="margin-top:2px;">Tick anyone working this job — no limit. Greyed-out people are already used elsewhere for this date.</p>
-            <div style="margin-top:6px; max-height:280px; overflow-y:auto;">${peopleRows}</div>
+            <p class="hint" style="margin-top:2px;">Tick anyone working this job, from the list below — no limit. Greyed-out people are already used elsewhere for this date.</p>
+            <div style="margin-top:6px; max-height:320px; overflow-y:auto;">${peopleRows}</div>
           </div>
+
+          <label style="margin-top:14px;">🚗 Assign a driver for this job (pick-up/drop-off)</label>
+          <select data-driver-select="${job.idx}"><option value="">No driver for this job</option>${driverOptions}</select>
         </div>
       `;
     }).join('');
@@ -1830,6 +1842,8 @@ function renderAllocationDraft() {
         locInput.addEventListener('input', () => { job.location = locInput.value; });
         wireAddressSearch(`allocDraftLoc_${job.idx}`, `allocDraftLocResults_${job.idx}`);
       }
+      const timeInput = $(`allocDraftTime_${job.idx}`);
+      if (timeInput) timeInput.addEventListener('input', () => { job.attendanceTime = timeInput.value; });
     });
     box.querySelectorAll('[data-driver-select]').forEach((sel) => {
       sel.addEventListener('change', () => {
@@ -1862,10 +1876,10 @@ async function publishAllocationDraft() {
   const rows = [];
   allocationDraftJobs.forEach((job) => {
     job.workers.forEach((personId) => {
-      rows.push({ person_id: personId, work_date: date, project: job.jobId, location: job.location.trim() || null, assignment_type: 'job', created_by: currentUser.id });
+      rows.push({ person_id: personId, work_date: date, project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', created_by: currentUser.id });
     });
     if (job.driverId) {
-      rows.push({ person_id: job.driverId, work_date: date, project: job.jobId, location: job.location.trim() || null, assignment_type: 'transportation', created_by: currentUser.id });
+      rows.push({ person_id: job.driverId, work_date: date, project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', created_by: currentUser.id });
     }
   });
   if (!rows.length) { showToast('Tick at least one worker or assign a driver first.'); return; }
@@ -1888,7 +1902,7 @@ async function loadManageAllocations() {
   const date = $('allocManageDate').value;
   if (!list || !date) return;
   list.innerHTML = '<div class="empty">Loading…</div>';
-  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type, location').eq('work_date', date);
+  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type, location, attendance_time').eq('work_date', date);
   if (error) { list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
   const rows = data || [];
   if (!rows.length) { list.innerHTML = '<div class="empty">Nothing published for this date yet.</div>'; return; }
@@ -1918,6 +1932,7 @@ async function loadManageAllocations() {
               <div class="entry-desc">${escapeHtml(allocPersonLabel(r.person_id))}</div>
               ${r.location ? `<div class="entry-meta">${escapeHtml(r.location)}</div>` : ''}
             </div>
+            <input type="time" class="alloc-manage-time" data-time-person="${r.person_id}" data-time-job="${escapeHtml(jobId)}" value="${escapeHtml(r.attendance_time || '')}" title="Attendance / report time" />
             <button type="button" class="alloc-manage-remove" data-remove-person="${r.person_id}" data-remove-job="${escapeHtml(jobId)}">✕</button>
           </div>
         `).join('')}
@@ -1928,6 +1943,7 @@ async function loadManageAllocations() {
               <div class="entry-desc">${escapeHtml(allocPersonLabel(driver.person_id))} — driver</div>
               ${driver.location ? `<div class="entry-meta">${escapeHtml(driver.location)}</div>` : ''}
             </div>
+            <input type="time" class="alloc-manage-time" data-time-person="${driver.person_id}" data-time-job="${escapeHtml(jobId)}" value="${escapeHtml(driver.attendance_time || '')}" title="Attendance / report time" />
             <button type="button" class="alloc-manage-remove" data-remove-person="${driver.person_id}" data-remove-job="${escapeHtml(jobId)}">✕</button>
           </div>
         ` : ''}
@@ -1941,6 +1957,14 @@ async function loadManageAllocations() {
         .eq('person_id', btn.dataset.removePerson).eq('work_date', date).eq('project', btn.dataset.removeJob === '(no job)' ? null : btn.dataset.removeJob);
       if (delErr) { showToast(`Couldn't remove: ${delErr.message}`); return; }
       loadManageAllocations();
+    });
+  });
+  list.querySelectorAll('.alloc-manage-time').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const { error: updErr } = await sb.from('daily_assignments').update({ attendance_time: input.value || null })
+        .eq('person_id', input.dataset.timePerson).eq('work_date', date).eq('project', input.dataset.timeJob === '(no job)' ? null : input.dataset.timeJob);
+      if (updErr) { showToast(`Couldn't update time: ${updErr.message}`); return; }
+      showToast('Time updated.');
     });
   });
   list.querySelectorAll('[data-delete-job]').forEach((btn) => {
