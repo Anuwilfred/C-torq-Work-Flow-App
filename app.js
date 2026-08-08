@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.52';
+const APP_VERSION = 'v3.53';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -333,30 +333,53 @@ $('clockOutBtn')?.addEventListener('click', () => {
 // what it was before (one entry, clock-in to clock-out).
 // =====================================================================
 
-let qsrArmed = false;
-let qsrDisarmTimer = null;
+// Quick Job Switch — right-side drawer with a game-console D-pad:
+//   Job ID (top)  — tap to open the scrollable job picker, just changes
+//                    which job is "loaded"; never touches the timer.
+//   Start (left)  — begins timing the currently-loaded Job ID. If another
+//                    job was already running (or stopped-but-not-yet-
+//                    submitted), it's auto-submitted first as a safety net
+//                    so no time is ever silently lost.
+//   Stop (right)  — pauses the timer (freezes the elapsed reading) without
+//                    saving yet, in case the person wants to double check
+//                    before it's written to their timesheet.
+//   Submit (down) — saves the (paused or still-running) stretch as its own
+//                    timesheet entry. After this, pick the next Job ID and
+//                    tap Start again.
+let qsrLoadedJobId = '';
+let qsrLoadedJobName = '';
 
 function renderQuickSwitchRing() {
-  const ring = $('quickSwitchRing');
-  if (!ring) return;
+  const handle = $('qsrHandle');
+  if (!handle) return;
   const state = getClockState();
   const clockedIn = state.status === 'working' || state.status === 'onbreak';
-  ring.style.display = clockedIn ? 'grid' : 'none';
-  if (!clockedIn) return;
+  handle.style.display = clockedIn ? 'flex' : 'none';
+  if (!clockedIn) { $('qsrDrawer')?.classList.remove('show'); $('qsrDrawerBackdrop')?.classList.remove('show'); return; }
 
-  $('qsrJobLabel').textContent = state.segmentStart ? ($('jobId').value.trim() || 'Untitled job') : 'No job yet';
-  $('qsrStartBtn').disabled = !qsrArmed || state.status === 'onbreak';
-  $('qsrStopBtn').disabled = !qsrArmed || !state.segmentStart || state.status === 'onbreak';
+  if (!qsrLoadedJobId) qsrLoadedJobId = $('jobId').value.trim();
+  const paused = !!state.segmentPausedAt;
+  const running = !!state.segmentStart && !paused;
+
+  const badge = $('qsrSelectedBadge');
+  if (badge) badge.textContent = qsrLoadedJobId ? `${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}` : 'No job selected yet';
+
+  $('qsrStartBtn').disabled = state.status === 'onbreak' || !qsrLoadedJobId;
+  $('qsrStopBtn').disabled = state.status === 'onbreak' || !state.segmentStart || paused;
+  $('qsrSubmitBtn').disabled = !state.segmentStart;
+
+  const center = $('qsrElapsed');
+  center.classList.toggle('running', running);
   if (state.segmentStart) {
-    const mins = Math.max(0, Math.round((Date.now() - new Date(state.segmentStart)) / 60000));
-    $('qsrElapsed').textContent = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+    const endPoint = paused ? new Date(state.segmentPausedAt) : new Date();
+    const mins = Math.max(0, Math.round((endPoint - new Date(state.segmentStart)) / 60000));
+    const label = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+    center.textContent = paused ? `⏸ ${label}` : label;
   } else {
-    $('qsrElapsed').textContent = '—';
+    center.textContent = '—';
   }
-  $('qsrArmBtn').classList.toggle('armed', qsrArmed);
-  $('qsrArmBtn').textContent = qsrArmed ? '🔓' : '🔒';
 }
-setInterval(renderQuickSwitchRing, 60000);
+setInterval(renderQuickSwitchRing, 30000);
 
 // Closes whatever job segment is currently running: saves it as its own
 // timesheet entry (using the CURRENT form's Job ID/project/location/mode —
@@ -389,6 +412,7 @@ async function closeCurrentSegmentAndSubmit(now) {
   await addEntry(draft);
   syncQueue();
   state.segmentStart = null;
+  state.segmentPausedAt = null;
   saveClockState(state);
   // Reset the form's own startTime marker to right now — otherwise a plain
   // Clock Out later (without ever tapping Start again) would double-count
@@ -398,65 +422,22 @@ async function closeCurrentSegmentAndSubmit(now) {
   return true;
 }
 
-async function qsrStop() {
-  if (!qsrArmed) return;
-  const state = getClockState();
-  if (!state.segmentStart) { showToast('No job currently running.'); qsrArmed = false; renderQuickSwitchRing(); return; }
-  await closeCurrentSegmentAndSubmit(new Date());
-  qsrArmed = false;
-  renderQuickSwitchRing();
-}
-
-async function qsrSwitchTo(jobId, jobName) {
-  const now = new Date();
-  const state = getClockState();
-  if (state.segmentStart) await closeCurrentSegmentAndSubmit(now);
-  const fresh = getClockState();
-  fresh.segmentStart = now.toISOString();
-  saveClockState(fresh);
-  $('jobId').value = jobId;
-  $('startTime').value = toTimeInputValue(now);
-  showToast(`Now working: ${jobId}${jobName ? ' — ' + jobName : ''}`);
-  qsrArmed = false;
-  renderQuickSwitchRing();
-}
-
-$('qsrArmBtn')?.addEventListener('click', () => {
-  qsrArmed = !qsrArmed;
-  clearTimeout(qsrDisarmTimer);
-  if (qsrArmed) qsrDisarmTimer = setTimeout(() => { qsrArmed = false; renderQuickSwitchRing(); }, 8000);
-  renderQuickSwitchRing();
-});
-
-function closeQsrPicker() {
-  $('qsrPickerBackdrop').classList.remove('show');
-  $('qsrPickerOverlay').classList.remove('show');
-}
-
-$('qsrStartBtn')?.addEventListener('click', () => {
-  if ($('qsrStartBtn').disabled) return;
-  qsrArmed = false;
-  renderQuickSwitchRing();
+// Job ID (top button): opens the drawer's job picker. Selecting a job just
+// loads it — it does not touch the timer at all.
+function openQsrJobPicker() {
   $('qsrJobSearch').value = '';
   $('qsrJobResults').style.display = 'none';
-  $('qsrPickerBackdrop').classList.add('show');
-  $('qsrPickerOverlay').classList.add('show');
+  showQsrJobMatches('');
   $('qsrJobSearch').focus();
-});
-$('qsrStopBtn')?.addEventListener('click', () => {
-  if ($('qsrStopBtn').disabled) return;
-  qsrStop();
-});
-$('qsrPickerCloseBtn')?.addEventListener('click', closeQsrPicker);
-$('qsrPickerBackdrop')?.addEventListener('click', closeQsrPicker);
+}
 
-$('qsrJobSearch')?.addEventListener('input', () => {
-  const q = $('qsrJobSearch').value.trim().toLowerCase();
+function showQsrJobMatches(q) {
   const box = $('qsrJobResults');
-  if (!q) { box.style.display = 'none'; return; }
-  const matches = jobSearchOptions.filter((r) =>
-    String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
-  ).slice(0, 8);
+  const query = (q || '').trim().toLowerCase();
+  const matches = (query
+    ? jobSearchOptions.filter((r) => String(r.job_id).toLowerCase().includes(query) || String(r.name || '').toLowerCase().includes(query))
+    : jobSearchOptions
+  ).slice(0, 30);
   box.innerHTML = matches.length
     ? matches.map((r) => `
         <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}" data-job-name="${escapeHtml(r.name || '')}">
@@ -467,13 +448,77 @@ $('qsrJobSearch')?.addEventListener('input', () => {
     : '<div class="job-search-empty">No matching job found.</div>';
   box.style.display = 'block';
   box.querySelectorAll('.job-search-item[data-job-id]').forEach((item) => {
-    item.addEventListener('mousedown', async (e) => {
+    item.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      closeQsrPicker();
-      await qsrSwitchTo(item.dataset.jobId, item.dataset.jobName);
+      qsrLoadedJobId = item.dataset.jobId;
+      qsrLoadedJobName = item.dataset.jobName || '';
+      $('jobId').value = qsrLoadedJobId;
+      box.style.display = 'none';
+      $('qsrJobSearch').value = '';
+      showToast(`Loaded job: ${qsrLoadedJobId}`);
+      renderQuickSwitchRing();
     });
   });
+}
+
+// Start (left): begins timing the loaded Job ID. Safety net — if a segment
+// was already running or paused-but-not-submitted, it's auto-submitted
+// first so nothing is ever silently lost.
+async function qsrStart() {
+  if (!qsrLoadedJobId) { showToast('Pick a Job ID first.'); return; }
+  const now = new Date();
+  const state = getClockState();
+  if (state.segmentStart) await closeCurrentSegmentAndSubmit(state.segmentPausedAt ? new Date(state.segmentPausedAt) : now);
+  const fresh = getClockState();
+  fresh.segmentStart = now.toISOString();
+  fresh.segmentPausedAt = null;
+  saveClockState(fresh);
+  $('jobId').value = qsrLoadedJobId;
+  $('startTime').value = toTimeInputValue(now);
+  showToast(`Started: ${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}`);
+  renderQuickSwitchRing();
+}
+
+// Stop (right): pauses the timer — freezes the elapsed reading — without
+// saving yet. Submit is the step that actually commits it.
+function qsrPause() {
+  const state = getClockState();
+  if (!state.segmentStart) { showToast('No job currently running.'); return; }
+  state.segmentPausedAt = new Date().toISOString();
+  saveClockState(state);
+  renderQuickSwitchRing();
+}
+
+// Submit (down): saves the running-or-paused stretch as its own timesheet
+// entry. After this, load the next Job ID and tap Start again.
+async function qsrSubmit() {
+  const state = getClockState();
+  if (!state.segmentStart) { showToast('Nothing to submit yet.'); return; }
+  const endPoint = state.segmentPausedAt ? new Date(state.segmentPausedAt) : new Date();
+  await closeCurrentSegmentAndSubmit(endPoint);
+  renderQuickSwitchRing();
+}
+
+$('qsrHandle')?.addEventListener('click', () => {
+  $('qsrDrawerBackdrop').classList.add('show');
+  $('qsrDrawer').classList.add('show');
+  renderQuickSwitchRing();
 });
+function closeQsrDrawer() {
+  $('qsrDrawerBackdrop').classList.remove('show');
+  $('qsrDrawer').classList.remove('show');
+  $('qsrJobResults').style.display = 'none';
+}
+$('qsrDrawerCloseBtn')?.addEventListener('click', closeQsrDrawer);
+$('qsrDrawerBackdrop')?.addEventListener('click', closeQsrDrawer);
+
+$('qsrJobIdBtn')?.addEventListener('click', openQsrJobPicker);
+$('qsrJobSearch')?.addEventListener('focus', () => showQsrJobMatches($('qsrJobSearch').value));
+$('qsrJobSearch')?.addEventListener('input', () => showQsrJobMatches($('qsrJobSearch').value));
+
+$('qsrStartBtn')?.addEventListener('click', () => { if (!$('qsrStartBtn').disabled) qsrStart(); });
+$('qsrStopBtn')?.addEventListener('click', () => { if (!$('qsrStopBtn').disabled) qsrPause(); });
+$('qsrSubmitBtn')?.addEventListener('click', () => { if (!$('qsrSubmitBtn').disabled) qsrSubmit(); });
 
 renderClockUI();
 renderQuickSwitchRing();
@@ -1587,6 +1632,7 @@ async function renderTeamList() {
       showToast('Department updated.');
     });
   });
+  initAllGlassSelects(list);
   list.querySelectorAll('[data-map-access]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const person = data.find((p) => p.id === btn.dataset.mapAccess);
@@ -2036,6 +2082,7 @@ function renderAllocationDraft() {
         if (job) { job.driverId = sel.value; renderAllocationDraft(); }
       });
     });
+    initAllGlassSelects(box);
     box.querySelectorAll('.alloc-worker-cb').forEach((cb) => {
       cb.addEventListener('change', () => {
         const job = allocationDraftJobs.find((j) => j.idx === Number(cb.dataset.jobIdx));
@@ -4261,6 +4308,85 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// ---------- Glass-styled dropdowns ----------
+// Native <select> option lists are drawn by the OS/browser, not the page —
+// on some devices (notably Android Chrome) that popup ignores our CSS
+// entirely and shows a plain white system list, even though the closed box
+// itself looks right. To make every dropdown's OPEN list follow the glass
+// design too, this wraps a real <select> with a small custom button + our
+// own glass-styled list, while keeping the original <select> in the page
+// (just visually hidden) so nothing else has to change — every existing
+// `.value` read, `addEventListener('change', ...)`, and dynamic option
+// repopulation (`select.innerHTML = ...`) keeps working exactly as before.
+function initGlassSelect(select) {
+  if (!select || select.dataset.glassInit) return;
+  select.dataset.glassInit = '1';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'glass-select-wrap';
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+  select.classList.add('glass-select-native');
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'glass-select-btn';
+  wrap.appendChild(btn);
+
+  const list = document.createElement('div');
+  list.className = 'glass-select-list job-search-results';
+  list.style.display = 'none';
+  wrap.appendChild(list);
+
+  function syncBtn() {
+    const opt = select.options[select.selectedIndex];
+    btn.textContent = opt ? (opt.textContent || opt.value || ' ') : ' ';
+    btn.disabled = select.disabled;
+    btn.classList.toggle('disabled', select.disabled);
+  }
+  function closeList() {
+    list.style.display = 'none';
+    document.removeEventListener('mousedown', onOutside, true);
+  }
+  function onOutside(e) {
+    if (!wrap.contains(e.target)) closeList();
+  }
+  function openList() {
+    if (select.disabled) return;
+    list.innerHTML = Array.from(select.options).map((opt, i) => `
+      <div class="job-search-item glass-select-item${i === select.selectedIndex ? ' selected' : ''}" data-index="${i}">
+        <div class="jid">${escapeHtml(opt.textContent || ' ')}</div>
+      </div>
+    `).join('') || '<div class="job-search-empty">No options</div>';
+    list.querySelectorAll('.glass-select-item[data-index]').forEach((item) => {
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const idx = Number(item.dataset.index);
+        if (select.selectedIndex !== idx) {
+          select.selectedIndex = idx;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        closeList();
+        syncBtn();
+      });
+    });
+    list.style.display = 'block';
+    document.addEventListener('mousedown', onOutside, true);
+  }
+  btn.addEventListener('click', () => { list.style.display === 'block' ? closeList() : openList(); });
+
+  // Options on many of these selects are (re)populated dynamically after
+  // data loads elsewhere in the app — watch for that so the button label
+  // stays correct without touching any of those call sites.
+  new MutationObserver(syncBtn).observe(select, { childList: true, subtree: true });
+  select.addEventListener('change', syncBtn);
+  syncBtn();
+}
+
+function initAllGlassSelects(root) {
+  (root || document).querySelectorAll('select:not([data-glass-init])').forEach(initGlassSelect);
+}
+
 async function renderQueue() {
   const list = $('entryList');
   const entries = await getAllEntries();
@@ -4593,3 +4719,9 @@ async function enablePushNotifications() {
   }
 }
 if ($('enablePushBtn')) $('enablePushBtn').addEventListener('click', enablePushNotifications);
+
+// Give every plain <select> already in the page the glass-styled dropdown
+// treatment. Selects created dynamically later (Team roster role/department
+// pickers, Job Allocation driver pickers) are wired individually right
+// after they're rendered — see initGlassSelect() calls near those renders.
+initAllGlassSelects();

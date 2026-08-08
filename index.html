@@ -486,32 +486,48 @@
   </div>
 </div>
 
-<!-- QUICK JOB SWITCH RING — floating on the right, only shown while clocked
-     in. Tap the center to arm it, then Start (pick a different job — this
-     closes out whatever's running and starts the new one) or Stop (close
-     out the current job without starting another). Each close auto-saves
-     that stretch of time as its own entry, same as filling the form and
-     submitting normally. -->
-<div id="quickSwitchRing" class="quick-switch-ring" style="display:none;">
-  <div class="qsr-slot qsr-top" id="qsrJobLabel">No job yet</div>
-  <button type="button" class="qsr-slot qsr-side qsr-left" id="qsrStartBtn" disabled>▶<br>Start</button>
-  <button type="button" class="qsr-center" id="qsrArmBtn" title="Tap to enable Start/Stop">🔒</button>
-  <button type="button" class="qsr-slot qsr-side qsr-right" id="qsrStopBtn" disabled>⏹<br>Stop</button>
-  <div class="qsr-slot qsr-bottom" id="qsrElapsed">0m</div>
-</div>
-
-<!-- QUICK JOB SWITCH — job picker popover, opened by the Start button -->
-<div id="qsrPickerBackdrop" class="panel-overlay-backdrop"></div>
-<div id="qsrPickerOverlay" class="panel-overlay">
-  <div class="panel-shell" style="max-width:420px; margin:auto; max-height:60vh; align-self:center;">
-    <div class="panel-header">
-      <strong>Switch to a job</strong>
-      <button type="button" class="ghost" id="qsrPickerCloseBtn">✕</button>
+<!-- QUICK JOB SWITCH — right-edge pull handle + sliding glass drawer, only
+     shown while clocked in (mirrors the News Room drawer, but on the right).
+     Tap the handle to open: pick a job from the scrollable list, then use
+     the game-console style D-pad — Job ID (top, tap to change job), Start
+     (left), Stop (right, pauses the timer), Submit (bottom, saves that
+     stretch as its own entry, same as filling the form and submitting
+     normally). After Submit, pick the next Job ID and tap Start again. -->
+<button type="button" id="qsrHandle" class="qsr-handle" style="display:none;" title="Quick Job Switch">🎮</button>
+<div id="qsrDrawerBackdrop" class="chat-overlay-backdrop"></div>
+<div id="qsrDrawer" class="qsr-drawer">
+  <div class="qsr-drawer-header">
+    <strong>Quick Job Switch</strong>
+    <button type="button" class="ghost" id="qsrDrawerCloseBtn">✕</button>
+  </div>
+  <div class="qsr-drawer-body">
+    <label for="qsrJobSearch">Job ID</label>
+    <div class="job-search-wrap" style="position:relative;">
+      <input id="qsrJobSearch" type="text" placeholder="Tap to see all jobs, or type to filter..." autocomplete="off" />
+      <div id="qsrJobResults" class="job-search-results" style="display:none;"></div>
     </div>
-    <div class="panel-body">
-      <div class="job-search-wrap" style="position:relative;">
-        <input id="qsrJobSearch" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
-        <div id="qsrJobResults" class="job-search-results" style="display:none; position:static; margin-top:8px;"></div>
+    <div id="qsrSelectedBadge" class="qsr-selected-badge">No job selected yet</div>
+
+    <div class="qsr-dpad-wrap">
+      <div class="qsr-dpad">
+        <div class="qsr-dpad-plate"></div>
+        <button type="button" class="qsr-slot qsr-top" id="qsrJobIdBtn" title="Tap to pick or change the job">
+          <span class="qsr-dpad-icon">🆔</span>
+          <span class="qsr-dpad-text">Job ID</span>
+        </button>
+        <button type="button" class="qsr-slot qsr-side qsr-left" id="qsrStartBtn" disabled>
+          <span class="qsr-dpad-icon">▶</span>
+          <span class="qsr-dpad-text">Start</span>
+        </button>
+        <button type="button" class="qsr-slot qsr-side qsr-right" id="qsrStopBtn" disabled>
+          <span class="qsr-dpad-icon">⏸</span>
+          <span class="qsr-dpad-text">Stop</span>
+        </button>
+        <button type="button" class="qsr-slot qsr-bottom" id="qsrSubmitBtn" disabled>
+          <span class="qsr-dpad-icon">✅</span>
+          <span class="qsr-dpad-text">Submit</span>
+        </button>
+        <div class="qsr-center" id="qsrElapsed">—</div>
       </div>
     </div>
   </div>

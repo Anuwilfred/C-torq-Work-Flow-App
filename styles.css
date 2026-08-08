@@ -322,6 +322,71 @@ select {
 }
 select option { background: #1a1815; color: var(--text); }
 
+/* Some browsers (notably Android Chrome) render a <select>'s open option
+   list as a plain OS system sheet that ignores page CSS entirely, even
+   with the option-styling above — the closed box looks right but the
+   opened list doesn't. To guarantee every dropdown's list follows the
+   glass design everywhere, initGlassSelect() (app.js) wraps each <select>
+   with a custom button + our own glass list, and just visually hides the
+   original select (still fully functional/read by the rest of the app). */
+.glass-select-wrap { position: relative; width: 100%; }
+select.glass-select-native {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.glass-select-btn {
+  width: 100%;
+  text-align: left;
+  padding: 12px 34px 12px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-2);
+  backdrop-filter: blur(var(--blur-soft)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur-soft)) saturate(160%);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.glass-select-btn::after {
+  content: '▾';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  font-size: 11px;
+  pointer-events: none;
+}
+.glass-select-btn:hover, .glass-select-btn:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.085);
+}
+.glass-select-btn.disabled, .glass-select-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.glass-select-list { width: 100%; }
+.glass-select-item.selected { background: var(--glass-strong); color: var(--accent); }
+
+/* Compact contexts that used to style the native <select> directly (Team
+   roster role/department pickers, per-job driver pickers) — apply the same
+   compact sizing to the new button instead. */
+.entry.team-entry .glass-select-wrap:has(.position-select) { flex: none; width: auto; }
+.entry.team-entry .glass-select-btn {
+  font-size: 11.5px;
+  padding: 6px 22px 6px 8px;
+  border-radius: 10px;
+}
+.entry.team-entry .glass-select-btn::after { right: 8px; font-size: 9px; }
+
 /* ---------- Buttons ---------- */
 button.primary {
   width: 100%;
@@ -1071,99 +1136,164 @@ button.ghost:hover { color: var(--text); }
 .news-comment-input-row input { flex: 1; padding: 8px 10px; font-size: 12px; }
 .news-comment-input-row button { flex: none; padding: 8px 12px; font-size: 12px; }
 
-/* ---------- Quick Job Switch ring — clocked-in only. Desktop: docked to
-   the right edge, vertically centered. Mobile: docked to the bottom,
-   horizontally centered (see media query below), so it doesn't sit under
-   a thumb reaching for the edge on a phone. ---------- */
-.quick-switch-ring {
+/* ---------- Quick Job Switch — right-edge pull handle + sliding glass
+   drawer (mirrors the News Room drawer, but docked to the right edge).
+   Only shown while clocked in. Inside: a scrollable Job ID picker and a
+   game-console style D-pad (Job ID / Start / Stop / Submit). ---------- */
+.qsr-handle {
   position: fixed;
-  right: 16px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 148px;
-  height: 148px;
-  z-index: 58;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
-  gap: 4px;
-  place-items: center;
-}
-.qsr-slot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  font-size: 10.5px;
-  font-weight: 650;
-  line-height: 1.25;
-  border-radius: 16px;
-  padding: 4px;
-  width: 100%;
-  height: 100%;
-  background: var(--glass);
-  backdrop-filter: blur(var(--blur-soft)) saturate(160%);
-  -webkit-backdrop-filter: blur(var(--blur-soft)) saturate(160%);
-  border: 1px solid var(--glass-border);
-  color: var(--text-muted);
-}
-.qsr-top {
-  grid-column: 2;
-  grid-row: 1;
-  color: var(--text);
-  font-weight: 700;
-  font-size: 10px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  user-select: none;
-}
-.qsr-bottom { grid-column: 2; grid-row: 3; color: var(--text-dim); }
-.qsr-left { grid-column: 1; grid-row: 2; }
-.qsr-right { grid-column: 3; grid-row: 2; }
-button.qsr-side {
-  cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-button.qsr-side:disabled { opacity: 0.4; cursor: not-allowed; }
-button.qsr-side:not(:disabled):hover { border-color: var(--accent); color: var(--accent); transform: scale(1.05); }
-#qsrStartBtn:not(:disabled) { border-color: rgba(99, 209, 151, 0.5); color: var(--ok); }
-#qsrStopBtn:not(:disabled) { border-color: rgba(242, 125, 112, 0.5); color: var(--err); }
-
-.qsr-center {
-  grid-column: 2;
-  grid-row: 2;
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  border: 1.5px solid var(--glass-border-strong);
+  width: 32px;
+  height: 62px;
+  border-radius: 16px 0 0 16px;
+  border: 1px solid var(--glass-border-strong);
+  border-right: none;
   background: var(--glass-strong);
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  color: var(--text);
   font-size: 17px;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
-}
-.qsr-center:hover { transform: scale(1.08); }
-.qsr-center.armed {
-  border-color: var(--accent);
-  box-shadow: 0 0 16px 3px rgba(224, 138, 95, 0.45), 0 4px 14px rgba(0, 0, 0, 0.3);
+  z-index: 58;
+  box-shadow: -4px 0 14px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 @media (max-width: 420px) {
-  /* On phones, dock it to the bottom-center instead of the right edge —
-     easier to reach with a thumb and doesn't crowd the side of the screen. */
-  .quick-switch-ring {
+  /* On phones, dock the handle to the bottom-center instead of the right
+     edge — easier to reach with a thumb and doesn't crowd the side. */
+  .qsr-handle {
     right: auto;
     left: 50%;
     top: auto;
     bottom: 128px;
     transform: translateX(-50%);
-    width: 128px;
-    height: 128px;
+    width: 62px;
+    height: 32px;
+    border-radius: 16px;
+    border-right: 1px solid var(--glass-border-strong);
   }
-  .qsr-center { width: 40px; height: 40px; font-size: 15px; }
+}
+
+.qsr-drawer {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(340px, 86vw);
+  z-index: 71;
+  background: var(--glass-strong);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-left: 1px solid var(--glass-border-strong);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.qsr-drawer.show { transform: translateX(0); }
+.qsr-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--glass-border);
+  flex: none;
+}
+.qsr-drawer-body { flex: 1; overflow-y: auto; padding: 14px 16px 24px; }
+.qsr-drawer-body label { display: block; font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
+.qsr-drawer-body .job-search-results { position: static; margin-top: 6px; max-height: 260px; }
+
+.qsr-selected-badge {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text);
+  text-align: center;
+}
+
+.qsr-dpad-wrap { display: flex; justify-content: center; margin-top: 22px; }
+.qsr-dpad {
+  position: relative;
+  width: 190px;
+  height: 190px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  place-items: center;
+}
+.qsr-dpad-plate {
+  position: absolute;
+  inset: 0;
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  clip-path: polygon(22% 0, 78% 0, 78% 22%, 100% 22%, 100% 78%, 78% 78%, 78% 100%, 22% 100%, 22% 78%, 0 78%, 0 22%, 22% 22%);
+}
+.qsr-slot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+.qsr-top { grid-column: 2; grid-row: 1; color: var(--text); }
+.qsr-left { grid-column: 1; grid-row: 2; }
+.qsr-right { grid-column: 3; grid-row: 2; }
+.qsr-bottom { grid-column: 2; grid-row: 3; }
+.qsr-dpad-icon { font-size: 19px; line-height: 1; }
+.qsr-dpad-text { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62px; user-select: none; }
+.qsr-slot:disabled { opacity: 0.35; cursor: not-allowed; }
+.qsr-slot:not(:disabled):hover { color: var(--accent); transform: scale(1.06); }
+#qsrStartBtn:not(:disabled) { color: var(--ok); }
+#qsrStopBtn:not(:disabled) { color: var(--warn, #e0a85f); }
+#qsrSubmitBtn:not(:disabled) { color: var(--accent); }
+
+.qsr-center {
+  grid-column: 2;
+  grid-row: 2;
+  z-index: 2;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1.5px solid var(--glass-border-strong);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.qsr-center.running {
+  border-color: var(--accent);
+  box-shadow: 0 0 16px 3px rgba(224, 138, 95, 0.45), 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
 /* ---------- Aeon Teams Chat: floating icon + full overlay ---------- */
