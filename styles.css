@@ -1,3 +1,52 @@
+/* ---------- Update banner — top-of-screen, appears when a new deployed
+   version has finished downloading in the background ---------- */
+.update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--accent);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  transform: translateY(-100%);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  cursor: pointer;
+}
+.update-banner.show { transform: translateY(0); }
+.update-banner-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px 2px rgba(224, 138, 95, 0.6);
+  flex: none;
+  animation: updatePulse 1.4s ease-in-out infinite;
+}
+@keyframes updatePulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.5; }
+}
+@keyframes updateSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.update-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.update-banner-text strong { font-size: 13px; color: var(--text); }
+.update-banner-text span { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-banner-cta { font-size: 11.5px; font-weight: 700; color: var(--accent); flex: none; white-space: nowrap; }
+.update-banner.updating .update-banner-dot {
+  animation: updateSpin 0.8s linear infinite;
+  border-radius: 3px;
+  box-shadow: none;
+}
+
 :root {
   --bg-0: #0d0d0e;
   --text: #f5f4f0;

@@ -22,6 +22,18 @@
 </head>
 <body>
 
+<!-- UPDATE BANNER — appears at the very top the moment a new deployed
+     version finishes downloading in the background. Tapping it plays a
+     brief "Updating…" animation and then reloads onto the new version. -->
+<div id="updateBanner" class="update-banner">
+  <div class="update-banner-dot"></div>
+  <div class="update-banner-text">
+    <strong id="updateBannerTitle">Update ready</strong>
+    <span id="updateBannerNotes"></span>
+  </div>
+  <span class="update-banner-cta">Tap to refresh</span>
+</div>
+
 <!-- ============== AUTH SCREEN (shown until signed in) ============== -->
 <div id="authScreen" class="auth-wrap">
   <div class="card glass auth-card">
@@ -216,6 +228,7 @@
                   <button type="button" id="stopBreakBtn" class="secondary" style="display:none;">▶️ Stop Break</button>
                   <button type="button" id="clockOutBtn" class="secondary" style="display:none;">🔴 Clock Out</button>
                 </div>
+                <p class="hint" id="clockLocationStatus" style="margin-top:8px; display:none;"></p>
                 <div id="clockLocationArea" style="margin-top:10px;"></div>
               </div>
 

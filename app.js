@@ -1,7 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.57';
+const APP_VERSION = 'v3.59';
+// One short line describing what changed this round — read by OTHER, older
+// tabs (via a plain-text fetch of this exact file) to show in the "new
+// update available" banner, so people see what's new before they refresh.
+const APP_UPDATE_NOTES = 'New: a banner tells you when an update is ready, with a quick summary of what changed.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -299,13 +303,57 @@ function renderClockLocationArea() {
   area.innerHTML = blocks.join('');
 }
 
+// Clock state itself already survives closing/reopening the app just fine
+// (it's saved to localStorage on every change) — but the New Entry FORM
+// FIELDS (Job ID, Project, Location, Date, Start time) are plain inputs
+// that reset to blank on every fresh page load, since nothing was wiring
+// them back up from that saved state. This restores exactly what was there
+// before the app was closed, so an in-progress clock-in looks the same
+// whether you kept the app open the whole time or closed and reopened it.
+// Safe to call multiple times — it never overwrites a field someone's
+// already actively filled in during this session.
+function rehydrateEntryFormFromClockState() {
+  const state = getClockState();
+  const stillOpen = state.status === 'working' || state.status === 'onbreak';
+  if (!stillOpen && !state.clockOutAt) return; // nothing in progress to restore
+
+  if (state.currentJobId && $('jobId') && !$('jobId').value.trim()) {
+    $('jobId').value = state.currentJobId;
+    autoFillProjectFromJobId(state.currentJobId);
+  }
+  if (state.clockInAt && $('date') && !$('date').value) $('date').value = state.clockInAt.slice(0, 10);
+  if (state.segmentStart && $('startTime')) $('startTime').value = toTimeInputValue(state.segmentStart);
+  if (state.clockOutAt && $('endTime')) $('endTime').value = toTimeInputValue(state.clockOutAt);
+  if (state.totalBreakMinutes && $('lunchMinutes')) $('lunchMinutes').value = state.totalBreakMinutes;
+  if (state.clockInLocation && $('location') && !$('location').value.trim()) {
+    $('location').value = state.clockInLocation;
+    const mapImg = $('locationMapImg');
+    if (mapImg && state.clockInLat) {
+      mapImg.onerror = () => { mapImg.style.display = 'none'; };
+      mapImg.onload = () => { mapImg.style.display = 'block'; };
+      mapImg.src = staticMapUrl(state.clockInLat, state.clockInLng);
+    }
+  }
+}
+
+function setClockLocationStatus(text) {
+  const el = $('clockLocationStatus');
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
 $('clockInBtn')?.addEventListener('click', () => {
   const now = new Date();
   const iso = now.toISOString();
+  const jobId = $('jobId') ? $('jobId').value.trim() : '';
   saveClockState({
     status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: iso,
     clockInLocation: null, clockInLat: null, clockInLng: null,
     clockOutLocation: null, clockOutLat: null, clockOutLng: null,
+    currentJobId: jobId || null,
+    currentJobName: jobId ? (jobSearchOptions.find((r) => r.job_id === jobId)?.name || '') : '',
   });
   $('date').value = iso.slice(0, 10);
   $('startTime').value = toTimeInputValue(iso);
@@ -313,13 +361,18 @@ $('clockInBtn')?.addEventListener('click', () => {
   renderQuickSwitchRing();
   showToast('Clocked in — have a good shift.');
   // Auto-fill the location (and its map preview) right away — no need to
-  // tap "Use my location" separately. Silent: a denied/slow GPS shouldn't
-  // throw an extra toast on top of the clock-in one; the button is still
-  // there to retry or type it in manually. Also stamped as attendance proof
-  // (separate from the job's own Location field) so both clock-in and
-  // clock-out locations can be checked against each other later.
+  // tap "Use my location" separately. This is also stamped as attendance
+  // proof (separate from the job's own Location field) so both clock-in
+  // and clock-out locations can be checked against each other later.
+  // Visible status here (not just a toast) so a denied/slow GPS is never
+  // silently invisible — you can always see what happened.
+  setClockLocationStatus('📍 Getting your location…');
   fetchAndFillLocation({ silent: true }).then((r) => {
-    if (!r.ok) return;
+    if (!r.ok) {
+      setClockLocationStatus("⚠️ Couldn't get your location — check that this site has location permission, then tap \"Refresh my location\" below.");
+      return;
+    }
+    setClockLocationStatus('');
     const s = getClockState();
     s.clockInLocation = r.address; s.clockInLat = r.lat; s.clockInLng = r.lng;
     saveClockState(s);
@@ -369,8 +422,13 @@ $('clockOutBtn')?.addEventListener('click', () => {
   // visible. This is attendance proof only: it does NOT touch the job's own
   // Location field above (fillField: false), since that describes where
   // the work itself happened, which may be a different place entirely.
+  setClockLocationStatus('📍 Getting your clock-out location…');
   fetchAndFillLocation({ silent: true, fillField: false }).then((r) => {
-    if (!r.ok) return;
+    if (!r.ok) {
+      setClockLocationStatus("⚠️ Couldn't get your clock-out location — check location permission for this site.");
+      return;
+    }
+    setClockLocationStatus('');
     const s = getClockState();
     s.clockOutLocation = r.address; s.clockOutLat = r.lat; s.clockOutLng = r.lng;
     saveClockState(s);
@@ -561,6 +619,8 @@ async function qsrStart() {
   const fresh = getClockState();
   fresh.segmentStart = now.toISOString();
   fresh.segmentPausedAt = null;
+  fresh.currentJobId = qsrLoadedJobId;
+  fresh.currentJobName = qsrLoadedJobName;
   saveClockState(fresh);
   $('jobId').value = qsrLoadedJobId;
   autoFillProjectFromJobId(qsrLoadedJobId);
@@ -596,6 +656,8 @@ async function qsrSubmit() {
     const fresh = getClockState();
     fresh.segmentStart = now.toISOString();
     fresh.segmentPausedAt = null;
+    fresh.currentJobId = resumeId;
+    fresh.currentJobName = resumeName;
     saveClockState(fresh);
     $('jobId').value = resumeId;
     autoFillProjectFromJobId(resumeId);
@@ -1133,7 +1195,12 @@ async function enterApp(knownUser) {
   applyFeatureAccess();
   startPresence();
   populateAllowanceDropdown();
-  populateJobIdDropdown().then(renderMyTodayAssignment).then(renderJobBoard);
+  // Rehydrate BEFORE checking today's allocation, so an already-in-progress
+  // clock-in (possibly on a different job than today's fresh allocation)
+  // wins — renderMyTodayAssignment only fills Job ID if it's still empty.
+  populateJobIdDropdown()
+    .then(() => { rehydrateEntryFormFromClockState(); return renderMyTodayAssignment(); })
+    .then(renderJobBoard);
   renderMyTripsToday();
   // Projects / Learning / Health Challenges are visible to everyone now —
   // only creating/deleting projects (and setting positions) stays admin-only.
@@ -4926,27 +4993,64 @@ $('aiInput').addEventListener('keydown', (e) => {
 // ---------- Service worker ----------
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+    navigator.serviceWorker.register('./service-worker.js').then((reg) => {
+      // Proactively re-check for a newer deploy whenever the tab regains
+      // focus — catches a tab that's been sitting open/backgrounded for a
+      // while, rather than only ever checking on a fresh page load.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(console.error);
   });
 
   // RELIABILITY: the app shell uses stale-while-revalidate caching for
   // instant, consistent open speed — but that means a tab that's already
   // open (or was cached from before) keeps running whatever JS it already
   // loaded, even after a newer version has finished downloading in the
-  // background; the swap only used to take effect on the NEXT full open.
-  // That's exactly why a normal browser tab could seem "stuck" on an older
-  // version while a brand-new incognito tab (nothing cached yet) always
-  // got the latest. Once a new service worker actually takes control of
-  // THIS page, reload once, automatically — so every device ends up on the
-  // latest, fixed version without anyone needing to know to hard-refresh
-  // or use incognito.
-  let swRefreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (swRefreshing) return;
-    swRefreshing = true;
-    location.reload();
+  // background. Once a new service worker actually takes control of THIS
+  // page, a fresh build is ready to go — rather than silently reloading
+  // out from under someone (which could interrupt typing or wipe an
+  // in-progress clock-in view), show a banner at the top naming the new
+  // version with a one-line "what changed", and let them tap it when it's
+  // a good moment. Tapping plays a brief "Updating…" animation, then
+  // reloads onto the new version.
+  let updateBannerShown = false;
+  navigator.serviceWorker.addEventListener('controllerchange', async () => {
+    if (updateBannerShown) return;
+    updateBannerShown = true;
+    let version = '', notes = '';
+    try {
+      // Cache-busted + no-store so this reads the genuinely new file over
+      // the network, not whatever this tab (or the old service worker)
+      // already had cached.
+      const res = await fetch('./app.js?_=' + Date.now(), { cache: 'no-store' });
+      const text = await res.text();
+      version = (text.match(/const APP_VERSION\s*=\s*'([^']+)'/) || [])[1] || '';
+      notes = (text.match(/const APP_UPDATE_NOTES\s*=\s*'([^']*)'/) || [])[1] || '';
+    } catch { /* show the banner anyway, just without the version/notes detail */ }
+    showUpdateBanner(version, notes);
   });
 }
+
+function showUpdateBanner(version, notes) {
+  const banner = $('updateBanner');
+  // Very old builds (from before this banner existed) won't have this
+  // element at all — fall back to the previous behavior (instant reload)
+  // rather than leaving someone stuck on a stale version with no way to
+  // know an update even shipped.
+  if (!banner) { location.reload(); return; }
+  $('updateBannerTitle').textContent = version ? `Update ${version} ready` : 'Update ready';
+  $('updateBannerNotes').textContent = notes || 'Tap to refresh and get the latest version.';
+  banner.classList.add('show');
+}
+$('updateBanner')?.addEventListener('click', () => {
+  const banner = $('updateBanner');
+  if (banner.classList.contains('updating')) return;
+  banner.classList.add('updating');
+  $('updateBannerTitle').textContent = 'Updating…';
+  $('updateBannerNotes').textContent = '';
+  setTimeout(() => location.reload(), 750);
+});
 
 // ---------- Push notifications (WhatsApp-style system alerts) ----------
 // iOS Safari requires: the app installed to the Home Screen (iOS 16.4+), and
