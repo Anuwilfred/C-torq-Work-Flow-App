@@ -903,20 +903,6 @@
   </div>
 </div>
 
-<!-- ENTRY DETAIL OVERLAY — tap any Queue entry to review its full details -->
-<div id="entryDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
-<div id="entryDetailOverlay" class="panel-overlay">
-  <div class="panel-shell" style="max-width:460px; margin:auto; max-height:76vh; align-self:center;">
-    <div class="panel-header">
-      <strong id="entryDetailTitle">Entry details</strong>
-      <button type="button" class="ghost" data-close="entryDetail">✕</button>
-    </div>
-    <div class="panel-body">
-      <div id="entryDetailBody"></div>
-    </div>
-  </div>
-</div>
-
 <!-- MY JOBS OVERLAY — everyone's own view of what they've been allocated,
      today plus every other day (past and upcoming). Not gated by
      allowed_features — this is just each person's own information, same as
@@ -930,6 +916,26 @@
     </div>
     <div class="panel-body">
       <div id="myJobsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ENTRY DETAIL OVERLAY — tap any Queue entry, or any My Jobs row, to
+     review its full details. Placed AFTER every panel that can open it
+     (Queue's tab is not an overlay, but My Jobs above is) so it always
+     paints on top — .panel-overlay has no per-panel z-index, so DOM order
+     is what decides which overlay stacks above another when two are open
+     at once. This used to sit BEFORE myJobsOverlay, which put it behind
+     the My Jobs list instead of in front of it. -->
+<div id="entryDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="entryDetailOverlay" class="panel-overlay">
+  <div class="panel-shell" style="max-width:460px; margin:auto; max-height:76vh; align-self:center;">
+    <div class="panel-header">
+      <strong id="entryDetailTitle">Entry details</strong>
+      <button type="button" class="ghost" data-close="entryDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="entryDetailBody"></div>
     </div>
   </div>
 </div>
