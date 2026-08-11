@@ -1599,6 +1599,13 @@ button.ghost:hover { color: var(--text); }
 }
 .home-tile:hover .home-tile-icon-allocation,
 .home-tile:active .home-tile-icon-allocation { box-shadow: 0 10px 22px rgba(224, 160, 90, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.home-tile-icon-datafeed {
+  background: linear-gradient(160deg, rgba(150, 130, 224, 0.28), rgba(100, 80, 176, 0.14));
+  border-color: rgba(150, 130, 224, 0.55);
+  box-shadow: 0 6px 16px rgba(150, 130, 224, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile:hover .home-tile-icon-datafeed,
+.home-tile:active .home-tile-icon-datafeed { box-shadow: 0 10px 22px rgba(150, 130, 224, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 
 /* Project Tank stat rows + low-level alert banner */
 .tank-stat-row {

@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.66';
+const APP_VERSION = 'v3.67';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed Admin → Projects (and the rest of that row) being hidden on desktop-width screens.';
+const APP_UPDATE_NOTES = 'New Data Feed tile on Home — paste WhatsApp job messages there to auto-add jobs.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -1962,6 +1962,7 @@ const FEATURE_LIST = [
   { key: 'quotations', label: 'Quotations' },
   { key: 'tank', label: 'Project Tank' },
   { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
+  { key: 'datafeed', label: 'Data Feed (add jobs from pasted WhatsApp messages)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -3023,6 +3024,7 @@ const PANEL_IDS = {
   allocation: ['allocationOverlay', 'allocationOverlayBackdrop'],
   myjobs: ['myJobsOverlay', 'myJobsOverlayBackdrop'],
   entryDetail: ['entryDetailOverlay', 'entryDetailOverlayBackdrop'],
+  datafeed: ['dataFeedOverlay', 'dataFeedOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -3035,7 +3037,6 @@ function openPanel(name, opts = {}) {
     // projects still lives in Admin → Projects, which opens this same
     // panel without the hideCreate flag.
     $('newProjectCard').style.display = (currentProfile?.role === 'admin' && !opts.hideCreate) ? 'block' : 'none';
-    if ($('importJobsCard')) $('importJobsCard').style.display = (currentProfile?.role === 'admin' && !opts.hideCreate) ? 'block' : 'none';
     renderProjectsList();
   }
   if (name === 'departments') {

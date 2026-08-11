@@ -145,6 +145,10 @@
           <span class="home-tile-icon home-tile-icon-allocation">🚚</span>
           <span class="home-tile-label">Job Allocation</span>
         </button>
+        <button type="button" class="home-tile" data-open="datafeed" data-feature="datafeed">
+          <span class="home-tile-icon home-tile-icon-datafeed">📥</span>
+          <span class="home-tile-label">Data Feed</span>
+        </button>
         <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
@@ -660,14 +664,6 @@
         <button id="createProjectBtn" class="primary" style="margin-top:12px;">Create project</button>
       </div>
 
-      <div class="card glass" id="importJobsCard" style="display:none; margin-top:12px;">
-        <strong style="font-size:14px;">Import jobs from WhatsApp</strong>
-        <p class="hint">Paste the job announcement messages below — AEON Ai will pull out every job number, description, and client, skip anything already in your Projects list, and show you just the new ones to confirm.</p>
-        <textarea id="importJobsText" rows="6" placeholder="Paste the WhatsApp messages here..."></textarea>
-        <button id="scanImportJobsBtn" class="secondary" style="margin-top:8px;">Scan for new jobs</button>
-        <div id="importJobsResultsArea" style="margin-top:12px;"></div>
-      </div>
-
       <div id="projectsListArea" style="margin-top:16px;"></div>
     </div>
   </div>
@@ -936,6 +932,30 @@
     </div>
     <div class="panel-body">
       <div id="entryDetailBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DATA FEED OVERLAY — admin pastes raw WhatsApp job-announcement
+     messages; AEON Ai automatically pulls out the job number, description,
+     and client for each one, skips anything already saved, and shows a
+     checklist to confirm before adding. First-class Home tile now (used to
+     be buried inside Admin → Projects, which nobody could find). -->
+<div id="dataFeedOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="dataFeedOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Data Feed</strong>
+      <button type="button" class="ghost" data-close="datafeed">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">Add jobs from WhatsApp</strong>
+        <p class="hint">Paste the job announcement messages below — AEON Ai will pull out every job number, description, and client, skip anything already in your Projects list, and show you just the new ones to confirm.</p>
+        <textarea id="importJobsText" rows="8" placeholder="Paste the WhatsApp messages here..."></textarea>
+        <button id="scanImportJobsBtn" class="secondary" style="margin-top:8px;">Scan for new jobs</button>
+        <div id="importJobsResultsArea" style="margin-top:12px;"></div>
+      </div>
     </div>
   </div>
 </div>
