@@ -1625,9 +1625,10 @@ button.ghost:hover { color: var(--text); }
 
 .admin-more-row { display: none; flex-wrap: wrap; }
 .admin-more-row button { flex: 1; min-width: 110px; }
-@media (min-width: 901px) {
-  .admin-more-row { display: none !important; }
-}
+/* Used to force-hide this row on desktop-width screens (>=901px) — a
+   leftover from an older layout. This is the ONLY way an admin reaches
+   Projects (and the WhatsApp import box) from the Admin tab, so hiding it
+   on desktop just made that unreachable there. Removed. */
 
 /* Project hour rings (Apple-Watch-style dual ring per role) */
 .project-rings {
