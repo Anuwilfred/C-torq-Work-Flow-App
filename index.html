@@ -103,10 +103,24 @@
           <span class="home-tile-icon">💬</span>
           <span class="home-tile-label">Chat</span>
         </button>
+        <button type="button" class="home-tile" data-open="myjobs">
+          <span class="home-tile-icon">🗂️</span>
+          <span class="home-tile-label">My Jobs</span>
+        </button>
         <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
         </button>
+      </div>
+
+      <!-- TODAY'S JOB BOARD — a message-board style broadcast, visible to
+           everyone (not gated by allowed_features), listing every job
+           published via Job Allocation for today: job id, location,
+           arrival time, driver, and who's on it. -->
+      <div class="card glass" id="jobBoardCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📋 Today's Job Board</strong>
+        <p class="hint" style="margin-top:2px;">What's been published for today, for everyone to see.</p>
+        <div id="jobBoardArea" style="margin-top:8px;"></div>
       </div>
 
       <!-- More tools — same tile style as above, was floating on the right
@@ -202,17 +216,19 @@
                   <button type="button" id="stopBreakBtn" class="secondary" style="display:none;">▶️ Stop Break</button>
                   <button type="button" id="clockOutBtn" class="secondary" style="display:none;">🔴 Clock Out</button>
                 </div>
+                <div id="clockLocationArea" style="margin-top:10px;"></div>
               </div>
 
               <label for="project">Project</label>
-              <input id="project" type="text" placeholder="e.g. Website Redesign" />
+              <input id="project" type="text" placeholder="Filled automatically from the Job ID above" readonly />
 
               <label for="location">Location</label>
               <div class="location-row">
-                <input id="location" type="text" placeholder="Tap to fetch, or type manually" />
-                <button type="button" id="fetchLocationBtn">📍 Use my location</button>
+                <input id="location" type="text" placeholder="Filled automatically by Clock In" readonly />
+                <button type="button" id="fetchLocationBtn">📍 Refresh my location</button>
               </div>
               <img id="locationMapImg" style="display:none; margin-top:8px; width:100%; max-width:340px; border-radius:14px; border:1px solid var(--glass-border);" alt="Map showing your location" />
+              <p class="hint" style="margin-top:4px;">No manual typing — Project comes from the Job ID you pick, and Location comes from GPS when you Clock In (tap "Refresh" if it needs updating).</p>
 
               <label for="allowanceLocation">Allowance area (optional)</label>
               <select id="allowanceLocation">
@@ -223,7 +239,7 @@
               <div class="row-2">
                 <div>
                   <label for="date">Date</label>
-                  <input id="date" type="date" />
+                  <input id="date" type="date" readonly />
                 </div>
                 <div></div>
               </div>
@@ -869,6 +885,37 @@
     </div>
     <div class="panel-body">
       <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ENTRY DETAIL OVERLAY — tap any Queue entry to review its full details -->
+<div id="entryDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="entryDetailOverlay" class="panel-overlay">
+  <div class="panel-shell" style="max-width:460px; margin:auto; max-height:76vh; align-self:center;">
+    <div class="panel-header">
+      <strong>Entry details</strong>
+      <button type="button" class="ghost" data-close="entryDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="entryDetailBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MY JOBS OVERLAY — everyone's own view of what they've been allocated,
+     today plus every other day (past and upcoming). Not gated by
+     allowed_features — this is just each person's own information, same as
+     the "Today's job" card on New Entry. -->
+<div id="myJobsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="myJobsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>My Jobs</strong>
+      <button type="button" class="ghost" data-close="myjobs">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="myJobsList"></div>
     </div>
   </div>
 </div>

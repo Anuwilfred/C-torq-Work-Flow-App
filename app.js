@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.53';
+const APP_VERSION = 'v3.57';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -160,6 +160,7 @@ function setActiveTab(name) {
   if (name === 'admin') { renderTeamList(); renderLocationList(); populateAssignPersonPicker(); renderAssignmentList(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
+  if (name === 'home') renderJobBoard();
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
@@ -265,17 +266,65 @@ function renderClockUI() {
   } else {
     line.textContent = 'Not clocked in yet — tap Clock In to start your day.';
   }
+  renderClockLocationArea();
+}
+
+// Attendance-proof strip: shows where someone clocked in (and, once they
+// have, where they clocked out) — each with its own little map thumbnail —
+// so the two can be checked against each other (e.g. clocked in at the
+// office but clocked out somewhere else).
+function renderClockLocationArea() {
+  const area = $('clockLocationArea');
+  if (!area) return;
+  const state = getClockState();
+  const blocks = [];
+  if (state.clockInLocation) {
+    blocks.push(`
+      <div class="clock-loc-block">
+        <div class="clock-loc-label">🟢 Clocked in near</div>
+        <div class="clock-loc-addr">${escapeHtml(state.clockInLocation)}</div>
+        ${state.clockInLat ? `<img class="clock-loc-map" src="${staticMapUrl(state.clockInLat, state.clockInLng, '300x140')}" onerror="this.style.display='none'" alt="Clock-in location map" />` : ''}
+      </div>
+    `);
+  }
+  if (state.clockOutLocation) {
+    blocks.push(`
+      <div class="clock-loc-block">
+        <div class="clock-loc-label">🔴 Clocked out near</div>
+        <div class="clock-loc-addr">${escapeHtml(state.clockOutLocation)}</div>
+        ${state.clockOutLat ? `<img class="clock-loc-map" src="${staticMapUrl(state.clockOutLat, state.clockOutLng, '300x140')}" onerror="this.style.display='none'" alt="Clock-out location map" />` : ''}
+      </div>
+    `);
+  }
+  area.innerHTML = blocks.join('');
 }
 
 $('clockInBtn')?.addEventListener('click', () => {
   const now = new Date();
   const iso = now.toISOString();
-  saveClockState({ status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: iso });
+  saveClockState({
+    status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: iso,
+    clockInLocation: null, clockInLat: null, clockInLng: null,
+    clockOutLocation: null, clockOutLat: null, clockOutLng: null,
+  });
   $('date').value = iso.slice(0, 10);
   $('startTime').value = toTimeInputValue(iso);
   renderClockUI();
   renderQuickSwitchRing();
   showToast('Clocked in — have a good shift.');
+  // Auto-fill the location (and its map preview) right away — no need to
+  // tap "Use my location" separately. Silent: a denied/slow GPS shouldn't
+  // throw an extra toast on top of the clock-in one; the button is still
+  // there to retry or type it in manually. Also stamped as attendance proof
+  // (separate from the job's own Location field) so both clock-in and
+  // clock-out locations can be checked against each other later.
+  fetchAndFillLocation({ silent: true }).then((r) => {
+    if (!r.ok) return;
+    const s = getClockState();
+    s.clockInLocation = r.address; s.clockInLat = r.lat; s.clockInLng = r.lng;
+    saveClockState(s);
+    renderClockUI();
+  });
 });
 
 $('startBreakBtn')?.addEventListener('click', () => {
@@ -315,6 +364,18 @@ $('clockOutBtn')?.addEventListener('click', () => {
   renderClockUI();
   renderQuickSwitchRing();
   showToast('Clocked out — review the rest of the entry and submit when ready.');
+  // Stamp where they clocked out from, same as the clock-in stamp — so if
+  // someone clocked in at the office but clocked out somewhere else, that's
+  // visible. This is attendance proof only: it does NOT touch the job's own
+  // Location field above (fillField: false), since that describes where
+  // the work itself happened, which may be a different place entirely.
+  fetchAndFillLocation({ silent: true, fillField: false }).then((r) => {
+    if (!r.ok) return;
+    const s = getClockState();
+    s.clockOutLocation = r.address; s.clockOutLat = r.lat; s.clockOutLng = r.lng;
+    saveClockState(s);
+    renderClockUI();
+  });
 });
 
 // =====================================================================
@@ -348,6 +409,12 @@ $('clockOutBtn')?.addEventListener('click', () => {
 //                    tap Start again.
 let qsrLoadedJobId = '';
 let qsrLoadedJobName = '';
+// Whatever job was running right before the most recent quick switch —
+// Submit automatically returns to this job, since Quick Job Switch is meant
+// for a short interruption (the boss needs another job done right now),
+// not permanently abandoning what was already in progress.
+let qsrResumeJobId = '';
+let qsrResumeJobName = '';
 
 function renderQuickSwitchRing() {
   const handle = $('qsrHandle');
@@ -388,7 +455,12 @@ setInterval(renderQuickSwitchRing, 30000);
 async function closeCurrentSegmentAndSubmit(now) {
   const state = getClockState();
   if (!state.segmentStart) return false;
-  if (!selectedMode) { showToast('Pick a mode of work first.'); return false; }
+  // Quick Job Switch is its own self-contained flow (Job ID → Start → Stop
+  // → Submit) — it never touches the New Entry form's mode chips or the
+  // separate "Project" text field, so this must not depend on either one
+  // being filled in first. Default to Site rather than blocking the submit.
+  if (!selectedMode) selectedMode = 'site';
+  const jobId = $('jobId').value.trim();
   const draft = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     type: 'timesheet',
@@ -398,8 +470,8 @@ async function closeCurrentSegmentAndSubmit(now) {
     error: null,
     category: 'timesheet',
     mode: selectedMode,
-    jobId: $('jobId').value.trim() || null,
-    project: $('project').value.trim(),
+    jobId: jobId || null,
+    project: $('project').value.trim() || jobId,
     location: $('location').value.trim(),
     allowanceLocation: $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null,
     date: $('date').value || new Date().toISOString().slice(0, 10),
@@ -407,6 +479,12 @@ async function closeCurrentSegmentAndSubmit(now) {
     endTime: toTimeInputValue(now),
     lunchMinutes: 0,
     description: $('workNotes').value.trim(),
+    clockInLocation: state.clockInLocation || null,
+    clockInLat: state.clockInLat ?? null,
+    clockInLng: state.clockInLng ?? null,
+    clockOutLocation: state.clockOutLocation || null,
+    clockOutLat: state.clockOutLat ?? null,
+    clockOutLng: state.clockOutLng ?? null,
     attachments: [],
   };
   await addEntry(draft);
@@ -453,6 +531,7 @@ function showQsrJobMatches(q) {
       qsrLoadedJobId = item.dataset.jobId;
       qsrLoadedJobName = item.dataset.jobName || '';
       $('jobId').value = qsrLoadedJobId;
+      autoFillProjectFromJobId(qsrLoadedJobId);
       box.style.display = 'none';
       $('qsrJobSearch').value = '';
       showToast(`Loaded job: ${qsrLoadedJobId}`);
@@ -468,12 +547,23 @@ async function qsrStart() {
   if (!qsrLoadedJobId) { showToast('Pick a Job ID first.'); return; }
   const now = new Date();
   const state = getClockState();
-  if (state.segmentStart) await closeCurrentSegmentAndSubmit(state.segmentPausedAt ? new Date(state.segmentPausedAt) : now);
+  const priorJobId = $('jobId').value.trim();
+  if (state.segmentStart) {
+    if (priorJobId === qsrLoadedJobId) { showToast('Already working this job.'); return; }
+    // Remember the job that was just running — Submit will automatically
+    // return to it once this quick interruption job is done.
+    if (priorJobId) {
+      qsrResumeJobId = priorJobId;
+      qsrResumeJobName = jobSearchOptions.find((r) => r.job_id === priorJobId)?.name || '';
+    }
+    await closeCurrentSegmentAndSubmit(state.segmentPausedAt ? new Date(state.segmentPausedAt) : now);
+  }
   const fresh = getClockState();
   fresh.segmentStart = now.toISOString();
   fresh.segmentPausedAt = null;
   saveClockState(fresh);
   $('jobId').value = qsrLoadedJobId;
+  autoFillProjectFromJobId(qsrLoadedJobId);
   $('startTime').value = toTimeInputValue(now);
   showToast(`Started: ${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}`);
   renderQuickSwitchRing();
@@ -495,7 +585,23 @@ async function qsrSubmit() {
   const state = getClockState();
   if (!state.segmentStart) { showToast('Nothing to submit yet.'); return; }
   const endPoint = state.segmentPausedAt ? new Date(state.segmentPausedAt) : new Date();
-  await closeCurrentSegmentAndSubmit(endPoint);
+  const ok = await closeCurrentSegmentAndSubmit(endPoint);
+  if (ok && qsrResumeJobId) {
+    // The job that was interrupted for this quick switch — pick it back up
+    // automatically, exactly as if Job ID + Start were tapped again.
+    const resumeId = qsrResumeJobId, resumeName = qsrResumeJobName;
+    qsrResumeJobId = ''; qsrResumeJobName = '';
+    qsrLoadedJobId = resumeId; qsrLoadedJobName = resumeName;
+    const now = new Date();
+    const fresh = getClockState();
+    fresh.segmentStart = now.toISOString();
+    fresh.segmentPausedAt = null;
+    saveClockState(fresh);
+    $('jobId').value = resumeId;
+    autoFillProjectFromJobId(resumeId);
+    $('startTime').value = toTimeInputValue(now);
+    showToast(`Submitted. Back to ${resumeId}${resumeName ? ' — ' + resumeName : ''}`);
+  }
   renderQuickSwitchRing();
 }
 
@@ -539,50 +645,69 @@ $('dateSimple').value = today;
 refreshTypeVisibility();
 
 // ---------- Geolocation -> reverse geocode (free, no API key: OSM Nominatim) ----------
-$('fetchLocationBtn').addEventListener('click', () => {
+// Shared by the manual "Use my location" button, the automatic Clock In
+// fetch, and the automatic Clock Out fetch, so the location + map preview
+// are usually already filled in before anyone's typed anything.
+//   opts.silent    — suppress the "couldn't get location" toast (used for
+//                    the automatic calls — a denied/slow GPS shouldn't
+//                    interrupt clocking in/out; the button is still there
+//                    to retry or type it in manually).
+//   opts.fillField — false for the Clock Out reading, which is only an
+//                    attendance-proof stamp, not the job's own Location
+//                    field (which may already describe a site visited
+//                    earlier in the day and shouldn't be overwritten by
+//                    "wherever I'm standing when I tap Clock Out").
+// Resolves with { ok, lat, lng, address } either way.
+function staticMapUrl(lat, lng, size = '340x180') {
+  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=16&size=${size}&maptype=mapnik&markers=${lat},${lng},red-dot`;
+}
+function fetchAndFillLocation(opts = {}) {
+  const fillField = opts.fillField !== false;
   if (!navigator.geolocation) {
-    showToast('Location not supported on this device — type it manually.');
-    return;
+    if (!opts.silent) showToast('Location not supported on this device — type it manually.');
+    return Promise.resolve({ ok: false });
   }
-  const btn = $('fetchLocationBtn');
-  btn.disabled = true;
-  btn.textContent = '📍 Locating…';
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      const { latitude, longitude } = pos.coords;
+  const btn = fillField ? $('fetchLocationBtn') : null;
+  if (btn) { btn.disabled = true; btn.textContent = '📍 Locating…'; }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        let address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,
+            { headers: { Accept: 'application/json' } }
+          );
+          const data = await res.json();
+          if (data.display_name) address = data.display_name;
+        } catch { /* keep the lat/lng fallback address */ }
 
-      // Map preview is purely decorative — never let it block or delay the
-      // location text (which the offline entry flow actually depends on).
-      // If there's no network, the <img> just fails to load and we hide it.
-      const mapImg = $('locationMapImg');
-      if (mapImg) {
-        mapImg.onerror = () => { mapImg.style.display = 'none'; };
-        mapImg.onload = () => { mapImg.style.display = 'block'; };
-        mapImg.src = `https://staticmap.openstreetmap.de/staticmap.php?center=${latitude},${longitude}&zoom=16&size=340x180&maptype=mapnik&markers=${latitude},${longitude},red-dot`;
-      }
-
-      try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,
-          { headers: { Accept: 'application/json' } }
-        );
-        const data = await res.json();
-        $('location').value = data.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-      } catch {
-        $('location').value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '📍 Use my location';
-      }
-    },
-    () => {
-      showToast('Could not get location — type it manually.');
-      btn.disabled = false;
-      btn.textContent = '📍 Use my location';
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-});
+        if (fillField) {
+          $('location').value = address;
+          // Map preview is purely decorative — never let it block or delay
+          // the location text. If there's no network, the <img> just fails
+          // to load and we hide it.
+          const mapImg = $('locationMapImg');
+          if (mapImg) {
+            mapImg.onerror = () => { mapImg.style.display = 'none'; };
+            mapImg.onload = () => { mapImg.style.display = 'block'; };
+            mapImg.src = staticMapUrl(latitude, longitude);
+          }
+          if (btn) { btn.disabled = false; btn.textContent = '📍 Use my location'; }
+        }
+        resolve({ ok: true, lat: latitude, lng: longitude, address });
+      },
+      () => {
+        if (!opts.silent) showToast('Could not get location — type it manually.');
+        if (btn) { btn.disabled = false; btn.textContent = '📍 Use my location'; }
+        resolve({ ok: false });
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+}
+$('fetchLocationBtn').addEventListener('click', () => fetchAndFillLocation());
 
 // ---------- File -> base64 helpers ----------
 function fileToBase64(file) {
@@ -659,6 +784,9 @@ async function buildDraftFromForm() {
     if (!$('date').value) { showToast('Pick a date.'); return null; }
     const lunchMinutes = parseInt($('lunchMinutes').value, 10) || 0;
     const allowanceLocation = $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null;
+    // Attendance proof — where they actually clocked in and (once they have)
+    // clocked out, captured automatically by GPS, never typed by hand.
+    const clk = getClockState();
     return {
       ...base,
       category: 'timesheet',
@@ -672,6 +800,12 @@ async function buildDraftFromForm() {
       endTime: $('endTime').value,
       lunchMinutes,
       description: $('workNotes').value.trim(),
+      clockInLocation: clk.clockInLocation || null,
+      clockInLat: clk.clockInLat ?? null,
+      clockInLng: clk.clockInLng ?? null,
+      clockOutLocation: clk.clockOutLocation || null,
+      clockOutLat: clk.clockOutLat ?? null,
+      clockOutLng: clk.clockOutLng ?? null,
       attachments: []
     };
   }
@@ -691,7 +825,11 @@ async function buildDraftFromForm() {
   };
 }
 
-function showReview(draft) {
+// Shared row-builder — used both for the pre-submit Review step and for
+// "view details" on an already-queued entry. opts.full adds the
+// bookkeeping fields (who, when, sync status) that only make sense once an
+// entry actually exists in the queue.
+function entryDetailRows(draft, opts = {}) {
   const rows = [];
   if (draft.type === 'timesheet') {
     rows.push(rowHtml('Mode', MODE_LABEL[draft.requestedMode || draft.mode]));
@@ -708,6 +846,10 @@ function showReview(draft) {
       rows.push(rowHtml('Date', draft.date));
       rows.push(rowHtml('Start time', draft.startTime));
       rows.push(rowHtml('End time', draft.endTime));
+      rows.push(rowHtml('Lunch/break (min)', draft.lunchMinutes));
+      rows.push(rowHtml('Allowance area', draft.allowanceLocation));
+      rows.push(rowHtml('Clocked in near', draft.clockInLocation));
+      rows.push(rowHtml('Clocked out near', draft.clockOutLocation));
     }
     rows.push(rowHtml('Notes', draft.description));
   } else {
@@ -719,8 +861,27 @@ function showReview(draft) {
   if (draft.attachments?.length) {
     rows.push(rowHtml('Attachments', draft.attachments.map(a => a.name).join(', ')));
   }
-  $('reviewContent').innerHTML = rows.join('');
+  if (opts.full) {
+    rows.push(rowHtml('Submitted by', draft.userLabel));
+    rows.push(rowHtml('Created', draft.createdAt ? new Date(draft.createdAt).toLocaleString() : ''));
+    rows.push(rowHtml('Status', draft.status));
+    if (draft.status === 'error' && draft.error) rows.push(rowHtml('Sync error', draft.error));
+  }
+  return rows;
+}
+
+function showReview(draft) {
+  $('reviewContent').innerHTML = entryDetailRows(draft).join('');
   $('reviewOverlay').classList.add('show');
+}
+
+// Queue → tap any entry to review its full details again before/after sync.
+async function openEntryDetail(id) {
+  const entries = await getAllEntries();
+  const en = entries.find((e) => e.id === id);
+  if (!en) return;
+  $('entryDetailBody').innerHTML = entryDetailRows(en, { full: true }).join('');
+  openPanel('entryDetail');
 }
 
 $('reviewBtn').addEventListener('click', async () => {
@@ -972,7 +1133,7 @@ async function enterApp(knownUser) {
   applyFeatureAccess();
   startPresence();
   populateAllowanceDropdown();
-  populateJobIdDropdown().then(renderMyTodayAssignment);
+  populateJobIdDropdown().then(renderMyTodayAssignment).then(renderJobBoard);
   renderMyTripsToday();
   // Projects / Learning / Health Challenges are visible to everyone now —
   // only creating/deleting projects (and setting positions) stays admin-only.
@@ -1016,6 +1177,14 @@ async function renderMyTodayAssignment() {
     .maybeSingle();
   if (error || !data) { card.style.display = 'none'; return; }
   card.style.display = 'block';
+  // Job ID is the one thing someone actually picks in New Entry — if
+  // there's already a real job published for them today and they haven't
+  // picked something else, load it in automatically so Clock In is the
+  // very next tap.
+  if (data.project && $('jobId') && !$('jobId').value.trim()) {
+    $('jobId').value = data.project;
+    autoFillProjectFromJobId(data.project);
+  }
   const isTransport = data.assignment_type === 'transportation';
   // The job may have been allocated via Job Allocation (data.project holds a
   // real Job ID) — look up its description if we already have it cached, so
@@ -1041,6 +1210,111 @@ async function renderMyTodayAssignment() {
       </div>
     </div>
   `;
+}
+
+// Looks up a job's description from the cached project list, same helper
+// logic used by renderMyTodayAssignment above, shared by the job board and
+// My Jobs panel below so every "job id — description" line reads the same.
+function jobLineFor(jobId) {
+  const jobMatch = jobSearchOptions.find((r) => r.job_id === jobId);
+  return jobMatch ? `${jobId}${jobMatch.name ? ' — ' + jobMatch.name : ''}` : (jobId || 'No job set');
+}
+
+// The New Entry "Project" field is read-only — it's always derived from
+// whichever Job ID was picked, never typed by hand. Called every time a Job
+// ID gets set, from wherever that happens (search pick, Quick Job Switch,
+// or auto-preloading today's allocation).
+function autoFillProjectFromJobId(jobId) {
+  if (!$('project')) return;
+  const jobMatch = jobSearchOptions.find((r) => r.job_id === jobId);
+  $('project').value = jobMatch?.name || jobId || '';
+}
+function timeLabel12h(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  if (Number.isNaN(h)) return '';
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m || 0).padStart(2, '0')} ${period}`;
+}
+
+// TODAY'S JOB BOARD — a message-board style broadcast on Home, visible to
+// EVERYONE (not just people assigned), so the whole team can see what's
+// been published for today at a glance: job id, location, arrival time,
+// driver, and who's working it. Re-rendered on login and every time
+// someone returns to Home.
+async function renderJobBoard() {
+  const card = $('jobBoardCard');
+  const area = $('jobBoardArea');
+  if (!card || !area || !currentUser) return;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb
+    .from('daily_assignments')
+    .select('project, location, attendance_time, assignment_type, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .eq('work_date', todayKey);
+  if (error || !data || !data.length) { card.style.display = 'none'; return; }
+
+  // Group every row by job id — each published job becomes one message box,
+  // listing its driver and everyone else ticked onto it.
+  const byJob = new Map();
+  data.forEach((r) => {
+    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', driver: null, workers: [] });
+    const g = byJob.get(r.project);
+    if (r.location && !g.location) g.location = r.location;
+    if (r.attendance_time && !g.attendanceTime) g.attendanceTime = r.attendance_time;
+    const name = r.profiles?.full_name || r.profiles?.email || 'Someone';
+    if (r.assignment_type === 'transportation') g.driver = name; else g.workers.push(name);
+  });
+
+  card.style.display = 'block';
+  area.innerHTML = Array.from(byJob.entries()).map(([jobId, g]) => `
+    <div class="job-board-item">
+      <div class="job-board-head">
+        <strong>${escapeHtml(jobLineFor(jobId))}</strong>
+        ${g.attendanceTime ? `<span class="job-board-time">⏰ ${escapeHtml(timeLabel12h(g.attendanceTime))}</span>` : ''}
+      </div>
+      ${g.location ? `<div class="job-board-line">📍 ${escapeHtml(g.location)}</div>` : ''}
+      ${g.driver ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.driver)}</div>` : ''}
+      ${g.workers.length ? `<div class="job-board-line">🧑‍🤝‍🧑 ${escapeHtml(g.workers.join(', '))}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+// MY JOBS — each person's own view of everything they've been allocated,
+// today plus every other day (recent history and anything upcoming), not
+// gated by allowed_features since it's just their own information.
+async function renderMyJobsPanel() {
+  const list = $('myJobsList');
+  if (!list || !currentUser) return;
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb
+    .from('daily_assignments')
+    .select('id, work_date, project, location, attendance_time, assignment_type')
+    .eq('person_id', currentUser.id)
+    .order('work_date', { ascending: false })
+    .limit(120);
+  if (error) { list.innerHTML = `<div class="empty">Couldn't load your jobs: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data || !data.length) { list.innerHTML = '<div class="empty">No jobs allocated to you yet.</div>'; return; }
+
+  list.innerHTML = data.map((r) => {
+    const isToday = r.work_date === todayKey;
+    const isDriver = r.assignment_type === 'transportation';
+    return `
+      <div class="entry" style="${isToday ? 'border-color: var(--accent);' : ''}">
+        <span class="type-icon">${isDriver ? '🚗' : '🗓️'}</span>
+        <div class="entry-body">
+          <div class="entry-desc">${escapeHtml(jobLineFor(r.project))}</div>
+          <div class="entry-meta">
+            ${isToday ? '<strong style="color:var(--accent);">TODAY</strong> · ' : ''}${escapeHtml(r.work_date)}
+            ${r.attendance_time ? ' · ⏰ ' + escapeHtml(timeLabel12h(r.attendance_time)) : ''}
+            ${r.location ? ' · 📍 ' + escapeHtml(r.location) : ''}
+            ${isDriver ? ' · 🚗 Driver' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 // Loads every active project into memory once, so the New Entry "Project /
@@ -1072,6 +1346,7 @@ function renderJobSearchResults(matches) {
       // mousedown (not click) so this fires before the input's blur hides the box
       e.preventDefault();
       $('jobId').value = item.dataset.jobId;
+      autoFillProjectFromJobId(item.dataset.jobId);
       box.style.display = 'none';
     });
   });
@@ -1092,6 +1367,9 @@ if ($('jobId')) {
   $('jobId').addEventListener('blur', () => {
     // Small delay so a click/mousedown on a result registers first.
     setTimeout(() => { if ($('jobIdResults')) $('jobIdResults').style.display = 'none'; }, 150);
+    // Covers a Job ID typed out fully by hand (no result tapped) — still
+    // auto-fills Project if it's a real, known job.
+    autoFillProjectFromJobId($('jobId').value.trim());
   });
 }
 
@@ -2155,6 +2433,10 @@ async function publishAllocationDraft() {
   allocationDraftJobs = [];
   await loadAllocationPublishedForDate();
   renderAllocationDraft();
+  // If today is the date just published, refresh the Home job board too,
+  // so the publisher (and anyone else with Home open) sees it immediately
+  // without waiting for their next login.
+  if (date === new Date().toISOString().slice(0, 10)) renderJobBoard();
 
   // Notify each assigned person with their own job — never lets a push
   // failure interrupt the publish itself, since the data is already saved.
@@ -2424,6 +2706,8 @@ const PANEL_IDS = {
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   allocation: ['allocationOverlay', 'allocationOverlayBackdrop'],
+  myjobs: ['myJobsOverlay', 'myJobsOverlayBackdrop'],
+  entryDetail: ['entryDetailOverlay', 'entryDetailOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -2458,6 +2742,9 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'allocation') {
     openAllocationPanel();
+  }
+  if (name === 'myjobs') {
+    renderMyJobsPanel();
   }
 }
 function closePanel(name) {
@@ -4403,7 +4690,7 @@ async function renderQueue() {
       meta = `${en.type} · ${en.project || '—'} · ${en.date}`;
     }
     return `
-      <div class="entry">
+      <div class="entry entry-clickable" data-entry-id="${escapeHtml(en.id)}" title="Tap to review the full details">
         <span class="type-icon">${icon}</span>
         <div class="entry-body">
           <div class="entry-meta">${escapeHtml(meta)}</div>
@@ -4413,6 +4700,9 @@ async function renderQueue() {
       </div>
     `;
   }).join('');
+  list.querySelectorAll('[data-entry-id]').forEach((row) => {
+    row.addEventListener('click', () => openEntryDetail(row.dataset.entryId));
+  });
 }
 $('syncNowBtn').addEventListener('click', () => syncQueue());
 

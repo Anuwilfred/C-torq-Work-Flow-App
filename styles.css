@@ -296,6 +296,17 @@ input:focus, select:focus, textarea:focus {
 input[type="file"] { padding: 9px 10px; font-size: 12.5px; }
 textarea { min-height: 78px; resize: vertical; }
 
+/* Auto-filled, non-editable fields (Project, Location, Date, Start/End time,
+   Break minutes) — greyed out and not typeable. These are only ever set by
+   the app itself (Clock In/Out, Start/Stop Break, picking a Job ID), never
+   by hand, so timesheet data can't be tampered with. */
+input[readonly] {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+input[readonly]:focus { border-color: var(--glass-border); background: rgba(255, 255, 255, 0.06); }
+
 /* Checkboxes/radios must NOT inherit the full-width input styling above —
    that was stretching every checkbox to fill its row, shoving its label
    text far off to the side (seen in Map Access and any tick-list). */
@@ -1135,6 +1146,38 @@ button.ghost:hover { color: var(--text); }
 .news-comment-input-row { display: flex; gap: 6px; margin-top: 8px; }
 .news-comment-input-row input { flex: 1; padding: 8px 10px; font-size: 12px; }
 .news-comment-input-row button { flex: none; padding: 8px 12px; font-size: 12px; }
+
+/* ---------- Today's Job Board — message-box style broadcast on Home ---------- */
+.job-board-item {
+  padding: 11px 13px;
+  margin-bottom: 8px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+}
+.job-board-item:last-child { margin-bottom: 0; }
+.job-board-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.job-board-head strong { font-size: 13.5px; }
+.job-board-time { font-size: 11.5px; color: var(--text-dim); font-weight: 650; white-space: nowrap; }
+.job-board-line { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
+
+/* ---------- Clock in/out attendance-proof strip ---------- */
+.clock-loc-block {
+  padding: 9px 11px;
+  margin-top: 8px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm);
+}
+.clock-loc-block:first-child { margin-top: 0; }
+.clock-loc-label { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; }
+.clock-loc-addr { font-size: 12.5px; color: var(--text); margin-top: 3px; }
+.clock-loc-map { display: block; width: 100%; max-width: 300px; height: auto; border-radius: 10px; margin-top: 6px; border: 1px solid var(--glass-border); }
+
+/* Queue entries are tappable — opens the full entry-detail overlay. */
+.entry-clickable { cursor: pointer; transition: background 0.15s ease; }
+.entry-clickable:hover { background: var(--glass-strong); }
 
 /* ---------- Quick Job Switch — right-edge pull handle + sliding glass
    drawer (mirrors the News Room drawer, but docked to the right edge).
