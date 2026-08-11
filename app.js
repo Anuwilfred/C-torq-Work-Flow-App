@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.62';
+const APP_VERSION = 'v3.64';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New app icon.';
+const APP_UPDATE_NOTES = 'Quick Job Switch notes box, and a new Evening (Transport) allocation alongside the morning Job Allocation.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -536,7 +536,10 @@ async function closeCurrentSegmentAndSubmit(now) {
     startTime: toTimeInputValue(state.segmentStart),
     endTime: toTimeInputValue(now),
     lunchMinutes: 0,
-    description: $('workNotes').value.trim(),
+    // Quick Job Switch has its own notes box (it's a self-contained flow
+    // that never touches the New Entry form) — prefer that, falling back to
+    // the main form's notes field only if someone typed there instead.
+    description: ($('qsrNotes')?.value.trim() || $('workNotes').value.trim()),
     clockInLocation: state.clockInLocation || null,
     clockInLat: state.clockInLat ?? null,
     clockInLng: state.clockInLng ?? null,
@@ -554,6 +557,9 @@ async function closeCurrentSegmentAndSubmit(now) {
   // Clock Out later (without ever tapping Start again) would double-count
   // this stretch of time that's already been saved above.
   $('startTime').value = toTimeInputValue(now);
+  // Clear the QJS notes box so it's ready for whatever job comes next —
+  // this stretch's notes are already saved on the entry above.
+  if ($('qsrNotes')) $('qsrNotes').value = '';
   showToast(`${draft.jobId || 'That job'} logged for this stretch.`);
   return true;
 }
@@ -800,6 +806,23 @@ function rowHtml(k, v) {
   return `<div class="review-row"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(String(v))}</span></div>`;
 }
 
+// Pairs a clock-in or clock-out moment together — date, time, AND where it
+// happened (address + map) — as one clearly-labeled block, instead of
+// scattered separate rows. This is what actually answers "where and when
+// did they clock in vs out", which separate Date/Start time/Clocked-in-near
+// rows never made obvious at a glance.
+function clockEventBlockHtml(label, emoji, dateVal, timeVal, address, lat, lng) {
+  if (!timeVal && !address) return '';
+  const whenBits = [dateVal, timeVal ? timeLabel12h(timeVal) : ''].filter(Boolean);
+  const when = whenBits.length ? ` — ${whenBits.join(' at ')}` : '';
+  return `
+    <div class="review-row-block clock-loc-block">
+      <div class="clock-loc-label">${emoji} ${escapeHtml(label)}${escapeHtml(when)}</div>
+      ${address ? `<div class="clock-loc-addr">${escapeHtml(address)}</div>` : ''}
+      ${lat ? `<img class="clock-loc-map" src="${staticMapUrl(lat, lng, '300x140')}" onerror="this.style.display='none'" alt="${escapeHtml(label)} map" />` : ''}
+    </div>`;
+}
+
 async function buildDraftFromForm() {
   const type = $('type').value;
   const base = {
@@ -905,13 +928,14 @@ function entryDetailRows(draft, opts = {}) {
     } else {
       rows.push(rowHtml('Project', draft.project));
       rows.push(rowHtml('Location', draft.location));
-      rows.push(rowHtml('Date', draft.date));
-      rows.push(rowHtml('Start time', draft.startTime));
-      rows.push(rowHtml('End time', draft.endTime));
+      // Clock-in and clock-out each get their date + time + where-it-happened
+      // shown together as one block — this is what actually lets someone
+      // check "clocked in at the office at 8am, clocked out somewhere else
+      // at 5pm" at a glance, instead of hunting across separate rows.
+      rows.push(clockEventBlockHtml('Clocked in', '🟢', draft.date, draft.startTime, draft.clockInLocation, draft.clockInLat, draft.clockInLng));
+      rows.push(clockEventBlockHtml('Clocked out', '🔴', draft.date, draft.endTime, draft.clockOutLocation, draft.clockOutLat, draft.clockOutLng));
       rows.push(rowHtml('Lunch/break (min)', draft.lunchMinutes));
       rows.push(rowHtml('Allowance area', draft.allowanceLocation));
-      rows.push(rowHtml('Clocked in near', draft.clockInLocation));
-      rows.push(rowHtml('Clocked out near', draft.clockOutLocation));
     }
     rows.push(rowHtml('Notes', draft.description));
   } else {
@@ -1200,7 +1224,8 @@ async function enterApp(knownUser) {
   // wins — renderMyTodayAssignment only fills Job ID if it's still empty.
   populateJobIdDropdown()
     .then(() => { rehydrateEntryFormFromClockState(); return renderMyTodayAssignment(); })
-    .then(renderJobBoard);
+    .then(renderJobBoard)
+    .then(renderAdminScheduleBoard);
   renderMyTripsToday();
   // Projects / Departments / Learning / Health / Clients / Quotations /
   // Project Tank / Job Allocation tiles are all just part of the single
@@ -1345,6 +1370,59 @@ async function renderJobBoard() {
       ${g.location ? `<div class="job-board-line">📍 ${escapeHtml(g.location)}</div>` : ''}
       ${g.driver ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.driver)}</div>` : ''}
       ${g.workers.length ? `<div class="job-board-line">🧑‍🤝‍🧑 ${escapeHtml(g.workers.join(', '))}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+// ADMIN — ALL SCHEDULES: every published job allocation from today onward,
+// across every person, grouped by date then by job — so an admin sees the
+// whole upcoming roster right on the dashboard, not just today's board.
+async function renderAdminScheduleBoard() {
+  const card = $('adminScheduleCard');
+  const area = $('adminScheduleArea');
+  if (!card || !area || !currentUser) return;
+  if (currentProfile?.role !== 'admin') { card.style.display = 'none'; return; }
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb
+    .from('daily_assignments')
+    .select('work_date, project, location, attendance_time, assignment_type, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .gte('work_date', todayKey)
+    .order('work_date', { ascending: true })
+    .limit(500);
+  if (error || !data || !data.length) { card.style.display = 'none'; return; }
+
+  // Group by date, then by job id within each date — same shape as the
+  // Today's Job Board, just spanning every upcoming date instead of one.
+  const byDate = new Map();
+  data.forEach((r) => {
+    if (!byDate.has(r.work_date)) byDate.set(r.work_date, new Map());
+    const byJob = byDate.get(r.work_date);
+    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', driver: null, workers: [] });
+    const g = byJob.get(r.project);
+    if (r.location && !g.location) g.location = r.location;
+    if (r.attendance_time && !g.attendanceTime) g.attendanceTime = r.attendance_time;
+    const name = r.profiles?.full_name || r.profiles?.email || 'Someone';
+    if (r.assignment_type === 'transportation') g.driver = name; else g.workers.push(name);
+  });
+
+  const tomorrowKey = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const dateLabel = (d) => (d === todayKey ? 'Today' : d === tomorrowKey ? 'Tomorrow' : d);
+
+  card.style.display = 'block';
+  area.innerHTML = Array.from(byDate.entries()).map(([date, byJob]) => `
+    <div class="admin-schedule-date-group">
+      <div class="admin-schedule-date-head">${escapeHtml(dateLabel(date))}</div>
+      ${Array.from(byJob.entries()).map(([jobId, g]) => `
+        <div class="job-board-item">
+          <div class="job-board-head">
+            <strong>${escapeHtml(jobLineFor(jobId))}</strong>
+            ${g.attendanceTime ? `<span class="job-board-time">⏰ ${escapeHtml(timeLabel12h(g.attendanceTime))}</span>` : ''}
+          </div>
+          ${g.location ? `<div class="job-board-line">📍 ${escapeHtml(g.location)}</div>` : ''}
+          ${g.driver ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.driver)}</div>` : ''}
+          ${g.workers.length ? `<div class="job-board-line">🧑‍🤝‍🧑 ${escapeHtml(g.workers.join(', '))}</div>` : ''}
+        </div>
+      `).join('')}
     </div>
   `).join('');
 }
@@ -2359,7 +2437,10 @@ async function loadAllocationPublishedForDate() {
   const date = $('allocationDate').value;
   allocationPublishedMap = new Map();
   if (!date) return;
-  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type').eq('work_date', date);
+  // Only the morning/job slot counts as a conflict here — an evening
+  // transport allocation for the same date/person is a separate row and
+  // shouldn't block ticking them onto a job.
+  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type').eq('work_date', date).eq('slot', 'day');
   if (!error && data) data.forEach((r) => allocationPublishedMap.set(r.person_id, { project: r.project, assignment_type: r.assignment_type }));
 }
 
@@ -2511,16 +2592,16 @@ async function publishAllocationDraft() {
   const rows = [];
   allocationDraftJobs.forEach((job) => {
     job.workers.forEach((personId) => {
-      rows.push({ person_id: personId, work_date: date, project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', created_by: currentUser.id });
+      rows.push({ person_id: personId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', created_by: currentUser.id });
     });
     if (job.driverId) {
-      rows.push({ person_id: job.driverId, work_date: date, project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', created_by: currentUser.id });
+      rows.push({ person_id: job.driverId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', created_by: currentUser.id });
     }
   });
   if (!rows.length) { showToast('Tick at least one worker or assign a driver first.'); return; }
   const btn = $('allocationPublishBtn');
   btn.disabled = true; btn.textContent = 'Publishing…';
-  const { error } = await sb.from('daily_assignments').upsert(rows, { onConflict: 'person_id,work_date' });
+  const { error } = await sb.from('daily_assignments').upsert(rows, { onConflict: 'person_id,work_date,slot' });
   btn.disabled = false; btn.textContent = '🚀 Publish ';
   btn.appendChild($('allocationPublishCount'));
   if (error) { showToast(`Couldn't publish: ${error.message}`); return; }
@@ -2535,6 +2616,139 @@ async function publishAllocationDraft() {
 
   // Notify each assigned person with their own job — never lets a push
   // failure interrupt the publish itself, since the data is already saved.
+  getSessionSafe().then(({ data: { session } }) => {
+    sb.functions.invoke('send-push', {
+      body: { kind: 'allocation', workDate: date, assignments: rows.map((r) => ({ personId: r.person_id, project: r.project })) },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    }).catch(() => {});
+  });
+}
+
+// ---- EVENING (transport pickup/drop) — separate from the job-based plan
+// above. No job id, just who's being picked up/dropped, when, by which
+// driver. Publishes its own rows (slot='evening') so it never collides with
+// anyone's morning job allocation for the same date. ----
+
+let allocSlot = 'day';               // which Plan sub-view is showing: 'day' (morning/job) or 'evening' (transport)
+let eveningDraftPeople = new Map();  // person_id -> drop-off location text
+let eveningWired = false;
+
+function showAllocSlot(which) {
+  allocSlot = which;
+  const isDay = which === 'day';
+  if ($('allocPlanMorning')) $('allocPlanMorning').style.display = isDay ? 'block' : 'none';
+  if ($('allocPlanEvening')) $('allocPlanEvening').style.display = isDay ? 'none' : 'block';
+  $('allocSlotDayBtn')?.classList.toggle('active', isDay);
+  $('allocSlotEveningBtn')?.classList.toggle('active', !isDay);
+}
+
+function wireEveningAllocation() {
+  if (eveningWired) return;
+  eveningWired = true;
+  $('allocSlotDayBtn')?.addEventListener('click', () => showAllocSlot('day'));
+  $('allocSlotEveningBtn')?.addEventListener('click', () => showAllocSlot('evening'));
+
+  const input = $('eveningPersonSearch');
+  const box = $('eveningPersonResults');
+  if (input && box) {
+    function showEveningPersonMatches() {
+      const q = input.value.trim().toLowerCase();
+      const matches = (q
+        ? allocationPeopleCache.filter((p) => (p.full_name || '').toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+        : allocationPeopleCache
+      ).filter((p) => !eveningDraftPeople.has(p.id));
+      box.innerHTML = matches.length
+        ? matches.map((p) => `
+            <div class="job-search-item" data-person-id="${p.id}">
+              <div class="jid">${escapeHtml(p.full_name || p.email)}</div>
+              ${p.full_name ? `<div class="jdesc">${escapeHtml(p.email)}</div>` : ''}
+            </div>
+          `).join('')
+        : '<div class="job-search-empty">No matching person found.</div>';
+      box.style.display = 'block';
+      box.querySelectorAll('.job-search-item[data-person-id]').forEach((item) => {
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          eveningDraftPeople.set(item.dataset.personId, '');
+          box.style.display = 'none';
+          input.value = '';
+          renderEveningDraft();
+        });
+      });
+    }
+    input.addEventListener('focus', showEveningPersonMatches);
+    input.addEventListener('click', showEveningPersonMatches);
+    input.addEventListener('input', showEveningPersonMatches);
+    input.addEventListener('blur', () => { setTimeout(() => { box.style.display = 'none'; }, 150); });
+  }
+
+  $('eveningPublishBtn')?.addEventListener('click', publishEveningAllocation);
+}
+
+function renderEveningDraft() {
+  const box = $('eveningDraftList');
+  if (!box) return;
+  if (!eveningDraftPeople.size) {
+    box.innerHTML = '<div class="empty">No one added yet — search above to add someone.</div>';
+  } else {
+    box.innerHTML = Array.from(eveningDraftPeople.entries()).map(([personId, dropLoc]) => {
+      const p = allocationPeopleCache.find((x) => x.id === personId);
+      const inputId = `eveningDrop_${personId}`;
+      return `
+        <div class="alloc-job-card" style="padding:10px 13px;">
+          <div class="alloc-job-card-head">
+            <strong style="font-size:13.5px;">${escapeHtml(p ? allocPersonDisplay(p) : personId)}</strong>
+            <button type="button" class="alloc-remove-job" data-evening-remove="${personId}">✕</button>
+          </div>
+          <label for="${inputId}" style="margin-top:8px;">Drop-off location (e.g. office, site, home)</label>
+          <input id="${inputId}" type="text" data-evening-drop="${personId}" value="${escapeHtml(dropLoc)}" placeholder="Where are they being dropped?" />
+        </div>
+      `;
+    }).join('');
+    box.querySelectorAll('[data-evening-drop]').forEach((inp) => {
+      inp.addEventListener('input', () => { eveningDraftPeople.set(inp.dataset.eveningDrop, inp.value); });
+    });
+    box.querySelectorAll('[data-evening-remove]').forEach((btn) => {
+      btn.addEventListener('click', () => { eveningDraftPeople.delete(btn.dataset.eveningRemove); renderEveningDraft(); });
+    });
+  }
+  const count = eveningDraftPeople.size;
+  if ($('eveningPublishCount')) $('eveningPublishCount').textContent = count ? ` (${count} ${count === 1 ? 'person' : 'people'})` : '';
+}
+
+// Reuses the same "Evening Transport" label as the project value on every
+// row — since it isn't a real Job ID, jobLineFor() just shows it verbatim
+// wherever it's displayed (Today's Job Board, My Jobs, Admin schedule,
+// Manage tab), no special-casing needed there.
+async function publishEveningAllocation() {
+  const date = $('eveningDate').value;
+  const time = $('eveningTime').value;
+  const driverId = $('eveningDriverSelect').value;
+  if (!date) { showToast('Pick a date first.'); return; }
+  if (!eveningDraftPeople.size && !driverId) { showToast('Add at least one person or a driver first.'); return; }
+  const rows = [];
+  eveningDraftPeople.forEach((dropLoc, personId) => {
+    rows.push({ person_id: personId, work_date: date, slot: 'evening', project: 'Evening Transport', location: (dropLoc || '').trim() || null, attendance_time: time || null, assignment_type: 'transport_passenger', created_by: currentUser.id });
+  });
+  if (driverId) {
+    rows.push({ person_id: driverId, work_date: date, slot: 'evening', project: 'Evening Transport', location: null, attendance_time: time || null, assignment_type: 'transportation', created_by: currentUser.id });
+  }
+  if (!rows.length) { showToast('Add at least one person or a driver first.'); return; }
+  const btn = $('eveningPublishBtn');
+  btn.disabled = true; btn.textContent = 'Publishing…';
+  const { error } = await sb.from('daily_assignments').upsert(rows, { onConflict: 'person_id,work_date,slot' });
+  btn.disabled = false; btn.textContent = '🚀 Publish evening transport';
+  if ($('eveningPublishCount')) btn.appendChild($('eveningPublishCount'));
+  if (error) { showToast(`Couldn't publish: ${error.message}`); return; }
+  showToast(`Published evening transport for ${rows.length} ${rows.length === 1 ? 'person' : 'people'}.`);
+  eveningDraftPeople = new Map();
+  $('eveningTime').value = '';
+  $('eveningDriverSelect').value = '';
+  renderEveningDraft();
+  // Same "show it on the dashboard right now, not just next login" refresh
+  // as the morning publish does.
+  if (date === new Date().toISOString().slice(0, 10)) { renderJobBoard(); renderAdminScheduleBoard(); }
+
   getSessionSafe().then(({ data: { session } }) => {
     sb.functions.invoke('send-push', {
       body: { kind: 'allocation', workDate: date, assignments: rows.map((r) => ({ personId: r.person_id, project: r.project })) },
@@ -2632,14 +2846,19 @@ async function openAllocationPanel() {
   if (!$('allocManageDate').value) $('allocManageDate').value = new Date().toISOString().slice(0, 10);
   if (!$('tripDate').value) $('tripDate').value = new Date().toISOString().slice(0, 10);
   if (!$('activityDate').value) $('activityDate').value = new Date().toISOString().slice(0, 10);
+  if ($('eveningDate') && !$('eveningDate').value) $('eveningDate').value = new Date().toISOString().slice(0, 10);
   allocationDraftJobs = [];
+  eveningDraftPeople = new Map();
   $('allocationJobSearch').value = '';
   const { data: people, error: peopleErr } = await sb.from('profiles').select('id, full_name, email').eq('status', 'active').order('full_name', { ascending: true });
   allocationPeopleCache = peopleErr ? [] : (people || []);
   await Promise.all([populateJobIdDropdown(), populateDriverSelects(), loadAllocationPublishedForDate()]);
   wireAllocationJobSearch();
+  wireEveningAllocation();
   showAllocTab('plan');
+  showAllocSlot('day');
   renderAllocationDraft();
+  renderEveningDraft();
   wireAddressSearch('tripFrom', 'tripFromResults');
   wireAddressSearch('tripTo', 'tripToResults');
 }
@@ -2650,6 +2869,7 @@ async function populateDriverSelects() {
   const options = people.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
   if ($('tripDriverSelect')) $('tripDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
   if ($('activityDriverSelect')) $('activityDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
+  if ($('eveningDriverSelect')) $('eveningDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
 }
 
 // Free, no-API-key forward address search (Nominatim) — debounced so typing

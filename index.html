@@ -160,6 +160,15 @@
         <p class="hint" style="margin-top:2px;">What's been published for today, for everyone to see.</p>
         <div id="jobBoardArea" style="margin-top:8px;"></div>
       </div>
+
+      <!-- ADMIN — ALL SCHEDULES: admin-only, shows every published job
+           allocation (today plus upcoming), across every person, right on
+           the dashboard — not just today's board. -->
+      <div class="card glass" id="adminScheduleCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📅 All Schedules (Admin)</strong>
+        <p class="hint" style="margin-top:2px;">Every published job allocation, today and upcoming, across everyone.</p>
+        <div id="adminScheduleArea" style="margin-top:8px;"></div>
+      </div>
     </section>
 
     <!-- NEW ENTRY -->
@@ -548,6 +557,9 @@
         <div class="qsr-center" id="qsrElapsed">—</div>
       </div>
     </div>
+
+    <label for="qsrNotes" style="margin-top:14px;">Notes about this job (optional)</label>
+    <textarea id="qsrNotes" placeholder="What are you doing on this job?" rows="3"></textarea>
   </div>
 </div>
 
@@ -940,6 +952,16 @@
            one driver) before anything is saved. Nothing here touches the
            database until Publish is tapped. -->
       <div id="allocPlanView">
+
+        <!-- Morning (job-based) vs Evening (transport pickup/drop) — two
+             completely separate allocations, both publishable for the same
+             date without one overwriting the other. -->
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+          <button type="button" class="secondary" id="allocSlotDayBtn">🌅 Morning (Job)</button>
+          <button type="button" class="secondary" id="allocSlotEveningBtn">🌆 Evening (Transport)</button>
+        </div>
+
+        <div id="allocPlanMorning">
         <label for="allocationDate">Date</label>
         <input id="allocationDate" type="date" />
 
@@ -950,6 +972,33 @@
         </div>
 
         <div id="allocationDraftList" style="margin-top:14px;"><div class="empty">No jobs added yet — search above to add one.</div></div>
+        </div>
+
+        <!-- EVENING — no job id needed. Just who's being picked up/dropped,
+             when, and by which driver. Publishes as its own set of rows so
+             it never touches anyone's morning job allocation for the same
+             date. -->
+        <div id="allocPlanEvening" style="display:none;">
+          <label for="eveningDate">Date</label>
+          <input id="eveningDate" type="date" />
+
+          <label for="eveningDriverSelect">🚗 Driver</label>
+          <select id="eveningDriverSelect"><option value="">Choose a driver</option></select>
+
+          <label for="eveningTime">Pickup / departure time</label>
+          <input id="eveningTime" type="time" />
+
+          <label for="eveningPersonSearch" style="margin-top:10px;">Add people to pick up / drop</label>
+          <div class="job-search-wrap" style="position:relative;">
+            <input id="eveningPersonSearch" type="text" placeholder="Type a name..." autocomplete="off" />
+            <div id="eveningPersonResults" class="job-search-results" style="display:none;"></div>
+          </div>
+
+          <div id="eveningDraftList" style="margin-top:14px;"><div class="empty">No one added yet — search above to add someone.</div></div>
+
+          <button type="button" id="eveningPublishBtn" class="primary" style="margin-top:18px;">🚀 Publish evening transport<span id="eveningPublishCount"></span></button>
+          <p class="hint">Nothing is saved or visible to anyone until you tap Publish.</p>
+        </div>
 
         <button type="button" id="allocationPublishBtn" class="primary" style="margin-top:18px;">🚀 Publish <span id="allocationPublishCount"></span></button>
         <p class="hint">Nothing is saved or visible to anyone until you tap Publish.</p>
