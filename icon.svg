@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e08a5f"/>
+      <stop offset="100%" stop-color="#cc785c"/>
+    </linearGradient>
+  </defs>
   <rect width="128" height="128" rx="24" fill="#1a1a19"/>
-  <circle cx="64" cy="64" r="34" fill="none" stroke="#cc785c" stroke-width="7"/>
-  <path d="M64 44 V64 L80 74" fill="none" stroke="#cc785c" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 96.76 41.04 A 40 40 0 1 0 96.76 86.96"
+        fill="none" stroke="url(#accentGrad)" stroke-width="20" stroke-linecap="round"/>
 </svg>
