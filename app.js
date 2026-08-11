@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.60';
+const APP_VERSION = 'v3.62';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: update icon next to Online (red = ready, tap to apply); My Jobs rows now open full details.';
+const APP_UPDATE_NOTES = 'New app icon.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -1065,8 +1065,7 @@ $('logoutBtn').addEventListener('click', async () => {
   $('aiOrbLabel').style.display = 'none';
   $('chatOrb').style.display = 'none';
   $('chatOrbLabel').style.display = 'none';
-  $('adminRail').style.display = 'none';
-  $('adminMoreRow').style.display = 'none';
+  if ($('adminMoreRow')) $('adminMoreRow').style.display = 'none';
   closeAiChat();
   closeChatOverlay();
   closePanel('projects');
@@ -1203,10 +1202,12 @@ async function enterApp(knownUser) {
     .then(() => { rehydrateEntryFormFromClockState(); return renderMyTodayAssignment(); })
     .then(renderJobBoard);
   renderMyTripsToday();
-  // Projects / Learning / Health Challenges are visible to everyone now —
-  // only creating/deleting projects (and setting positions) stays admin-only.
-  $('adminRail').style.display = 'grid';
-  $('adminMoreRow').style.display = 'flex';
+  // Projects / Departments / Learning / Health / Clients / Quotations /
+  // Project Tank / Job Allocation tiles are all just part of the single
+  // Home grid now (see index.html) — visible to everyone, gated per-tile
+  // by data-feature/applyFeatureAccess() same as every other tile, so
+  // there's nothing extra to show/hide here anymore.
+  if ($('adminMoreRow')) $('adminMoreRow').style.display = 'flex';
 
   renderQueue();
   syncQueue();
@@ -3916,7 +3917,7 @@ async function buildProjectShareImage(data) {
   ctx.fillText(project.name ? `${project.jobId} — ${project.name}` : project.jobId, 40, 52);
   ctx.fillStyle = '#a8a6a2';
   ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
-  ctx.fillText('C-TORQ Work Flow — project status', 40, 76);
+  ctx.fillText('C-TORQ Digital Organization — project status', 40, 76);
 
   drawShareRing(ctx, W / 2 - 110, 168, totals.engineerHours, project.allocatedEngineer, 'Engineer');
   drawShareRing(ctx, W / 2 + 110, 168, totals.technicianHours, project.allocatedTechnician, 'Technician');

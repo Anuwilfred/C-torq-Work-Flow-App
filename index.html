@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>C-TORQ Work Flow</title>
+<title>C-TORQ Digital Organization</title>
 <link rel="manifest" href="./manifest.json" />
 <link rel="icon" href="./icon.svg" />
 <meta name="theme-color" content="#cc785c" />
@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="C-TORQ WF" />
+<meta name="apple-mobile-web-app-title" content="C-TORQ" />
 <link rel="apple-touch-icon" href="./icon-192.png" />
 <link rel="apple-touch-icon" sizes="512x512" href="./icon-512.png" />
 
@@ -27,7 +27,7 @@
   <div class="card glass auth-card">
     <div class="auth-brand">
       <img src="./icon.svg" width="40" height="40" alt="" />
-      <h2>C-TORQ Work Flow</h2>
+      <h2>C-TORQ Digital Organization</h2>
     </div>
 
     <div id="loginView">
@@ -63,7 +63,7 @@
 <!-- ============== MAIN APP (shown once signed in) ============== -->
 <div id="appShell" style="display:none">
   <header>
-    <h1>C-TORQ Work Flow</h1>
+    <h1>C-TORQ Digital Organization</h1>
     <div style="display:flex; align-items:center; gap:10px;">
       <span id="statusBadge">checking…</span>
       <button type="button" id="updateStatusBtn" class="admin-corner-btn update-status-btn" title="Check for updates">
@@ -86,6 +86,12 @@
 
     <!-- HOME — macOS-style icon grid, one tile per section -->
     <section id="home" class="panel active">
+      <!-- One continuous grid — previously split into two separate <div>
+           grids (with Settings left dangling alone in its own row in
+           between), which read as an odd empty gap before the second
+           section started. Everything below is already visible to
+           everyone (not admin-gated), so there's no reason to keep them
+           visually separated. -->
       <div class="home-grid">
         <button type="button" class="home-tile" data-tab="entry" data-feature="entry">
           <span class="home-tile-icon">📝</span>
@@ -110,29 +116,6 @@
         <button type="button" class="home-tile" data-open="myjobs">
           <span class="home-tile-icon">🗂️</span>
           <span class="home-tile-label">My Jobs</span>
-        </button>
-        <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
-          <span class="home-tile-icon">⚙️</span>
-          <span class="home-tile-label">Settings</span>
-        </button>
-      </div>
-
-      <!-- TODAY'S JOB BOARD — a message-board style broadcast, visible to
-           everyone (not gated by allowed_features), listing every job
-           published via Job Allocation for today: job id, location,
-           arrival time, driver, and who's on it. -->
-      <div class="card glass" id="jobBoardCard" style="margin-top:14px; display:none;">
-        <strong style="font-size:14px;">📋 Today's Job Board</strong>
-        <p class="hint" style="margin-top:2px;">What's been published for today, for everyone to see.</p>
-        <div id="jobBoardArea" style="margin-top:8px;"></div>
-      </div>
-
-      <!-- More tools — same tile style as above, was floating on the right
-           edge before; now it just lives lower on the Home page. -->
-      <div id="adminRail" class="home-grid" style="display:none; margin-top:8px;">
-        <button type="button" class="home-tile" data-open="projects" data-feature="projects">
-          <span class="home-tile-icon home-tile-icon-projects">📁</span>
-          <span class="home-tile-label">Projects</span>
         </button>
         <button type="button" class="home-tile" data-open="departments" data-feature="departments">
           <span class="home-tile-icon home-tile-icon-departments">🏢</span>
@@ -162,6 +145,20 @@
           <span class="home-tile-icon home-tile-icon-allocation">🚚</span>
           <span class="home-tile-label">Job Allocation</span>
         </button>
+        <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
+          <span class="home-tile-icon">⚙️</span>
+          <span class="home-tile-label">Settings</span>
+        </button>
+      </div>
+
+      <!-- TODAY'S JOB BOARD — a message-board style broadcast, visible to
+           everyone (not gated by allowed_features), listing every job
+           published via Job Allocation for today: job id, location,
+           arrival time, driver, and who's on it. -->
+      <div class="card glass" id="jobBoardCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📋 Today's Job Board</strong>
+        <p class="hint" style="margin-top:2px;">What's been published for today, for everyone to see.</p>
+        <div id="jobBoardArea" style="margin-top:8px;"></div>
       </div>
     </section>
 
