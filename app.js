@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.59';
+const APP_VERSION = 'v3.60';
 // One short line describing what changed this round — read by OTHER, older
-// tabs (via a plain-text fetch of this exact file) to show in the "new
-// update available" banner, so people see what's new before they refresh.
-const APP_UPDATE_NOTES = 'New: a banner tells you when an update is ready, with a quick summary of what changed.';
+// tabs (via a plain-text fetch of this exact file) so the update icon's
+// toast can say what's new before anyone taps to refresh.
+const APP_UPDATE_NOTES = 'New: update icon next to Online (red = ready, tap to apply); My Jobs rows now open full details.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -942,6 +942,7 @@ async function openEntryDetail(id) {
   const entries = await getAllEntries();
   const en = entries.find((e) => e.id === id);
   if (!en) return;
+  if ($('entryDetailTitle')) $('entryDetailTitle').textContent = 'Entry details';
   $('entryDetailBody').innerHTML = entryDetailRows(en, { full: true }).join('');
   openPanel('entryDetail');
 }
@@ -1350,6 +1351,8 @@ async function renderJobBoard() {
 // MY JOBS — each person's own view of everything they've been allocated,
 // today plus every other day (recent history and anything upcoming), not
 // gated by allowed_features since it's just their own information.
+let myJobsCache = []; // last-loaded rows, so tapping one can show full details without re-querying
+
 async function renderMyJobsPanel() {
   const list = $('myJobsList');
   if (!list || !currentUser) return;
@@ -1357,18 +1360,19 @@ async function renderMyJobsPanel() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('daily_assignments')
-    .select('id, work_date, project, location, attendance_time, assignment_type')
+    .select('id, work_date, project, location, notes, attendance_time, assignment_type')
     .eq('person_id', currentUser.id)
     .order('work_date', { ascending: false })
     .limit(120);
   if (error) { list.innerHTML = `<div class="empty">Couldn't load your jobs: ${escapeHtml(error.message)}</div>`; return; }
   if (!data || !data.length) { list.innerHTML = '<div class="empty">No jobs allocated to you yet.</div>'; return; }
+  myJobsCache = data;
 
   list.innerHTML = data.map((r) => {
     const isToday = r.work_date === todayKey;
     const isDriver = r.assignment_type === 'transportation';
     return `
-      <div class="entry" style="${isToday ? 'border-color: var(--accent);' : ''}">
+      <div class="entry entry-clickable" data-myjob-id="${escapeHtml(r.id)}" title="Tap for full details" style="${isToday ? 'border-color: var(--accent);' : ''}">
         <span class="type-icon">${isDriver ? '🚗' : '🗓️'}</span>
         <div class="entry-body">
           <div class="entry-desc">${escapeHtml(jobLineFor(r.project))}</div>
@@ -1382,6 +1386,29 @@ async function renderMyJobsPanel() {
       </div>
     `;
   }).join('');
+  list.querySelectorAll('[data-myjob-id]').forEach((row) => {
+    row.addEventListener('click', () => openMyJobDetail(row.dataset.myjobId));
+  });
+}
+
+// Tapping a row in My Jobs — shows everything about that day's allocation:
+// job + description, date, location, arrival time, your role, and any note
+// the admin left when publishing it.
+function openMyJobDetail(id) {
+  const r = myJobsCache.find((x) => x.id === id);
+  if (!r) return;
+  const isDriver = r.assignment_type === 'transportation';
+  const rows = [
+    rowHtml('Job', jobLineFor(r.project)),
+    rowHtml('Date', r.work_date),
+    rowHtml('Your role', isDriver ? 'Driver' : 'Worker'),
+    rowHtml('Location', r.location),
+    rowHtml('Arrival time', r.attendance_time ? timeLabel12h(r.attendance_time) : ''),
+    rowHtml('Notes', r.notes),
+  ];
+  if ($('entryDetailTitle')) $('entryDetailTitle').textContent = 'Job details';
+  $('entryDetailBody').innerHTML = rows.join('');
+  openPanel('entryDetail');
 }
 
 // Loads every active project into memory once, so the New Entry "Project /
@@ -4990,10 +5017,29 @@ $('aiInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') sendAiMessage();
 });
 
-// ---------- Service worker ----------
+// ---------- Service worker + update status icon ----------
+// The little refresh icon next to the Online pill, Windows-Update-style:
+//   idle (no dot)   — nothing pending; tap does a manual "check now"
+//   red dot         — a new build finished downloading and is ready; tap
+//                     applies it (spins briefly, then reloads onto it)
+//   green dot       — just updated, confirming you're on the new build
+//                     (fades back to idle after a few seconds)
+let pendingUpdateReady = false;
+let pendingUpdateVersion = '';
+let pendingUpdateNotes = '';
+let swRegistration = null;
+
+function setUpdateDot(state) {
+  const dot = $('updateStatusDot');
+  if (!dot) return;
+  dot.className = 'update-status-dot' + (state === 'none' ? '' : ' dot-' + state);
+  dot.style.display = state === 'none' ? 'none' : 'block';
+}
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js').then((reg) => {
+      swRegistration = reg;
       // Proactively re-check for a newer deploy whenever the tab regains
       // focus — catches a tab that's been sitting open/backgrounded for a
       // while, rather than only ever checking on a fresh page load.
@@ -5005,51 +5051,60 @@ if ('serviceWorker' in navigator) {
 
   // RELIABILITY: the app shell uses stale-while-revalidate caching for
   // instant, consistent open speed — but that means a tab that's already
-  // open (or was cached from before) keeps running whatever JS it already
-  // loaded, even after a newer version has finished downloading in the
-  // background. Once a new service worker actually takes control of THIS
-  // page, a fresh build is ready to go — rather than silently reloading
-  // out from under someone (which could interrupt typing or wipe an
-  // in-progress clock-in view), show a banner at the top naming the new
-  // version with a one-line "what changed", and let them tap it when it's
-  // a good moment. Tapping plays a brief "Updating…" animation, then
-  // reloads onto the new version.
-  let updateBannerShown = false;
+  // open keeps running whatever JS it already loaded, even after a newer
+  // version has finished downloading in the background. Once a new service
+  // worker actually takes control of THIS page, a fresh build is ready —
+  // rather than silently reloading out from under someone (which could
+  // interrupt typing or wipe an in-progress clock-in view), light up the
+  // update icon's red dot and let them apply it when it's a good moment.
   navigator.serviceWorker.addEventListener('controllerchange', async () => {
-    if (updateBannerShown) return;
-    updateBannerShown = true;
-    let version = '', notes = '';
+    if (pendingUpdateReady) return;
+    pendingUpdateReady = true;
     try {
       // Cache-busted + no-store so this reads the genuinely new file over
       // the network, not whatever this tab (or the old service worker)
       // already had cached.
       const res = await fetch('./app.js?_=' + Date.now(), { cache: 'no-store' });
       const text = await res.text();
-      version = (text.match(/const APP_VERSION\s*=\s*'([^']+)'/) || [])[1] || '';
-      notes = (text.match(/const APP_UPDATE_NOTES\s*=\s*'([^']*)'/) || [])[1] || '';
-    } catch { /* show the banner anyway, just without the version/notes detail */ }
-    showUpdateBanner(version, notes);
+      pendingUpdateVersion = (text.match(/const APP_VERSION\s*=\s*'([^']+)'/) || [])[1] || '';
+      pendingUpdateNotes = (text.match(/const APP_UPDATE_NOTES\s*=\s*'([^']*)'/) || [])[1] || '';
+    } catch { /* light up the dot anyway, just without the version/notes detail */ }
+    setUpdateDot('red');
   });
+
+  // If we just reloaded to apply an update (see applyPendingUpdate below),
+  // show a brief green "you're up to date" confirmation on this fresh load.
+  if (localStorage.getItem('ctorq-just-updated')) {
+    localStorage.removeItem('ctorq-just-updated');
+    setUpdateDot('green');
+    setTimeout(() => setUpdateDot('none'), 5000);
+  }
 }
 
-function showUpdateBanner(version, notes) {
-  const banner = $('updateBanner');
-  // Very old builds (from before this banner existed) won't have this
-  // element at all — fall back to the previous behavior (instant reload)
-  // rather than leaving someone stuck on a stale version with no way to
-  // know an update even shipped.
-  if (!banner) { location.reload(); return; }
-  $('updateBannerTitle').textContent = version ? `Update ${version} ready` : 'Update ready';
-  $('updateBannerNotes').textContent = notes || 'Tap to refresh and get the latest version.';
-  banner.classList.add('show');
+function applyPendingUpdate() {
+  const btn = $('updateStatusBtn');
+  showToast(pendingUpdateVersion
+    ? `Updating to ${pendingUpdateVersion}${pendingUpdateNotes ? ' — ' + pendingUpdateNotes : ''}`
+    : 'Updating to the latest version…');
+  if (btn) btn.classList.add('updating');
+  try { localStorage.setItem('ctorq-just-updated', '1'); } catch { /* ignore */ }
+  setTimeout(() => location.reload(), 600);
 }
-$('updateBanner')?.addEventListener('click', () => {
-  const banner = $('updateBanner');
-  if (banner.classList.contains('updating')) return;
-  banner.classList.add('updating');
-  $('updateBannerTitle').textContent = 'Updating…';
-  $('updateBannerNotes').textContent = '';
-  setTimeout(() => location.reload(), 750);
+
+$('updateStatusBtn')?.addEventListener('click', async () => {
+  const btn = $('updateStatusBtn');
+  if (btn.classList.contains('updating') || btn.classList.contains('checking')) return;
+  if (pendingUpdateReady) { applyPendingUpdate(); return; }
+
+  // No update pending yet — do a manual check-now instead.
+  btn.classList.add('checking');
+  try { if (swRegistration) await swRegistration.update(); } catch { /* ignore */ }
+  setTimeout(() => {
+    btn.classList.remove('checking');
+    if (!pendingUpdateReady) showToast(`You're up to date — ${APP_VERSION}`);
+    // If a real update WAS found, the controllerchange handler above will
+    // have already flipped the dot red on its own.
+  }, 1200);
 });
 
 // ---------- Push notifications (WhatsApp-style system alerts) ----------

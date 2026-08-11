@@ -22,18 +22,6 @@
 </head>
 <body>
 
-<!-- UPDATE BANNER — appears at the very top the moment a new deployed
-     version finishes downloading in the background. Tapping it plays a
-     brief "Updating…" animation and then reloads onto the new version. -->
-<div id="updateBanner" class="update-banner">
-  <div class="update-banner-dot"></div>
-  <div class="update-banner-text">
-    <strong id="updateBannerTitle">Update ready</strong>
-    <span id="updateBannerNotes"></span>
-  </div>
-  <span class="update-banner-cta">Tap to refresh</span>
-</div>
-
 <!-- ============== AUTH SCREEN (shown until signed in) ============== -->
 <div id="authScreen" class="auth-wrap">
   <div class="card glass auth-card">
@@ -78,6 +66,10 @@
     <h1>C-TORQ Work Flow</h1>
     <div style="display:flex; align-items:center; gap:10px;">
       <span id="statusBadge">checking…</span>
+      <button type="button" id="updateStatusBtn" class="admin-corner-btn update-status-btn" title="Check for updates">
+        🔄
+        <span id="updateStatusDot" class="update-status-dot" style="display:none;"></span>
+      </button>
       <button type="button" id="adminHomeBtn" class="admin-corner-btn" style="display:none" title="Admin">⚙️</button>
     </div>
   </header>
@@ -907,7 +899,7 @@
 <div id="entryDetailOverlay" class="panel-overlay">
   <div class="panel-shell" style="max-width:460px; margin:auto; max-height:76vh; align-self:center;">
     <div class="panel-header">
-      <strong>Entry details</strong>
+      <strong id="entryDetailTitle">Entry details</strong>
       <button type="button" class="ghost" data-close="entryDetail">✕</button>
     </div>
     <div class="panel-body">
