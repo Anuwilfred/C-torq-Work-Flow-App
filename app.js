@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.70';
+const APP_VERSION = 'v3.71';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Submitting a timesheet entry while still clocked in now auto-captures your clock-out time and location — no need to tap Clock Out separately first.';
+const APP_UPDATE_NOTES = 'If you\'re still clocked in when you reopen the app, New Entry now shows your Clocked In status right away — no need to tap a mode chip first to see Clock Out.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -317,6 +317,16 @@ function rehydrateEntryFormFromClockState() {
   const stillOpen = state.status === 'working' || state.status === 'onbreak';
   if (!stillOpen && !state.clockOutAt) return; // nothing in progress to restore
 
+  // Re-select whichever mode chip (Office/Site/Driver/etc.) was active when
+  // they clocked in, so the Clocked In card — status line, Clock Out button,
+  // location — is visible again immediately on open, instead of staying
+  // hidden behind "pick a mode of work first" until they tap a chip by hand.
+  if (state.mode && !selectedMode) {
+    selectedMode = state.mode;
+    document.querySelectorAll('.mode-chip').forEach((c) => c.classList.toggle('selected', c.dataset.mode === state.mode));
+    refreshModeVisibility();
+  }
+
   if (state.currentJobId && $('jobId') && !$('jobId').value.trim()) {
     $('jobId').value = state.currentJobId;
     autoFillProjectFromJobId(state.currentJobId);
@@ -352,6 +362,12 @@ $('clockInBtn')?.addEventListener('click', () => {
     status: 'working', clockInAt: iso, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: iso,
     clockInLocation: null, clockInLat: null, clockInLng: null,
     clockOutLocation: null, clockOutLat: null, clockOutLng: null,
+    // Remembered so that if the app is closed/crashes and reopened,
+    // rehydrateEntryFormFromClockState() can re-select this same mode chip
+    // automatically — otherwise the whole Clocked In card (with Clock Out)
+    // stays hidden behind "pick a mode of work first" even though the clock
+    // itself is still running.
+    mode: selectedMode,
     currentJobId: jobId || null,
     currentJobName: jobId ? (jobSearchOptions.find((r) => r.job_id === jobId)?.name || '') : '',
     // Fresh day, fresh Quick Job Switch bookkeeping — QJS runs entirely on
