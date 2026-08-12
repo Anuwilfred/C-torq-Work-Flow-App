@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.69';
+const APP_VERSION = 'v3.70';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Job Allocation: you can now assign someone as a job\'s driver even if they\'re also ticked as a worker on it.';
+const APP_UPDATE_NOTES = 'Submitting a timesheet entry while still clocked in now auto-captures your clock-out time and location — no need to tap Clock Out separately first.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -891,6 +891,32 @@ async function buildDraftFromForm() {
     // separately too, purely so the entry detail view can show the two
     // apart instead of one confusing combined number.
     const qsrDeductedMinutes = clk.interruptionMinutes || 0;
+
+    // If they never explicitly tapped "Clock Out" (still shows as
+    // working/on a break) and are submitting anyway, submitting IS the
+    // clock-out — capture the same date/time/location a manual Clock Out
+    // tap would, right now, so every entry always has both ends of the day
+    // instead of only "Clocked in" with nothing for "Clocked out". This
+    // does not touch the persisted clock state itself — that's only ever
+    // reset on final confirm (resetClockState), so going Back from Review
+    // doesn't wrongly stop an actually-still-running clock.
+    let endTimeVal = $('endTime').value;
+    let clockOutLocation = clk.clockOutLocation || null;
+    let clockOutLat = clk.clockOutLat ?? null;
+    let clockOutLng = clk.clockOutLng ?? null;
+    if (clk.status === 'working' || clk.status === 'onbreak') {
+      if (!endTimeVal) {
+        endTimeVal = toTimeInputValue(new Date());
+        $('endTime').value = endTimeVal;
+      }
+      if (!clockOutLocation) {
+        setClockLocationStatus('📍 Getting your clock-out location…');
+        const r = await fetchAndFillLocation({ silent: true, fillField: false });
+        setClockLocationStatus('');
+        if (r.ok) { clockOutLocation = r.address; clockOutLat = r.lat; clockOutLng = r.lng; }
+      }
+    }
+
     return {
       ...base,
       category: 'timesheet',
@@ -901,7 +927,7 @@ async function buildDraftFromForm() {
       allowanceLocation,
       date: $('date').value,
       startTime: $('startTime').value,
-      endTime: $('endTime').value,
+      endTime: endTimeVal,
       lunchMinutes: lunchMinutesRaw + qsrDeductedMinutes,
       lunchMinutesRaw,
       qsrDeductedMinutes,
@@ -909,9 +935,9 @@ async function buildDraftFromForm() {
       clockInLocation: clk.clockInLocation || null,
       clockInLat: clk.clockInLat ?? null,
       clockInLng: clk.clockInLng ?? null,
-      clockOutLocation: clk.clockOutLocation || null,
-      clockOutLat: clk.clockOutLat ?? null,
-      clockOutLng: clk.clockOutLng ?? null,
+      clockOutLocation,
+      clockOutLat,
+      clockOutLng,
       attachments: []
     };
   }
