@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.67';
+const APP_VERSION = 'v3.68';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New Data Feed tile on Home — paste WhatsApp job messages there to auto-add jobs.';
+const APP_UPDATE_NOTES = 'Quick Job Switch now runs fully independently — your normal job keeps counting while a quick job runs, and its time is deducted automatically.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -229,13 +229,13 @@ function getClockState() {
     const raw = localStorage.getItem(CLOCK_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) { /* ignore */ }
-  return { status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0 };
+  return { status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0, interruptionMinutes: 0 };
 }
 function saveClockState(state) {
   try { localStorage.setItem(CLOCK_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
 }
 function resetClockState() {
-  saveClockState({ status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: null });
+  saveClockState({ status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: null, interruptionMinutes: 0, qsrSegmentStart: null, qsrSegmentPausedAt: null, qsrJobId: null, qsrJobName: null });
   renderClockUI();
   renderQuickSwitchRing();
 }
@@ -354,6 +354,13 @@ $('clockInBtn')?.addEventListener('click', () => {
     clockOutLocation: null, clockOutLat: null, clockOutLng: null,
     currentJobId: jobId || null,
     currentJobName: jobId ? (jobSearchOptions.find((r) => r.job_id === jobId)?.name || '') : '',
+    // Fresh day, fresh Quick Job Switch bookkeeping — QJS runs entirely on
+    // its own timer/location fields (qsr*) from here, completely separate
+    // from this normal job's segmentStart above, so switching to a quick
+    // job never touches or pauses this one.
+    interruptionMinutes: 0,
+    qsrSegmentStart: null,
+    qsrSegmentPausedAt: null,
   });
   $('date').value = iso.slice(0, 10);
   $('startTime').value = toTimeInputValue(iso);
@@ -438,41 +445,40 @@ $('clockOutBtn')?.addEventListener('click', () => {
 
 // =====================================================================
 // QUICK JOB SWITCH RING — only shown while clocked in ("working" or
-// "onbreak"). Tap the center to arm it (auto-disarms after 8s or after one
-// use, so a pocket-tap can't accidentally fire it), then:
-//   - Start: opens a job picker. Picking a job closes out whatever segment
-//     is currently running (auto-saved as its own entry, exactly like
-//     filling the form and submitting) and begins timing the new job.
-//   - Stop: closes out the current segment without starting another —
-//     for when someone's done with a job but isn't switching to a new one
-//     yet (they can still Start again later, or use the normal Clock Out
-//     to end their whole day).
-// The very last open segment is always left for the normal Clock Out +
-// Review & Submit flow — so if this is never touched, behavior is exactly
-// what it was before (one entry, clock-in to clock-out).
+// "onbreak"). Runs on its OWN independent timer/location fields (the
+// qsr-prefixed ones in clock state) — it never reads or writes the normal
+// job's segmentStart, Job ID, Project, Location, Date, or Start time. This
+// is deliberate: the normal job keeps counting exactly as if Quick Job
+// Switch didn't exist, for as long as it's clocked in.
+//   - Start: begins timing the loaded Job ID on its own clock, capturing a
+//     fresh GPS location for "where this quick job started" — completely
+//     independent of, and simultaneous with, the normal job's own clock.
+//   - Stop: closes out the quick job's own segment without starting
+//     another, capturing a fresh GPS location for "where it ended".
+// When a quick job is Submitted, its duration is saved as its own separate
+// timesheet entry AND added to a running "interruption minutes" total for
+// the day. That total gets subtracted from the normal job's hours (folded
+// into its lunch/break minutes) the next time the normal entry is actually
+// submitted — so the normal job's clock-in/out times never change, but its
+// counted hours correctly exclude whatever time went to quick jobs.
 // =====================================================================
 
 // Quick Job Switch — right-side drawer with a game-console D-pad:
 //   Job ID (top)  — tap to open the scrollable job picker, just changes
-//                    which job is "loaded"; never touches the timer.
-//   Start (left)  — begins timing the currently-loaded Job ID. If another
-//                    job was already running (or stopped-but-not-yet-
-//                    submitted), it's auto-submitted first as a safety net
-//                    so no time is ever silently lost.
-//   Stop (right)  — pauses the timer (freezes the elapsed reading) without
-//                    saving yet, in case the person wants to double check
-//                    before it's written to their timesheet.
+//                    which job is "loaded"; never touches the timer, and
+//                    never touches the New Entry form's own Job ID field.
+//   Start (left)  — begins timing the currently-loaded Job ID on QJS's own
+//                    clock. If another quick job was already running (or
+//                    stopped-but-not-yet-submitted), it's auto-submitted
+//                    first as a safety net so no time is ever silently lost.
+//   Stop (right)  — pauses QJS's own timer (freezes the elapsed reading)
+//                    without saving yet, in case the person wants to double
+//                    check before it's written to their timesheet.
 //   Submit (down) — saves the (paused or still-running) stretch as its own
 //                    timesheet entry. After this, pick the next Job ID and
 //                    tap Start again.
 let qsrLoadedJobId = '';
 let qsrLoadedJobName = '';
-// Whatever job was running right before the most recent quick switch —
-// Submit automatically returns to this job, since Quick Job Switch is meant
-// for a short interruption (the boss needs another job done right now),
-// not permanently abandoning what was already in progress.
-let qsrResumeJobId = '';
-let qsrResumeJobName = '';
 
 function renderQuickSwitchRing() {
   const handle = $('qsrHandle');
@@ -483,21 +489,21 @@ function renderQuickSwitchRing() {
   if (!clockedIn) { $('qsrDrawer')?.classList.remove('show'); $('qsrDrawerBackdrop')?.classList.remove('show'); return; }
 
   if (!qsrLoadedJobId) qsrLoadedJobId = $('jobId').value.trim();
-  const paused = !!state.segmentPausedAt;
-  const running = !!state.segmentStart && !paused;
+  const paused = !!state.qsrSegmentPausedAt;
+  const running = !!state.qsrSegmentStart && !paused;
 
   const badge = $('qsrSelectedBadge');
   if (badge) badge.textContent = qsrLoadedJobId ? `${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}` : 'No job selected yet';
 
   $('qsrStartBtn').disabled = state.status === 'onbreak' || !qsrLoadedJobId;
-  $('qsrStopBtn').disabled = state.status === 'onbreak' || !state.segmentStart || paused;
-  $('qsrSubmitBtn').disabled = !state.segmentStart;
+  $('qsrStopBtn').disabled = state.status === 'onbreak' || !state.qsrSegmentStart || paused;
+  $('qsrSubmitBtn').disabled = !state.qsrSegmentStart;
 
   const center = $('qsrElapsed');
   center.classList.toggle('running', running);
-  if (state.segmentStart) {
-    const endPoint = paused ? new Date(state.segmentPausedAt) : new Date();
-    const mins = Math.max(0, Math.round((endPoint - new Date(state.segmentStart)) / 60000));
+  if (state.qsrSegmentStart) {
+    const endPoint = paused ? new Date(state.qsrSegmentPausedAt) : new Date();
+    const mins = Math.max(0, Math.round((endPoint - new Date(state.qsrSegmentStart)) / 60000));
     const label = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
     center.textContent = paused ? `⏸ ${label}` : label;
   } else {
@@ -506,66 +512,9 @@ function renderQuickSwitchRing() {
 }
 setInterval(renderQuickSwitchRing, 30000);
 
-// Closes whatever job segment is currently running: saves it as its own
-// timesheet entry (using the CURRENT form's Job ID/project/location/mode —
-// whatever was active for that stretch) from segmentStart to now, straight
-// into the same offline-tolerant queue every other entry uses.
-async function closeCurrentSegmentAndSubmit(now) {
-  const state = getClockState();
-  if (!state.segmentStart) return false;
-  // Quick Job Switch is its own self-contained flow (Job ID → Start → Stop
-  // → Submit) — it never touches the New Entry form's mode chips or the
-  // separate "Project" text field, so this must not depend on either one
-  // being filled in first. Default to Site rather than blocking the submit.
-  if (!selectedMode) selectedMode = 'site';
-  const jobId = $('jobId').value.trim();
-  const draft = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    type: 'timesheet',
-    userLabel: currentProfile?.full_name || currentUser.email,
-    createdAt: new Date().toISOString(),
-    status: 'pending',
-    error: null,
-    category: 'timesheet',
-    mode: selectedMode,
-    jobId: jobId || null,
-    project: $('project').value.trim() || jobId,
-    location: $('location').value.trim(),
-    allowanceLocation: $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null,
-    date: $('date').value || new Date().toISOString().slice(0, 10),
-    startTime: toTimeInputValue(state.segmentStart),
-    endTime: toTimeInputValue(now),
-    lunchMinutes: 0,
-    // Quick Job Switch has its own notes box (it's a self-contained flow
-    // that never touches the New Entry form) — prefer that, falling back to
-    // the main form's notes field only if someone typed there instead.
-    description: ($('qsrNotes')?.value.trim() || $('workNotes').value.trim()),
-    clockInLocation: state.clockInLocation || null,
-    clockInLat: state.clockInLat ?? null,
-    clockInLng: state.clockInLng ?? null,
-    clockOutLocation: state.clockOutLocation || null,
-    clockOutLat: state.clockOutLat ?? null,
-    clockOutLng: state.clockOutLng ?? null,
-    attachments: [],
-  };
-  await addEntry(draft);
-  syncQueue();
-  state.segmentStart = null;
-  state.segmentPausedAt = null;
-  saveClockState(state);
-  // Reset the form's own startTime marker to right now — otherwise a plain
-  // Clock Out later (without ever tapping Start again) would double-count
-  // this stretch of time that's already been saved above.
-  $('startTime').value = toTimeInputValue(now);
-  // Clear the QJS notes box so it's ready for whatever job comes next —
-  // this stretch's notes are already saved on the entry above.
-  if ($('qsrNotes')) $('qsrNotes').value = '';
-  showToast(`${draft.jobId || 'That job'} logged for this stretch.`);
-  return true;
-}
-
 // Job ID (top button): opens the drawer's job picker. Selecting a job just
-// loads it — it does not touch the timer at all.
+// loads it into QJS's own local variables — it never touches the timer,
+// and never touches the New Entry form's Job ID/Project fields.
 function openQsrJobPicker() {
   $('qsrJobSearch').value = '';
   $('qsrJobResults').style.display = 'none';
@@ -594,8 +543,6 @@ function showQsrJobMatches(q) {
       e.preventDefault();
       qsrLoadedJobId = item.dataset.jobId;
       qsrLoadedJobName = item.dataset.jobName || '';
-      $('jobId').value = qsrLoadedJobId;
-      autoFillProjectFromJobId(qsrLoadedJobId);
       box.style.display = 'none';
       $('qsrJobSearch').value = '';
       showToast(`Loaded job: ${qsrLoadedJobId}`);
@@ -604,72 +551,137 @@ function showQsrJobMatches(q) {
   });
 }
 
-// Start (left): begins timing the loaded Job ID. Safety net — if a segment
-// was already running or paused-but-not-submitted, it's auto-submitted
-// first so nothing is ever silently lost.
+// Start (left): begins timing the loaded Job ID on QJS's own clock —
+// completely separate from whatever's running in the normal New Entry
+// form/segmentStart, which is left running untouched. Captures a fresh GPS
+// location for "where this quick job started". Safety net — if a PRIOR
+// quick job was already running or stopped-but-not-yet-submitted, it's
+// auto-submitted first so nothing is ever silently lost.
 async function qsrStart() {
   if (!qsrLoadedJobId) { showToast('Pick a Job ID first.'); return; }
   const now = new Date();
-  const state = getClockState();
-  const priorJobId = $('jobId').value.trim();
-  if (state.segmentStart) {
-    if (priorJobId === qsrLoadedJobId) { showToast('Already working this job.'); return; }
-    // Remember the job that was just running — Submit will automatically
-    // return to it once this quick interruption job is done.
-    if (priorJobId) {
-      qsrResumeJobId = priorJobId;
-      qsrResumeJobName = jobSearchOptions.find((r) => r.job_id === priorJobId)?.name || '';
-    }
-    await closeCurrentSegmentAndSubmit(state.segmentPausedAt ? new Date(state.segmentPausedAt) : now);
+  let state = getClockState();
+  if (state.qsrSegmentStart) {
+    // qsrSubmit() clears qsrLoadedJobId/Name once it's done (ready for a
+    // fresh pick) — but here that variable is actually the NEXT job we're
+    // about to start, so stash and restore it around the safety-net submit.
+    const nextJobId = qsrLoadedJobId, nextJobName = qsrLoadedJobName;
+    await qsrSubmit();
+    qsrLoadedJobId = nextJobId; qsrLoadedJobName = nextJobName;
+    state = getClockState();
   }
-  const fresh = getClockState();
-  fresh.segmentStart = now.toISOString();
-  fresh.segmentPausedAt = null;
-  fresh.currentJobId = qsrLoadedJobId;
-  fresh.currentJobName = qsrLoadedJobName;
-  saveClockState(fresh);
-  $('jobId').value = qsrLoadedJobId;
-  autoFillProjectFromJobId(qsrLoadedJobId);
-  $('startTime').value = toTimeInputValue(now);
+  state.qsrSegmentStart = now.toISOString();
+  state.qsrSegmentPausedAt = null;
+  // Stamped into STATE (not just the module-level "currently loaded in the
+  // picker" variable) so that if someone picks a different job in the
+  // picker before Stop/Submit, the safety-net auto-submit above still
+  // correctly labels the segment that was actually running, not whatever's
+  // now loaded.
+  state.qsrJobId = qsrLoadedJobId;
+  state.qsrJobName = qsrLoadedJobName;
+  state.qsrStartLocation = null; state.qsrStartLat = null; state.qsrStartLng = null;
+  state.qsrStopLocation = null; state.qsrStopLat = null; state.qsrStopLng = null;
+  saveClockState(state);
   showToast(`Started: ${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}`);
   renderQuickSwitchRing();
+  fetchAndFillLocation({ silent: true, fillField: false }).then((r) => {
+    if (!r.ok) return;
+    const s = getClockState();
+    if (!s.qsrSegmentStart) return; // already submitted/cancelled by the time this resolved
+    s.qsrStartLocation = r.address; s.qsrStartLat = r.lat; s.qsrStartLng = r.lng;
+    saveClockState(s);
+  });
 }
 
-// Stop (right): pauses the timer — freezes the elapsed reading — without
-// saving yet. Submit is the step that actually commits it.
-function qsrPause() {
+// Stop (right): pauses QJS's own timer — freezes the elapsed reading —
+// without saving yet, capturing a fresh GPS location for "where it ended".
+// Submit is the step that actually commits it.
+async function qsrPause() {
   const state = getClockState();
-  if (!state.segmentStart) { showToast('No job currently running.'); return; }
-  state.segmentPausedAt = new Date().toISOString();
+  if (!state.qsrSegmentStart) { showToast('No quick job currently running.'); return; }
+  state.qsrSegmentPausedAt = new Date().toISOString();
   saveClockState(state);
   renderQuickSwitchRing();
+  const r = await fetchAndFillLocation({ silent: true, fillField: false });
+  if (!r.ok) return;
+  const s = getClockState();
+  if (!s.qsrSegmentPausedAt) return; // already submitted by the time this resolved
+  s.qsrStopLocation = r.address; s.qsrStopLat = r.lat; s.qsrStopLng = r.lng;
+  saveClockState(s);
 }
 
-// Submit (down): saves the running-or-paused stretch as its own timesheet
-// entry. After this, load the next Job ID and tap Start again.
+// Submit (down): saves the running-or-paused quick-job stretch as its own
+// timesheet entry — using QJS's OWN loaded job/location, never the New
+// Entry form's fields — and adds its duration to today's running
+// "interruption minutes" total, which gets deducted from the normal job's
+// hours the next time that entry is actually submitted.
 async function qsrSubmit() {
   const state = getClockState();
-  if (!state.segmentStart) { showToast('Nothing to submit yet.'); return; }
-  const endPoint = state.segmentPausedAt ? new Date(state.segmentPausedAt) : new Date();
-  const ok = await closeCurrentSegmentAndSubmit(endPoint);
-  if (ok && qsrResumeJobId) {
-    // The job that was interrupted for this quick switch — pick it back up
-    // automatically, exactly as if Job ID + Start were tapped again.
-    const resumeId = qsrResumeJobId, resumeName = qsrResumeJobName;
-    qsrResumeJobId = ''; qsrResumeJobName = '';
-    qsrLoadedJobId = resumeId; qsrLoadedJobName = resumeName;
-    const now = new Date();
-    const fresh = getClockState();
-    fresh.segmentStart = now.toISOString();
-    fresh.segmentPausedAt = null;
-    fresh.currentJobId = resumeId;
-    fresh.currentJobName = resumeName;
-    saveClockState(fresh);
-    $('jobId').value = resumeId;
-    autoFillProjectFromJobId(resumeId);
-    $('startTime').value = toTimeInputValue(now);
-    showToast(`Submitted. Back to ${resumeId}${resumeName ? ' — ' + resumeName : ''}`);
+  if (!state.qsrSegmentStart) { showToast('Nothing to submit yet.'); return; }
+  const now = new Date();
+  const wasPaused = !!state.qsrSegmentPausedAt;
+  const endPoint = wasPaused ? new Date(state.qsrSegmentPausedAt) : now;
+
+  // If it was never explicitly Stopped, capture the "ended here" location
+  // right now, at Submit — same idea as Stop, just deferred.
+  let stopLocation = state.qsrStopLocation, stopLat = state.qsrStopLat, stopLng = state.qsrStopLng;
+  if (!wasPaused) {
+    const r = await fetchAndFillLocation({ silent: true, fillField: false });
+    if (r.ok) { stopLocation = r.address; stopLat = r.lat; stopLng = r.lng; }
   }
+
+  // Use the job stamped into state at Start time — NOT the module-level
+  // "currently loaded in the picker" variable, which may have already
+  // changed if this is running as the safety net inside qsrStart() picking
+  // up a different job.
+  const jobId = state.qsrJobId || qsrLoadedJobId;
+  const jobInfo = jobSearchOptions.find((r) => r.job_id === jobId);
+  const minutes = Math.max(0, Math.round((endPoint - new Date(state.qsrSegmentStart)) / 60000));
+
+  const draft = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'timesheet',
+    userLabel: currentProfile?.full_name || currentUser.email,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    error: null,
+    category: 'timesheet',
+    mode: 'site',
+    jobId: jobId || null,
+    project: jobInfo?.name || jobId || null,
+    location: state.qsrStartLocation || null,
+    allowanceLocation: null,
+    date: new Date(state.qsrSegmentStart).toISOString().slice(0, 10),
+    startTime: toTimeInputValue(state.qsrSegmentStart),
+    endTime: toTimeInputValue(endPoint),
+    lunchMinutes: 0,
+    description: ($('qsrNotes')?.value.trim() || ''),
+    clockInLocation: state.qsrStartLocation || null,
+    clockInLat: state.qsrStartLat ?? null,
+    clockInLng: state.qsrStartLng ?? null,
+    clockOutLocation: stopLocation || null,
+    clockOutLat: stopLat ?? null,
+    clockOutLng: stopLng ?? null,
+    attachments: [],
+  };
+  await addEntry(draft);
+  syncQueue();
+
+  const fresh = getClockState();
+  fresh.qsrSegmentStart = null;
+  fresh.qsrSegmentPausedAt = null;
+  fresh.qsrJobId = null; fresh.qsrJobName = null;
+  fresh.qsrStartLocation = null; fresh.qsrStartLat = null; fresh.qsrStartLng = null;
+  fresh.qsrStopLocation = null; fresh.qsrStopLat = null; fresh.qsrStopLng = null;
+  // The normal job's clock keeps running untouched throughout all of this —
+  // this is the ONLY effect a quick job has on it: minutes banked here to
+  // be subtracted from its hours once IT is actually submitted.
+  fresh.interruptionMinutes = (fresh.interruptionMinutes || 0) + minutes;
+  saveClockState(fresh);
+
+  qsrLoadedJobId = ''; qsrLoadedJobName = '';
+  if ($('qsrNotes')) $('qsrNotes').value = '';
+  showToast(`${draft.jobId || 'That job'} logged (${minutes}m) — deducted from today's normal job hours.`);
   renderQuickSwitchRing();
 }
 
@@ -867,11 +879,18 @@ async function buildDraftFromForm() {
     }
 
     if (!$('date').value) { showToast('Pick a date.'); return null; }
-    const lunchMinutes = parseInt($('lunchMinutes').value, 10) || 0;
+    const lunchMinutesRaw = parseInt($('lunchMinutes').value, 10) || 0;
     const allowanceLocation = $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null;
     // Attendance proof — where they actually clocked in and (once they have)
     // clocked out, captured automatically by GPS, never typed by hand.
     const clk = getClockState();
+    // Any time spent on Quick Job Switch interruptions today gets deducted
+    // from THIS job's hours here — folded straight into lunchMinutes, since
+    // that's the one field every hour calculation (Reports, edge functions)
+    // already subtracts. lunchMinutesRaw/qsrDeductedMinutes are kept
+    // separately too, purely so the entry detail view can show the two
+    // apart instead of one confusing combined number.
+    const qsrDeductedMinutes = clk.interruptionMinutes || 0;
     return {
       ...base,
       category: 'timesheet',
@@ -883,7 +902,9 @@ async function buildDraftFromForm() {
       date: $('date').value,
       startTime: $('startTime').value,
       endTime: $('endTime').value,
-      lunchMinutes,
+      lunchMinutes: lunchMinutesRaw + qsrDeductedMinutes,
+      lunchMinutesRaw,
+      qsrDeductedMinutes,
       description: $('workNotes').value.trim(),
       clockInLocation: clk.clockInLocation || null,
       clockInLat: clk.clockInLat ?? null,
@@ -934,7 +955,18 @@ function entryDetailRows(draft, opts = {}) {
       // at 5pm" at a glance, instead of hunting across separate rows.
       rows.push(clockEventBlockHtml('Clocked in', '🟢', draft.date, draft.startTime, draft.clockInLocation, draft.clockInLat, draft.clockInLng));
       rows.push(clockEventBlockHtml('Clocked out', '🔴', draft.date, draft.endTime, draft.clockOutLocation, draft.clockOutLat, draft.clockOutLng));
-      rows.push(rowHtml('Lunch/break (min)', draft.lunchMinutes));
+      // draft.lunchMinutes (used for every actual hour calculation) is the
+      // raw lunch value PLUS any Quick Job Switch time deducted — shown
+      // here broken back apart so it's clear where the deduction came from,
+      // rather than one confusing combined number. Older entries saved
+      // before this existed won't have these two sub-fields, so fall back
+      // to showing the plain combined value exactly as before.
+      if (draft.lunchMinutesRaw !== undefined || draft.qsrDeductedMinutes !== undefined) {
+        rows.push(rowHtml('Lunch/break (min)', draft.lunchMinutesRaw || 0));
+        if (draft.qsrDeductedMinutes) rows.push(rowHtml('Quick job time deducted (min)', draft.qsrDeductedMinutes));
+      } else {
+        rows.push(rowHtml('Lunch/break (min)', draft.lunchMinutes));
+      }
       rows.push(rowHtml('Allowance area', draft.allowanceLocation));
     }
     rows.push(rowHtml('Notes', draft.description));
