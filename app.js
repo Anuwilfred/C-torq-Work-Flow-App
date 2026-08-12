@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.68';
+const APP_VERSION = 'v3.69';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Quick Job Switch now runs fully independently — your normal job keeps counting while a quick job runs, and its time is deducted automatically.';
+const APP_UPDATE_NOTES = 'Job Allocation: you can now assign someone as a job\'s driver even if they\'re also ticked as a worker on it.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -1376,20 +1376,24 @@ async function renderJobBoard() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('daily_assignments')
-    .select('project, location, attendance_time, assignment_type, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .select('project, location, attendance_time, assignment_type, is_driver, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
     .eq('work_date', todayKey);
   if (error || !data || !data.length) { card.style.display = 'none'; return; }
 
   // Group every row by job id — each published job becomes one message box,
-  // listing its driver and everyone else ticked onto it.
+  // listing its driver(s) and everyone else ticked onto it. A worker can
+  // also be the driver (is_driver=true on their 'job' row), so we collect
+  // driver names separately from the plain-worker list rather than treating
+  // the two as mutually exclusive.
   const byJob = new Map();
   data.forEach((r) => {
-    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', driver: null, workers: [] });
+    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', drivers: [], workers: [] });
     const g = byJob.get(r.project);
     if (r.location && !g.location) g.location = r.location;
     if (r.attendance_time && !g.attendanceTime) g.attendanceTime = r.attendance_time;
     const name = r.profiles?.full_name || r.profiles?.email || 'Someone';
-    if (r.assignment_type === 'transportation') g.driver = name; else g.workers.push(name);
+    if (r.assignment_type === 'transportation') g.drivers.push(name);
+    else { g.workers.push(name); if (r.is_driver) g.drivers.push(name); }
   });
 
   card.style.display = 'block';
@@ -1400,7 +1404,7 @@ async function renderJobBoard() {
         ${g.attendanceTime ? `<span class="job-board-time">⏰ ${escapeHtml(timeLabel12h(g.attendanceTime))}</span>` : ''}
       </div>
       ${g.location ? `<div class="job-board-line">📍 ${escapeHtml(g.location)}</div>` : ''}
-      ${g.driver ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.driver)}</div>` : ''}
+      ${g.drivers.length ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.drivers.join(', '))}</div>` : ''}
       ${g.workers.length ? `<div class="job-board-line">🧑‍🤝‍🧑 ${escapeHtml(g.workers.join(', '))}</div>` : ''}
     </div>
   `).join('');
@@ -1417,7 +1421,7 @@ async function renderAdminScheduleBoard() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('daily_assignments')
-    .select('work_date, project, location, attendance_time, assignment_type, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .select('work_date, project, location, attendance_time, assignment_type, is_driver, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
     .gte('work_date', todayKey)
     .order('work_date', { ascending: true })
     .limit(500);
@@ -1425,16 +1429,19 @@ async function renderAdminScheduleBoard() {
 
   // Group by date, then by job id within each date — same shape as the
   // Today's Job Board, just spanning every upcoming date instead of one.
+  // A worker can also be the driver (is_driver=true on their 'job' row), so
+  // drivers are collected separately rather than treated as exclusive.
   const byDate = new Map();
   data.forEach((r) => {
     if (!byDate.has(r.work_date)) byDate.set(r.work_date, new Map());
     const byJob = byDate.get(r.work_date);
-    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', driver: null, workers: [] });
+    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', drivers: [], workers: [] });
     const g = byJob.get(r.project);
     if (r.location && !g.location) g.location = r.location;
     if (r.attendance_time && !g.attendanceTime) g.attendanceTime = r.attendance_time;
     const name = r.profiles?.full_name || r.profiles?.email || 'Someone';
-    if (r.assignment_type === 'transportation') g.driver = name; else g.workers.push(name);
+    if (r.assignment_type === 'transportation') g.drivers.push(name);
+    else { g.workers.push(name); if (r.is_driver) g.drivers.push(name); }
   });
 
   const tomorrowKey = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -1451,7 +1458,7 @@ async function renderAdminScheduleBoard() {
             ${g.attendanceTime ? `<span class="job-board-time">⏰ ${escapeHtml(timeLabel12h(g.attendanceTime))}</span>` : ''}
           </div>
           ${g.location ? `<div class="job-board-line">📍 ${escapeHtml(g.location)}</div>` : ''}
-          ${g.driver ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.driver)}</div>` : ''}
+          ${g.drivers.length ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.drivers.join(', '))}</div>` : ''}
           ${g.workers.length ? `<div class="job-board-line">🧑‍🤝‍🧑 ${escapeHtml(g.workers.join(', '))}</div>` : ''}
         </div>
       `).join('')}
@@ -1471,7 +1478,7 @@ async function renderMyJobsPanel() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('daily_assignments')
-    .select('id, work_date, project, location, notes, attendance_time, assignment_type')
+    .select('id, work_date, project, location, notes, attendance_time, assignment_type, is_driver')
     .eq('person_id', currentUser.id)
     .order('work_date', { ascending: false })
     .limit(120);
@@ -1481,7 +1488,7 @@ async function renderMyJobsPanel() {
 
   list.innerHTML = data.map((r) => {
     const isToday = r.work_date === todayKey;
-    const isDriver = r.assignment_type === 'transportation';
+    const isDriver = r.assignment_type === 'transportation' || !!r.is_driver;
     return `
       <div class="entry entry-clickable" data-myjob-id="${escapeHtml(r.id)}" title="Tap for full details" style="${isToday ? 'border-color: var(--accent);' : ''}">
         <span class="type-icon">${isDriver ? '🚗' : '🗓️'}</span>
@@ -1508,11 +1515,12 @@ async function renderMyJobsPanel() {
 function openMyJobDetail(id) {
   const r = myJobsCache.find((x) => x.id === id);
   if (!r) return;
-  const isDriver = r.assignment_type === 'transportation';
+  const isTransportOnly = r.assignment_type === 'transportation';
+  const roleLabel = isTransportOnly ? 'Driver' : (r.is_driver ? 'Worker + Driver' : 'Worker');
   const rows = [
     rowHtml('Job', jobLineFor(r.project)),
     rowHtml('Date', r.work_date),
-    rowHtml('Your role', isDriver ? 'Driver' : 'Worker'),
+    rowHtml('Your role', roleLabel),
     rowHtml('Location', r.location),
     rowHtml('Arrival time', r.attendance_time ? timeLabel12h(r.attendance_time) : ''),
     rowHtml('Notes', r.notes),
@@ -2460,7 +2468,7 @@ function allocPersonDisplay(p) {
 function removeJobFromDraft(idx) {
   const job = allocationDraftJobs.find((j) => j.idx === idx);
   if (!job) return;
-  const peopleCount = job.workers.size + (job.driverId ? 1 : 0);
+  const peopleCount = job.workers.size + (job.driverId && !job.workers.has(job.driverId) ? 1 : 0);
   if (peopleCount > 0 && !confirm(`Remove job ${job.jobId}? This clears the ${peopleCount} ${peopleCount === 1 ? 'person' : 'people'} ticked for it — nothing has been published yet, so this can't be undone.`)) return;
   allocationDraftJobs = allocationDraftJobs.filter((j) => j.idx !== idx);
   renderAllocationDraft();
@@ -2515,13 +2523,20 @@ function renderAllocationDraft() {
           </label>
         `;
       }).join('');
+      // Anyone already ticked as a Worker on THIS job can still be picked as
+      // its driver too (dual role — e.g. they drive themselves to site and
+      // also do the work). Only people used on a DIFFERENT job/date are
+      // excluded here.
       const driverOptions = allocationPeopleCache.filter((p) => {
         if (p.id === job.driverId) return true;
         const usedElsewhereInDraft = draftUsageFor(p.id, allocationDraftJobs.indexOf(job));
         const published = allocationPublishedMap.get(p.id);
         const publishedElsewhere = published && published.project !== job.jobId;
-        return !usedElsewhereInDraft && !publishedElsewhere && !job.workers.has(p.id);
-      }).map((p) => `<option value="${p.id}" ${job.driverId === p.id ? 'selected' : ''}>${escapeHtml(allocPersonDisplay(p))}</option>`).join('');
+        return !usedElsewhereInDraft && !publishedElsewhere;
+      }).map((p) => {
+        const alsoWorking = job.workers.has(p.id) ? ' (also ticked as a worker)' : '';
+        return `<option value="${p.id}" ${job.driverId === p.id ? 'selected' : ''}>${escapeHtml(allocPersonDisplay(p))}${alsoWorking}</option>`;
+      }).join('');
       return `
         <div class="alloc-job-card">
           <div class="alloc-job-card-head">
@@ -2614,7 +2629,7 @@ function renderAllocationDraft() {
     });
   }
 
-  const totalPeople = allocationDraftJobs.reduce((sum, j) => sum + j.workers.size + (j.driverId ? 1 : 0), 0);
+  const totalPeople = allocationDraftJobs.reduce((sum, j) => sum + j.workers.size + (j.driverId && !j.workers.has(j.driverId) ? 1 : 0), 0);
   $('allocationPublishCount').textContent = allocationDraftJobs.length ? `(${totalPeople} ${totalPeople === 1 ? 'person' : 'people'} across ${allocationDraftJobs.length} ${allocationDraftJobs.length === 1 ? 'job' : 'jobs'})` : '';
 }
 
@@ -2625,10 +2640,14 @@ async function publishAllocationDraft() {
   const rows = [];
   allocationDraftJobs.forEach((job) => {
     job.workers.forEach((personId) => {
-      rows.push({ person_id: personId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', created_by: currentUser.id });
+      // If this same person is also the job's driver, fold that into their
+      // one 'job' row via is_driver — a second row for the same person on
+      // the same date/slot would violate the unique constraint.
+      const alsoDriver = !!job.driverId && job.driverId === personId;
+      rows.push({ person_id: personId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', is_driver: alsoDriver, created_by: currentUser.id });
     });
-    if (job.driverId) {
-      rows.push({ person_id: job.driverId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', created_by: currentUser.id });
+    if (job.driverId && !job.workers.has(job.driverId)) {
+      rows.push({ person_id: job.driverId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', is_driver: true, created_by: currentUser.id });
     }
   });
   if (!rows.length) { showToast('Tick at least one worker or assign a driver first.'); return; }
