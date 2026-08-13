@@ -312,6 +312,16 @@ label:first-child { margin-top: 0; }
 .map-access-row input[type="checkbox"] { width: 19px; height: 19px; min-width: 19px; }
 .map-access-row span { color: var(--text); font-size: 13.5px; font-weight: 550; line-height: 1.4; }
 
+/* The "grant everything" quick-toggle sits above the per-feature list and
+   is deliberately called out as its own thing, not just another row. */
+#mapAccessAllRow {
+  border: 1px solid var(--accent) !important;
+  border-radius: var(--r-md);
+  background: linear-gradient(160deg, rgba(224,138,95,0.16), rgba(204,120,92,0.08));
+  margin-top: 8px !important;
+  padding: 12px 14px;
+}
+
 input, select, textarea {
   width: 100%;
   padding: 12px 14px;

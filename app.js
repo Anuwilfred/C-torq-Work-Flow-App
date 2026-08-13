@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.72';
+const APP_VERSION = 'v3.73';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed: Clocked In status now always shows on reopen, even for a shift started before this update. Quick Job Switch also now has its own Mode of work chips (Office/Site/Work from Home/Exhibition/Other).';
+const APP_UPDATE_NOTES = 'Map Access now has a one-tap "Admin access" toggle to grant someone every dashboard feature at once, instead of ticking each one by hand.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -2255,6 +2255,18 @@ function openMapAccessModal(person) {
       <span>${escapeHtml(f.label)}</span>
     </label>
   `).join('');
+
+  const featureCbs = () => [...$('mapAccessList').querySelectorAll('input[type="checkbox"]')];
+  const allCb = $('mapAccessAllCb');
+  // Reflects the individual list: on if every single feature is already
+  // ticked, off otherwise — this is a convenience "grant everything" toggle,
+  // not a separate permission of its own, so it always mirrors reality.
+  allCb.checked = featureCbs().every((cb) => cb.checked);
+  allCb.onchange = () => { featureCbs().forEach((cb) => { cb.checked = allCb.checked; }); };
+  featureCbs().forEach((cb) => {
+    cb.addEventListener('change', () => { allCb.checked = featureCbs().every((c) => c.checked); });
+  });
+
   openPanel('mapAccess');
 }
 
