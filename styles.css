@@ -532,7 +532,7 @@ button.ghost:hover { color: var(--text); }
   padding: 2px;
   margin-top: 2px;
 }
-.mode-chip {
+.mode-chip, .qsr-mode-chip {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -552,9 +552,9 @@ button.ghost:hover { color: var(--text); }
   transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   line-height: 1.2;
 }
-.mode-chip .emoji { font-size: 19px; }
-.mode-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
-.mode-chip.selected {
+.mode-chip .emoji, .qsr-mode-chip .emoji { font-size: 19px; }
+.mode-chip:hover, .qsr-mode-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
+.mode-chip.selected, .qsr-mode-chip.selected {
   background: linear-gradient(160deg, rgba(224,138,95,0.22), rgba(204,120,92,0.14));
   border-color: var(--accent);
   color: var(--text);

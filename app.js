@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.71';
+const APP_VERSION = 'v3.72';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'If you\'re still clocked in when you reopen the app, New Entry now shows your Clocked In status right away — no need to tap a mode chip first to see Clock Out.';
+const APP_UPDATE_NOTES = 'Fixed: Clocked In status now always shows on reopen, even for a shift started before this update. Quick Job Switch also now has its own Mode of work chips (Office/Site/Work from Home/Exhibition/Other).';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -207,7 +207,14 @@ $('type').addEventListener('change', refreshTypeVisibility);
 function refreshModeVisibility() {
   const isLeave = LEAVE_MODES.includes(selectedMode);
   const hasMode = !!selectedMode;
-  $('workModeFields').classList.toggle('active', hasMode && !isLeave);
+  // Belt-and-braces: even if selectedMode was never restored (e.g. an
+  // already-in-progress clock-in saved by an older app version, before this
+  // was tracked), the Clocked In card must still show whenever the clock
+  // state itself says you're actually working/on a break/clocked out
+  // pending submit — never gated behind picking a mode chip by hand.
+  const clk = getClockState();
+  const clockInProgress = clk.status === 'working' || clk.status === 'onbreak' || !!clk.clockOutAt;
+  $('workModeFields').classList.toggle('active', (hasMode && !isLeave) || clockInProgress);
   $('leaveModeFields').classList.toggle('active', hasMode && isLeave);
   $('sickDocField').style.display = selectedMode === 'sick_leave' ? 'block' : 'none';
 }
@@ -495,6 +502,7 @@ $('clockOutBtn')?.addEventListener('click', () => {
 //                    tap Start again.
 let qsrLoadedJobId = '';
 let qsrLoadedJobName = '';
+let qsrMode = 'site'; // mode-of-work chip for quick jobs — defaults to Site, kept independent of the main New Entry mode chips
 
 function renderQuickSwitchRing() {
   const handle = $('qsrHandle');
@@ -662,7 +670,7 @@ async function qsrSubmit() {
     status: 'pending',
     error: null,
     category: 'timesheet',
-    mode: 'site',
+    mode: qsrMode,
     jobId: jobId || null,
     project: jobInfo?.name || jobId || null,
     location: state.qsrStartLocation || null,
@@ -721,6 +729,17 @@ $('qsrJobSearch')?.addEventListener('input', () => showQsrJobMatches($('qsrJobSe
 $('qsrStartBtn')?.addEventListener('click', () => { if (!$('qsrStartBtn').disabled) qsrStart(); });
 $('qsrStopBtn')?.addEventListener('click', () => { if (!$('qsrStopBtn').disabled) qsrPause(); });
 $('qsrSubmitBtn')?.addEventListener('click', () => { if (!$('qsrSubmitBtn').disabled) qsrSubmit(); });
+
+// Quick Job Switch's own Mode of work chips — separate element/class from
+// the main New Entry mode-chip grid on purpose, so tapping one never
+// affects the other. Whatever's picked here stays selected across quick
+// jobs (most people repeat the same mode), it isn't reset on Submit.
+document.querySelectorAll('.qsr-mode-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    qsrMode = chip.dataset.qsrMode;
+    document.querySelectorAll('.qsr-mode-chip').forEach((c) => c.classList.toggle('selected', c === chip));
+  });
+});
 
 renderClockUI();
 renderQuickSwitchRing();
