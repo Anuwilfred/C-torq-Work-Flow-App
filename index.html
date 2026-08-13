@@ -427,6 +427,12 @@
         <div id="teamList" style="margin-top:12px;"></div>
       </div>
       <div class="card glass">
+        <strong style="font-size:14px;">🔁 Recalled Entries</strong>
+        <p class="hint" style="margin-top:4px;">Timesheet/leave entries people have pulled back before you've reviewed them — already off every dashboard and report. Correct, restore, or delete each one below.</p>
+        <button type="button" id="refreshRecalledBtn" class="secondary" style="margin-top:8px;">Refresh list</button>
+        <div id="recalledEntriesList" style="margin-top:12px;"><div class="empty">Tap Refresh to load.</div></div>
+      </div>
+      <div class="card glass">
         <strong style="font-size:14px;">Locations &amp; allowances</strong>
         <p class="hint" style="margin-top:4px;">Add a place (country/city/site) and how many extra hours get added automatically when someone works there — e.g. "Abu Dhabi" +2 hours.</p>
         <div class="row-2" style="margin-top:10px;">
@@ -921,6 +927,7 @@
     </div>
     <div class="panel-body">
       <div id="entryDetailBody"></div>
+      <div id="entryDetailActions" style="margin-top:14px;"></div>
     </div>
   </div>
 </div>
@@ -1095,6 +1102,48 @@
         </div>
         <div id="activityTripList" style="margin-top:10px;"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- RECALLED ENTRY EDIT OVERLAY — admin corrects/restores/deletes one
+     recalled timesheet or leave entry -->
+<div id="recalledEditOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="recalledEditOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Recalled entry — <span id="recalledEditPersonName">—</span></strong>
+      <button type="button" class="ghost" data-close="recalledEdit">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="recalledEditTimesheetFields">
+        <label for="recEditDate">Date</label>
+        <input id="recEditDate" type="date" />
+        <label for="recEditStart">Start time</label>
+        <input id="recEditStart" type="time" />
+        <label for="recEditEnd">End time</label>
+        <input id="recEditEnd" type="time" />
+        <label for="recEditLunch">Lunch/break (min)</label>
+        <input id="recEditLunch" type="number" min="0" />
+        <label for="recEditJobId">Job ID</label>
+        <input id="recEditJobId" type="text" />
+        <label for="recEditProject">Project</label>
+        <input id="recEditProject" type="text" />
+        <label for="recEditLocation">Location</label>
+        <input id="recEditLocation" type="text" />
+      </div>
+      <div id="recalledEditLeaveFields" style="display:none;">
+        <label for="recEditLeaveStart">Leave start</label>
+        <input id="recEditLeaveStart" type="date" />
+        <label for="recEditLeaveEnd">Leave end</label>
+        <input id="recEditLeaveEnd" type="date" />
+      </div>
+      <label for="recEditNotes">Notes / description</label>
+      <textarea id="recEditNotes" rows="3"></textarea>
+
+      <button type="button" id="recalledSaveRestoreBtn" class="primary" style="margin-top:14px; width:100%;">💾 Save corrections &amp; restore</button>
+      <button type="button" id="recalledRestoreAsIsBtn" class="secondary" style="margin-top:8px; width:100%;">↩️ Restore as-is (no changes)</button>
+      <button type="button" id="recalledDeleteBtn" class="secondary" style="margin-top:8px; width:100%; color:var(--err);">🗑️ Delete permanently</button>
     </div>
   </div>
 </div>

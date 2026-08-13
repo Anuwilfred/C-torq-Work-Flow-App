@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.76';
+const APP_VERSION = 'v3.78';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Data Feed now has quick actions for adding/removing people and jobs, plus a Rules placeholder. Also enlarged the Quick Job Switch, News Room, and software-update icons to match the rest of the UI.';
+const APP_UPDATE_NOTES = 'New: Recall a submitted timesheet/leave entry from Queue — it comes off every dashboard right away, and Admin → Recalled Entries lets you correct, restore, or delete it.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -161,7 +161,7 @@ function setActiveTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('section.panel').forEach(s => s.classList.toggle('active', s.id === name));
   if (name === 'queue') renderQueue();
-  if (name === 'admin') { renderTeamList(); renderLocationList(); }
+  if (name === 'admin') { renderTeamList(); renderLocationList(); renderRecalledEntriesList(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
   if (name === 'home') renderJobBoard();
@@ -1061,7 +1061,56 @@ async function openEntryDetail(id) {
   if (!en) return;
   if ($('entryDetailTitle')) $('entryDetailTitle').textContent = 'Entry details';
   $('entryDetailBody').innerHTML = entryDetailRows(en, { full: true }).join('');
+
+  // Recall — only makes sense once it's actually synced (live on
+  // Reports/dashboards) and only for timesheet/leave entries (that's what
+  // recall-entry supports right now). Already-recalled entries just show a
+  // status line instead of the button again.
+  const actions = $('entryDetailActions');
+  if (actions) {
+    const canRecall = en.status === 'synced' && (en.category === 'timesheet' || en.category === 'leave');
+    if (canRecall) {
+      actions.innerHTML = `<button type="button" class="secondary" id="recallEntryBtn" style="width:100%;">↩️ Recall this entry</button>`;
+      $('recallEntryBtn').addEventListener('click', () => recallEntry(en));
+    } else if (en.status === 'recalled') {
+      actions.innerHTML = `<p class="hint" style="margin-top:0;">↩️ Recalled — this is no longer on any dashboard or report. An admin can restore, correct, or delete it from Admin → Recalled Entries.</p>`;
+    } else {
+      actions.innerHTML = '';
+    }
+  }
   openPanel('entryDetail');
+}
+
+// Pulls a live (already-synced) timesheet/leave entry back out of GitHub —
+// moves it into a "_recalled" holding area (see recall-entry Edge Function)
+// so it disappears from every dashboard/report immediately, while an admin
+// can still find and fix or delete it from Admin → Recalled Entries.
+async function recallEntry(en) {
+  if (!confirm('Recall this entry? It will be removed from Reports and every dashboard right away. An admin will need to review it before it counts again.')) return;
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { showToast('Please log in first.'); return; }
+  const btn = $('recallEntryBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Recalling…'; }
+  try {
+    const { data, error } = await sb.functions.invoke('recall-entry', {
+      body: {
+        category: en.category,
+        id: en.id,
+        date: en.date || en.leaveStart,
+        userLabel: en.userLabel,
+      },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+    en.status = 'recalled';
+    await updateEntry(en);
+    showToast('Recalled — removed from dashboards. An admin can now review it.');
+    renderQueue();
+    closePanel('entryDetail');
+  } catch (err) {
+    showToast(`Couldn't recall: ${err.message || err}`);
+    if (btn) { btn.disabled = false; btn.textContent = '↩️ Recall this entry'; }
+  }
 }
 
 $('reviewBtn').addEventListener('click', async () => {
@@ -1588,6 +1637,7 @@ function openMyJobDetail(id) {
   ];
   if ($('entryDetailTitle')) $('entryDetailTitle').textContent = 'Job details';
   $('entryDetailBody').innerHTML = rows.join('');
+  if ($('entryDetailActions')) $('entryDetailActions').innerHTML = ''; // this view has no Recall action — Queue's openEntryDetail is the only one that populates it
   openPanel('entryDetail');
 }
 
@@ -2255,6 +2305,135 @@ async function renderTeamList() {
     });
   });
 }
+
+// =====================================================================
+// RECALLED ENTRIES — timesheet/leave entries people pulled back before an
+// admin reviewed them. Lives entirely server-side (admin-recalled-entries
+// Edge Function scans everyone's "_recalled" GitHub subfolders) — nothing
+// here is stored locally, so this always reflects the true current state.
+// =====================================================================
+
+let recalledEntriesCache = [];
+
+function recalledEntrySummary(item) {
+  const e = item.entry || {};
+  if (item.category === 'leave') {
+    return `${MODE_LABEL[e.mode] || e.mode || 'Leave'} · ${escapeHtml(e.leaveStart || '')} → ${escapeHtml(e.leaveEnd || '')}`;
+  }
+  return `${escapeHtml(MODE_LABEL[e.mode] || e.mode || 'Timesheet')} · ${escapeHtml(e.date || '')}${e.jobId ? ' · ' + escapeHtml(e.jobId) : ''}`;
+}
+
+async function renderRecalledEntriesList() {
+  const list = $('recalledEntriesList');
+  if (!list) return;
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { list.innerHTML = '<div class="empty">Please log in first.</div>'; return; }
+  const { data, error } = await sb.functions.invoke('admin-recalled-entries', {
+    body: { action: 'list' },
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (error || data?.error) {
+    list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
+    return;
+  }
+  recalledEntriesCache = data.results || [];
+  if (!recalledEntriesCache.length) { list.innerHTML = '<div class="empty">Nothing recalled right now.</div>'; return; }
+  list.innerHTML = recalledEntriesCache.map((item, idx) => `
+    <div class="entry entry-clickable" data-recalled-idx="${idx}" title="Tap to review">
+      <span class="type-icon">${item.category === 'leave' ? '🌴' : '🗓️'}</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(item.personName)}</div>
+        <div class="entry-meta">${recalledEntrySummary(item)}</div>
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-recalled-idx]').forEach((row) => {
+    row.addEventListener('click', () => openRecalledEditPanel(recalledEntriesCache[Number(row.dataset.recalledIdx)]));
+  });
+}
+
+let currentRecalledItem = null;
+
+function openRecalledEditPanel(item) {
+  currentRecalledItem = item;
+  const e = item.entry || {};
+  $('recalledEditPersonName').textContent = item.personName;
+  const isLeave = item.category === 'leave';
+  $('recalledEditTimesheetFields').style.display = isLeave ? 'none' : 'block';
+  $('recalledEditLeaveFields').style.display = isLeave ? 'block' : 'none';
+  if (isLeave) {
+    $('recEditLeaveStart').value = e.leaveStart || '';
+    $('recEditLeaveEnd').value = e.leaveEnd || '';
+  } else {
+    $('recEditDate').value = e.date || '';
+    $('recEditStart').value = e.startTime || '';
+    $('recEditEnd').value = e.endTime || '';
+    $('recEditLunch').value = e.lunchMinutesRaw ?? e.lunchMinutes ?? 0;
+    $('recEditJobId').value = e.jobId || '';
+    $('recEditProject').value = e.project || '';
+    $('recEditLocation').value = e.location || '';
+  }
+  $('recEditNotes').value = e.description || '';
+  openPanel('recalledEdit');
+}
+
+async function callAdminRecalled(action, extra) {
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { showToast('Please log in first.'); return { ok: false }; }
+  const { data, error } = await sb.functions.invoke('admin-recalled-entries', {
+    body: { action, path: currentRecalledItem.path, ...extra },
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (error || data?.error) {
+    showToast(`Couldn't ${action}: ${data?.error || await readFunctionsError(error)}`);
+    return { ok: false };
+  }
+  return { ok: true };
+}
+
+$('recalledSaveRestoreBtn')?.addEventListener('click', async () => {
+  if (!currentRecalledItem) return;
+  const isLeave = currentRecalledItem.category === 'leave';
+  const updates = isLeave
+    ? { leaveStart: $('recEditLeaveStart').value, leaveEnd: $('recEditLeaveEnd').value, description: $('recEditNotes').value.trim() }
+    : {
+        date: $('recEditDate').value, startTime: $('recEditStart').value, endTime: $('recEditEnd').value,
+        lunchMinutes: parseInt($('recEditLunch').value, 10) || 0, lunchMinutesRaw: parseInt($('recEditLunch').value, 10) || 0,
+        jobId: $('recEditJobId').value.trim() || null, project: $('recEditProject').value.trim(),
+        location: $('recEditLocation').value.trim(), description: $('recEditNotes').value.trim(),
+      };
+  const btn = $('recalledSaveRestoreBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const { ok } = await callAdminRecalled('update', { updates });
+  btn.disabled = false; btn.textContent = '💾 Save corrections & restore';
+  if (!ok) return;
+  showToast('Corrected and restored — back on their dashboard and Reports.');
+  closePanel('recalledEdit');
+  renderRecalledEntriesList();
+});
+
+$('recalledRestoreAsIsBtn')?.addEventListener('click', async () => {
+  if (!currentRecalledItem) return;
+  if (!confirm('Restore this entry exactly as it was, with no changes?')) return;
+  const { ok } = await callAdminRecalled('restore', {});
+  if (!ok) return;
+  showToast('Restored — back on their dashboard and Reports.');
+  closePanel('recalledEdit');
+  renderRecalledEntriesList();
+});
+
+$('recalledDeleteBtn')?.addEventListener('click', async () => {
+  if (!currentRecalledItem) return;
+  if (!confirm("Permanently delete this entry? This can't be undone.")) return;
+  const { ok } = await callAdminRecalled('delete', {});
+  if (!ok) return;
+  showToast('Deleted permanently.');
+  closePanel('recalledEdit');
+  renderRecalledEntriesList();
+});
+
+$('refreshRecalledBtn')?.addEventListener('click', renderRecalledEntriesList);
 
 // =====================================================================
 // MAP ACCESS — admin ticks which dashboard features one person can see.
@@ -3091,6 +3270,7 @@ const PANEL_IDS = {
   myjobs: ['myJobsOverlay', 'myJobsOverlayBackdrop'],
   entryDetail: ['entryDetailOverlay', 'entryDetailOverlayBackdrop'],
   datafeed: ['dataFeedOverlay', 'dataFeedOverlayBackdrop'],
+  recalledEdit: ['recalledEditOverlay', 'recalledEditOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
