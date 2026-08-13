@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.78';
+const APP_VERSION = 'v3.79';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: Recall a submitted timesheet/leave entry from Queue — it comes off every dashboard right away, and Admin → Recalled Entries lets you correct, restore, or delete it.';
+const APP_UPDATE_NOTES = 'Job Allocation: the driver dropdown now always lists everyone — instead of hiding people used elsewhere that day, it shows a note on where else they are assigned so you can judge for yourself if the times actually clash.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -2721,15 +2721,28 @@ function renderAllocationDraft() {
       // its driver too (dual role — e.g. they drive themselves to site and
       // also do the work). Only people used on a DIFFERENT job/date are
       // excluded here.
-      const driverOptions = allocationPeopleCache.filter((p) => {
-        if (p.id === job.driverId) return true;
+      // Always list every person as a possible driver — a report/attendance
+      // TIME, not just the date, is what actually decides whether someone
+      // can drive two jobs the same day (e.g. drop one job at 9am, drive
+      // another at 2pm — same day is fine, same time isn't). This app only
+      // has a single point-in-time per job, not a start/end range, so it
+      // can't safely auto-block on time — instead every option stays
+      // pickable, annotated with where else they're used (job + time) so
+      // the admin can judge for themselves whether it actually overlaps.
+      const driverOptions = allocationPeopleCache.map((p) => {
         const usedElsewhereInDraft = draftUsageFor(p.id, allocationDraftJobs.indexOf(job));
         const published = allocationPublishedMap.get(p.id);
-        const publishedElsewhere = published && published.project !== job.jobId;
-        return !usedElsewhereInDraft && !publishedElsewhere;
-      }).map((p) => {
-        const alsoWorking = job.workers.has(p.id) ? ' (also ticked as a worker)' : '';
-        return `<option value="${p.id}" ${job.driverId === p.id ? 'selected' : ''}>${escapeHtml(allocPersonDisplay(p))}${alsoWorking}</option>`;
+        const publishedElsewhere = published && published.project !== job.jobId ? published : null;
+        const alsoWorking = job.workers.has(p.id) ? ' (also ticked as a worker here)' : '';
+        let conflictNote = '';
+        if (usedElsewhereInDraft) {
+          const otherJob = allocationDraftJobs.find((j) => j.driverId === p.id || j.workers.has(p.id));
+          const otherTime = otherJob?.attendanceTime ? ` at ${timeLabel12h(otherJob.attendanceTime)}` : '';
+          conflictNote = ` — also on ${usedElsewhereInDraft}${otherTime} (this draft)`;
+        } else if (publishedElsewhere) {
+          conflictNote = ` — already assigned to ${publishedElsewhere.project}`;
+        }
+        return `<option value="${p.id}" ${job.driverId === p.id ? 'selected' : ''}>${escapeHtml(allocPersonDisplay(p))}${alsoWorking}${escapeHtml(conflictNote)}</option>`;
       }).join('');
       return `
         <div class="alloc-job-card">
