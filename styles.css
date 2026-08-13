@@ -13,8 +13,8 @@
   position: absolute;
   top: -3px;
   right: -3px;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   border: 2px solid var(--bg-0);
 }
@@ -239,13 +239,13 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 /* ---------- Admin shortcut, pinned top-right of the header (same teal
    stroke as the home tiles / AI widget) ---------- */
 .admin-corner-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 19px;
   background: linear-gradient(160deg, rgba(76, 189, 185, 0.22), rgba(0, 112, 109, 0.12));
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -1079,16 +1079,16 @@ button.ghost:hover { color: var(--text); }
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 32px;
-  height: 62px;
-  border-radius: 0 16px 16px 0;
+  width: 42px;
+  height: 78px;
+  border-radius: 0 20px 20px 0;
   border: 1px solid var(--glass-border-strong);
   border-left: none;
   background: var(--glass-strong);
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   color: var(--text);
-  font-size: 17px;
+  font-size: 22px;
   cursor: pointer;
   z-index: 58;
   box-shadow: 4px 0 14px rgba(0, 0, 0, 0.3);
@@ -1099,10 +1099,10 @@ button.ghost:hover { color: var(--text); }
 }
 .news-handle-dot {
   position: absolute;
-  top: 7px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
+  top: 8px;
+  right: 7px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--err);
   box-shadow: 0 0 6px 1px rgba(242, 125, 112, 0.6);
@@ -1246,16 +1246,16 @@ button.ghost:hover { color: var(--text); }
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 32px;
-  height: 62px;
-  border-radius: 16px 0 0 16px;
+  width: 42px;
+  height: 78px;
+  border-radius: 20px 0 0 20px;
   border: 1px solid var(--glass-border-strong);
   border-right: none;
   background: var(--glass-strong);
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   color: var(--text);
-  font-size: 17px;
+  font-size: 22px;
   cursor: pointer;
   z-index: 58;
   box-shadow: -4px 0 14px rgba(0, 0, 0, 0.3);
@@ -1274,9 +1274,9 @@ button.ghost:hover { color: var(--text); }
     top: auto;
     bottom: 128px;
     transform: translateX(-50%);
-    width: 62px;
-    height: 32px;
-    border-radius: 16px;
+    width: 78px;
+    height: 42px;
+    border-radius: 20px;
     border-right: 1px solid var(--glass-border-strong);
   }
 }

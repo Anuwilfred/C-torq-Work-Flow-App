@@ -436,26 +436,6 @@
         <button id="addLocationBtn" class="primary" style="margin-top:12px;">Add location</button>
         <div id="locationList" style="margin-top:14px;"></div>
       </div>
-      <div class="card glass">
-        <strong style="font-size:14px;">Job Allocation</strong>
-        <p class="hint" style="margin-top:4px;">Assign each person's job for a date — this is what the 6:55am reminder tells them, and what shows on their own Home screen and their department's page today.</p>
-        <label for="assignPerson" style="margin-top:10px;">Person</label>
-        <select id="assignPerson"></select>
-        <label for="assignDate">Date</label>
-        <input id="assignDate" type="date" />
-        <label class="toggle-row" for="assignIsTransport">
-          <span>🚕 Transportation arrangement</span>
-          <input id="assignIsTransport" type="checkbox" />
-        </label>
-        <label for="assignProject" id="assignProjectLabel">Job / project</label>
-        <input id="assignProject" type="text" placeholder="e.g. Site inspection — Tower 3" />
-        <label for="assignLocation" id="assignLocationLabel">Location (optional)</label>
-        <input id="assignLocation" type="text" placeholder="e.g. Abu Dhabi" />
-        <label for="assignNotes">Notes (optional)</label>
-        <input id="assignNotes" type="text" placeholder="Anything they should know" />
-        <button id="saveAssignmentBtn" class="primary" style="margin-top:12px;">Save assignment</button>
-        <div id="assignmentList" style="margin-top:14px;"></div>
-      </div>
     </section>
 
     <!-- SETTINGS -->
@@ -958,6 +938,15 @@
       <button type="button" class="ghost" data-close="datafeed">✕</button>
     </div>
     <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">Quick actions</strong>
+        <p class="hint" style="margin-top:4px;">Anything else data-related starts here too.</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+          <button type="button" class="secondary" id="dfGoToTeamBtn" style="width:100%;">👥 Add or Remove People</button>
+          <button type="button" class="secondary" data-open="projects" style="width:100%;">🗂️ Add or Remove Job</button>
+          <button type="button" class="secondary" id="dfRulesBtn" style="width:100%;">📐 Rules</button>
+        </div>
+      </div>
       <div class="card glass">
         <strong style="font-size:14px;">Add jobs from WhatsApp</strong>
         <p class="hint">Paste the job announcement messages below — AEON Ai will pull out every job number, description, and client, skip anything already in your Projects list, and show you just the new ones to confirm.</p>

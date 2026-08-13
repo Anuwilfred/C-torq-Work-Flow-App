@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.73';
+const APP_VERSION = 'v3.76';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Map Access now has a one-tap "Admin access" toggle to grant someone every dashboard feature at once, instead of ticking each one by hand.';
+const APP_UPDATE_NOTES = 'Data Feed now has quick actions for adding/removing people and jobs, plus a Rules placeholder. Also enlarged the Quick Job Switch, News Room, and software-update icons to match the rest of the UI.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -161,7 +161,7 @@ function setActiveTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('section.panel').forEach(s => s.classList.toggle('active', s.id === name));
   if (name === 'queue') renderQueue();
-  if (name === 'admin') { renderTeamList(); renderLocationList(); populateAssignPersonPicker(); renderAssignmentList(); }
+  if (name === 'admin') { renderTeamList(); renderLocationList(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
   if (name === 'home') renderJobBoard();
@@ -2045,6 +2045,12 @@ $('sendInviteBtn').addEventListener('click', async () => {
 
 const POSITION_LABEL = { engineer: 'Engineer', technician: 'Technician', other: 'Other' };
 
+// The account owner's Admin status can never be removed by anyone —
+// including other admins — not just "can't remove your own". Without this,
+// any second admin could open Team, tap Remove Admin on the owner's row,
+// and lock them out of their own system.
+const PROTECTED_OWNER_EMAIL = 'anu@tv-me.com';
+
 // Dashboard feature keys — must match the data-feature attributes on the
 // home tiles / nav tabs in index.html, plus the two floating orbs (chat, ai)
 // which are gated by id directly in applyFeatureAccess() below.
@@ -2159,7 +2165,13 @@ async function renderTeamList() {
       </select>
       <button type="button" class="secondary" data-map-access="${p.id}" data-map-access-name="${escapeHtml(p.full_name || p.email)}" ${p.role === 'admin' ? 'disabled title="Admins already see everything"' : ''}>🔐 Map Access</button>
       ${p.role === 'admin'
-        ? `<button type="button" class="secondary" data-remove-admin="${p.id}" ${p.id === currentUser?.id ? 'disabled title="Can\'t remove your own admin"' : ''}>👑 Remove Admin</button>`
+        ? (() => {
+            const isOwner = p.email === PROTECTED_OWNER_EMAIL;
+            const isSelf = p.id === currentUser?.id;
+            const guard = isOwner ? 'disabled title="Account owner — admin access is protected and can\'t be removed"'
+              : isSelf ? 'disabled title="Can\'t remove your own admin"' : '';
+            return `<button type="button" class="secondary" data-remove-admin="${p.id}" ${guard}>👑 Remove Admin</button>`;
+          })()
         : `<button type="button" class="secondary" data-make-admin="${p.id}">👑 Make Admin</button>`}
       ${p.role === 'admin'
         ? ''
@@ -2204,6 +2216,11 @@ async function renderTeamList() {
   list.querySelectorAll('[data-remove-admin]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (btn.disabled) return;
+      // Re-checked here (not just via the disabled attribute) so this can
+      // never fire on the protected owner account even if the button's
+      // disabled state were somehow bypassed.
+      const target = data.find((p) => p.id === btn.dataset.removeAdmin);
+      if (target?.email === PROTECTED_OWNER_EMAIL) { showToast("The account owner's admin access is protected and can't be removed."); return; }
       if (!confirm('Remove Admin from this person? They will go back to whatever Map Access has ticked for them.')) return;
       const { error: updErr } = await sb.from('profiles').update({ role: 'member' }).eq('id', btn.dataset.removeAdmin);
       if (updErr) { showToast(`Couldn't update: ${updErr.message}`); return; }
@@ -2342,88 +2359,13 @@ if ($('addLocationBtn')) {
 }
 
 // =====================================================================
-// DAILY JOB ASSIGNMENTS — admin assigns each person's job/location for a
-// date; the 6:55am reminder (server-side) reads this to tell them their
-// job for the day. Only ever shows/edits TODAY + upcoming — old ones just
-// age out of the list naturally.
-// =====================================================================
-
-let assignPeoplePopulated = false;
-
-async function populateAssignPersonPicker() {
-  const select = $('assignPerson');
-  if (!select || assignPeoplePopulated) return;
-  assignPeoplePopulated = true;
-  const { data } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
-  const people = data || [];
-  select.innerHTML = people.map(p => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
-  if (!$('assignDate').value) $('assignDate').value = new Date().toISOString().slice(0, 10);
-}
-
-async function renderAssignmentList() {
-  const list = $('assignmentList');
-  if (!list) return;
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const { data, error } = await sb
-    .from('daily_assignments')
-    .select('id, work_date, project, location, notes, assignment_type, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
-    .gte('work_date', todayKey)
-    .order('work_date', { ascending: true });
-  if (error || !data || !data.length) { list.innerHTML = '<div class="empty">No upcoming assignments yet.</div>'; return; }
-  list.innerHTML = data.map((r) => `
-    <div class="entry">
-      <span class="type-icon">${r.assignment_type === 'transportation' ? '🚕' : '🗓️'}</span>
-      <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Someone')} — ${escapeHtml(r.project || 'No job set')}</div>
-        <div class="entry-meta">${escapeHtml(r.work_date)}${r.location ? ' · ' + escapeHtml(r.location) : ''}</div>
-      </div>
-      <button type="button" class="ghost" data-assignment-id="${r.id}">✕</button>
-    </div>
-  `).join('');
-  list.querySelectorAll('[data-assignment-id]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await sb.from('daily_assignments').delete().eq('id', btn.dataset.assignmentId);
-      renderAssignmentList();
-    });
-  });
-}
-
-if ($('assignIsTransport')) {
-  $('assignIsTransport').addEventListener('change', () => {
-    const isTransport = $('assignIsTransport').checked;
-    $('assignProjectLabel').textContent = isTransport ? 'Task / arrangement' : 'Job / project';
-    $('assignProject').placeholder = isTransport ? 'e.g. Pick up 3 engineers from site' : 'e.g. Site inspection — Tower 3';
-    $('assignLocationLabel').textContent = isTransport ? 'Pickup location (optional)' : 'Location (optional)';
-  });
-}
-
-if ($('saveAssignmentBtn')) {
-  $('saveAssignmentBtn').addEventListener('click', async () => {
-    const personId = $('assignPerson').value;
-    const workDate = $('assignDate').value;
-    const project = $('assignProject').value.trim();
-    const isTransport = $('assignIsTransport')?.checked || false;
-    if (!personId || !workDate) { showToast('Pick a person and a date.'); return; }
-    if (!project) { showToast(isTransport ? 'Enter the transportation task.' : 'Enter a job/project for them.'); return; }
-    const { error } = await sb.from('daily_assignments').upsert({
-      person_id: personId, work_date: workDate, project,
-      location: $('assignLocation').value.trim() || null,
-      notes: $('assignNotes').value.trim() || null,
-      assignment_type: isTransport ? 'transportation' : 'job',
-      created_by: currentUser.id,
-    }, { onConflict: 'person_id,work_date' });
-    if (error) { showToast(`Couldn't save assignment: ${error.message}`); return; }
-    $('assignProject').value = '';
-    $('assignLocation').value = '';
-    $('assignNotes').value = '';
-    if ($('assignIsTransport')) $('assignIsTransport').checked = false;
-    $('assignProjectLabel').textContent = 'Job / project';
-    $('assignLocationLabel').textContent = 'Location (optional)';
-    renderAssignmentList();
-    showToast('Assignment saved.');
-  });
-}
-
+// (Removed: the old single-person "Job Allocation" card that lived
+// directly in the Admin tab — superseded by the full Job Allocation panel
+// under Home, which handles multi-job/multi-person draft-then-publish plus
+// Morning/Evening slots. This legacy form wrote to daily_assignments with
+// onConflict: 'person_id,work_date', which no longer matches that table's
+// current unique constraint (person_id, work_date, slot) added for Evening
+// Allocation — so it was also quietly out of date, not just redundant.)
 // =====================================================================
 // JOB ALLOCATION PANEL — draft-then-publish multi-job planner.
 //
@@ -3824,6 +3766,24 @@ function renderImportJobsResults(newJobs, alreadyExists) {
       populateJobIdDropdown();
     });
   }
+}
+
+// Data Feed quick actions — "Add or Remove Job" reuses the existing Projects
+// panel via the generic data-open wiring further down. These two need their
+// own handlers: People management lives inline in the Admin tab (not its own
+// overlay), and Rules doesn't exist yet — this is a placeholder until it's
+// specified.
+if ($('dfGoToTeamBtn')) {
+  $('dfGoToTeamBtn').addEventListener('click', () => {
+    closePanel('datafeed');
+    document.querySelector('nav.tabs [data-tab="admin"]')?.click();
+    setTimeout(() => $('teamList')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+  });
+}
+if ($('dfRulesBtn')) {
+  $('dfRulesBtn').addEventListener('click', () => {
+    showToast('Rules — coming soon. Tell me what rules you want and I\'ll build it.');
+  });
 }
 
 if ($('scanImportJobsBtn')) {
