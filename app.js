@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.80';
+const APP_VERSION = 'v3.81';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Redesigned the News Room and Quick Job Switch handles to be molded into the screen edge (like a camera-control notch), instead of floating separately off it.';
+const APP_UPDATE_NOTES = 'Job Allocation → Manage now has an ✏️ Edit button per job — reopens it in Plan & Publish with everyone already loaded, so you can change and republish instead of only deleting/removing people one by one.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -2860,7 +2860,20 @@ async function publishAllocationDraft() {
   if (!rows.length) { showToast('Tick at least one worker or assign a driver first.'); return; }
   const btn = $('allocationPublishBtn');
   btn.disabled = true; btn.textContent = 'Publishing…';
-  const { error } = await sb.from('daily_assignments').upsert(rows, { onConflict: 'person_id,work_date,slot' });
+  // Clear out whatever was previously published for exactly these job(s) on
+  // this date first, then insert the fresh set. Plain upsert alone only
+  // touches rows for people still present in the draft — if editing an
+  // already-published job removed someone (untick a worker, clear the
+  // driver), their old row would otherwise be left stranded and still show
+  // up everywhere. Delete-then-insert makes this a true full replace.
+  const jobIds = [...new Set(allocationDraftJobs.map((j) => j.jobId))];
+  const { error: clearErr } = await sb.from('daily_assignments').delete().eq('work_date', date).eq('slot', 'day').in('project', jobIds);
+  if (clearErr) {
+    showToast(`Couldn't publish: ${clearErr.message}`);
+    btn.disabled = false; btn.textContent = '🚀 Publish '; btn.appendChild($('allocationPublishCount'));
+    return;
+  }
+  const { error } = await sb.from('daily_assignments').insert(rows);
   btn.disabled = false; btn.textContent = '🚀 Publish ';
   btn.appendChild($('allocationPublishCount'));
   if (error) { showToast(`Couldn't publish: ${error.message}`); return; }
@@ -3018,12 +3031,17 @@ async function publishEveningAllocation() {
 
 // ---- MANAGE tab: view/edit/delete already-published allocations ----
 
+// Cache of the currently-shown Manage tab's rows, keyed by job id — kept so
+// tapping Edit can pull the exact same rows back into a Plan-tab draft
+// without a second round-trip.
+let manageJobsCache = new Map();
+
 async function loadManageAllocations() {
   const list = $('allocManageList');
   const date = $('allocManageDate').value;
   if (!list || !date) return;
   list.innerHTML = '<div class="empty">Loading…</div>';
-  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type, location, attendance_time').eq('work_date', date);
+  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type, location, attendance_time, is_driver').eq('work_date', date).eq('slot', 'day');
   if (error) { list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
   const rows = data || [];
   if (!rows.length) { list.innerHTML = '<div class="empty">Nothing published for this date yet.</div>'; return; }
@@ -3033,10 +3051,11 @@ async function loadManageAllocations() {
     if (!byJob.has(key)) byJob.set(key, []);
     byJob.get(key).push(r);
   });
+  manageJobsCache = byJob;
   list.innerHTML = Array.from(byJob.entries()).map(([jobId, people]) => {
     const jobInfo = jobSearchOptions.find((j) => String(j.job_id) === String(jobId));
     const workers = people.filter((r) => r.assignment_type !== 'transportation');
-    const driver = people.find((r) => r.assignment_type === 'transportation');
+    const dedicatedDriver = people.find((r) => r.assignment_type === 'transportation');
     return `
       <div class="alloc-manage-card">
         <div class="alloc-job-card-head">
@@ -3044,34 +3063,40 @@ async function loadManageAllocations() {
             <strong style="font-size:14px;">${escapeHtml(jobId)}</strong>
             <p class="hint" style="margin:2px 0 0;">${escapeHtml(jobInfo?.name || '')}</p>
           </div>
-          <button type="button" class="alloc-remove-job" data-delete-job="${escapeHtml(jobId)}">🗑 Delete this job's allocations</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="secondary" data-edit-job="${escapeHtml(jobId)}">✏️ Edit</button>
+            <button type="button" class="alloc-remove-job" data-delete-job="${escapeHtml(jobId)}">🗑 Delete this job's allocations</button>
+          </div>
         </div>
         ${workers.map((r) => `
           <div class="entry">
-            <span class="type-icon">🙂</span>
+            <span class="type-icon">${r.is_driver ? '🚗' : '🙂'}</span>
             <div class="entry-body">
-              <div class="entry-desc">${escapeHtml(allocPersonLabel(r.person_id))}</div>
+              <div class="entry-desc">${escapeHtml(allocPersonLabel(r.person_id))}${r.is_driver ? ' — also driving' : ''}</div>
               ${r.location ? `<div class="entry-meta">${escapeHtml(r.location)}</div>` : ''}
             </div>
             <input type="time" class="alloc-manage-time" data-time-person="${r.person_id}" data-time-job="${escapeHtml(jobId)}" value="${escapeHtml(r.attendance_time || '')}" title="Attendance / report time" />
             <button type="button" class="alloc-manage-remove" data-remove-person="${r.person_id}" data-remove-job="${escapeHtml(jobId)}">✕</button>
           </div>
         `).join('')}
-        ${driver ? `
+        ${dedicatedDriver ? `
           <div class="entry">
             <span class="type-icon">🚗</span>
             <div class="entry-body">
-              <div class="entry-desc">${escapeHtml(allocPersonLabel(driver.person_id))} — driver</div>
-              ${driver.location ? `<div class="entry-meta">${escapeHtml(driver.location)}</div>` : ''}
+              <div class="entry-desc">${escapeHtml(allocPersonLabel(dedicatedDriver.person_id))} — driver</div>
+              ${dedicatedDriver.location ? `<div class="entry-meta">${escapeHtml(dedicatedDriver.location)}</div>` : ''}
             </div>
-            <input type="time" class="alloc-manage-time" data-time-person="${driver.person_id}" data-time-job="${escapeHtml(jobId)}" value="${escapeHtml(driver.attendance_time || '')}" title="Attendance / report time" />
-            <button type="button" class="alloc-manage-remove" data-remove-person="${driver.person_id}" data-remove-job="${escapeHtml(jobId)}">✕</button>
+            <input type="time" class="alloc-manage-time" data-time-person="${dedicatedDriver.person_id}" data-time-job="${escapeHtml(jobId)}" value="${escapeHtml(dedicatedDriver.attendance_time || '')}" title="Attendance / report time" />
+            <button type="button" class="alloc-manage-remove" data-remove-person="${dedicatedDriver.person_id}" data-remove-job="${escapeHtml(jobId)}">✕</button>
           </div>
         ` : ''}
       </div>
     `;
   }).join('');
 
+  list.querySelectorAll('[data-edit-job]').forEach((btn) => {
+    btn.addEventListener('click', () => editPublishedJob(btn.dataset.editJob, date));
+  });
   list.querySelectorAll('[data-remove-person]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const { error: delErr } = await sb.from('daily_assignments').delete()
@@ -3097,6 +3122,45 @@ async function loadManageAllocations() {
       showToast('Deleted.');
       loadManageAllocations();
     });
+  });
+}
+
+// Pulls an already-published job's people (workers + driver) back into a
+// fresh Plan-tab draft card, so the admin/allocator can change anything —
+// add/remove workers, swap the driver, change location/time — and hit
+// Publish to save the corrected version. Nothing is touched here until
+// Publish is actually tapped; publishAllocationDraft() then clears out the
+// old rows for this exact job/date and writes the new set, so someone
+// removed from the job really disappears instead of being left stranded.
+function editPublishedJob(jobId, date) {
+  const people = manageJobsCache.get(jobId);
+  if (!people || !people.length) { showToast("Couldn't find that job's details — try refreshing."); return; }
+  if (allocationDraftJobs.some((j) => j.jobId === jobId)) {
+    showToast(`${jobId} is already open below — scroll down to it.`);
+    showAllocTab('plan');
+    return;
+  }
+  const dedicatedDriver = people.find((r) => r.assignment_type === 'transportation');
+  const dualRoleDriver = people.find((r) => r.assignment_type !== 'transportation' && r.is_driver);
+  const driverId = dedicatedDriver?.person_id || dualRoleDriver?.person_id || '';
+  const workers = new Set(people.filter((r) => r.assignment_type !== 'transportation').map((r) => r.person_id));
+  // The draft model has one shared location/time per job, but this table
+  // stores them per person (Manage tab lets each person have their own) —
+  // picking the first non-empty value as the starting point is the closest
+  // fit; re-check it once it's loaded into the draft below.
+  const location = people.find((r) => r.location)?.location || '';
+  const attendanceTime = people.find((r) => r.attendance_time)?.attendance_time || '';
+  const jobInfo = jobSearchOptions.find((j) => String(j.job_id) === String(jobId));
+
+  allocationDraftJobs.push({
+    idx: allocDraftIdxCounter++, jobId, jobName: jobInfo?.name || '',
+    location, attendanceTime, driverId, workers,
+  });
+  $('allocationDate').value = date;
+  loadAllocationPublishedForDate().then(() => {
+    renderAllocationDraft();
+    showAllocTab('plan');
+    showToast(`Loaded ${jobId} for editing — make your changes below and tap Publish.`);
   });
 }
 
