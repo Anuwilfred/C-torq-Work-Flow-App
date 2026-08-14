@@ -1075,43 +1075,46 @@ button.ghost:hover { color: var(--text); }
 }
 
 /* ---------- News Room — left-edge pull handle + sliding drawer ----------
-   Same rounded-square glass "app icon" look as the Home tile icons (and the
-   header's admin-corner-btn), just floating near the left edge instead of
-   sitting in the grid — not the old half-pill tab clipped flush to the
-   edge, which read as much smaller/different from everything else. */
+   Molded INTO the screen's edge, like a camera-control notch built into a
+   phone's frame — flush against the true edge (not floating a few pixels
+   off it), rounded only on the side facing into the screen so it reads as
+   part of the border itself. Same glass gradient/glow language as the Home
+   tile icons and header buttons, just shaped for its edge position instead
+   of being a plain floating square. */
 .news-handle {
   position: fixed;
-  left: 10px;
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 60px;
-  height: 60px;
-  border-radius: 20px;
+  width: 34px;
+  height: 92px;
+  border-radius: 0 24px 24px 0;
   border: 1.5px solid rgba(0, 161, 156, 0.5);
+  border-left: none;
   background: linear-gradient(160deg, rgba(76, 189, 185, 0.22), rgba(0, 112, 109, 0.12));
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   color: var(--text);
-  font-size: 27px;
+  font-size: 24px;
   cursor: pointer;
   z-index: 58;
-  box-shadow: 0 6px 16px rgba(0, 161, 156, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: 4px 0 16px rgba(0, 161, 156, 0.25), inset 1px 0 0 rgba(255, 255, 255, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+  transition: width 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
 }
 .news-handle:hover {
-  transform: translateY(-50%) translateY(-2px) scale(1.05);
-  box-shadow: 0 10px 22px rgba(0, 161, 156, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  width: 40px;
+  box-shadow: 6px 0 20px rgba(0, 161, 156, 0.4), inset 1px 0 0 rgba(255, 255, 255, 0.3);
 }
 .news-handle-dot {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 14px;
-  height: 14px;
+  top: 10px;
+  right: 6px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   border: 2px solid var(--bg-0);
   background: var(--err);
@@ -1255,43 +1258,54 @@ button.ghost:hover { color: var(--text); }
    accent orange so it reads as its own thing at a glance. ---------- */
 .qsr-handle {
   position: fixed;
-  right: 10px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 60px;
-  height: 60px;
-  border-radius: 20px;
+  width: 34px;
+  height: 92px;
+  border-radius: 24px 0 0 24px;
   border: 1.5px solid rgba(224, 160, 90, 0.5);
+  border-right: none;
   background: linear-gradient(160deg, rgba(224, 138, 95, 0.22), rgba(204, 120, 92, 0.12));
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   color: var(--text);
-  font-size: 27px;
+  font-size: 24px;
   cursor: pointer;
   z-index: 58;
-  box-shadow: 0 6px 16px rgba(224, 138, 95, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: -4px 0 16px rgba(224, 138, 95, 0.3), inset -1px 0 0 rgba(255, 255, 255, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+  transition: width 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
 }
 .qsr-handle:hover {
-  transform: translateY(-50%) translateY(-2px) scale(1.05);
-  box-shadow: 0 10px 22px rgba(224, 138, 95, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  width: 40px;
+  box-shadow: -6px 0 20px rgba(224, 138, 95, 0.45), inset -1px 0 0 rgba(255, 255, 255, 0.3);
 }
 
 @media (max-width: 420px) {
   /* On phones, dock the handle to the bottom-center instead of the right
-     edge — easier to reach with a thumb and doesn't crowd the side. */
+     edge — not attached to any screen edge here, so it goes back to a
+     fully-rounded floating shape rather than the notched edge look. */
   .qsr-handle {
     right: auto;
     left: 50%;
     top: auto;
     bottom: 128px;
     transform: translateX(-50%);
+    width: 60px;
+    height: 60px;
+    border-radius: 20px;
+    border-right: 1.5px solid rgba(224, 160, 90, 0.5);
+    box-shadow: 0 6px 16px rgba(224, 138, 95, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
-  .qsr-handle:hover { transform: translateX(-50%) translateY(-2px) scale(1.05); }
+  .qsr-handle:hover {
+    width: 60px;
+    transform: translateX(-50%) translateY(-2px) scale(1.05);
+    box-shadow: 0 10px 22px rgba(224, 138, 95, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
 }
 
 .qsr-drawer {

@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.79';
+const APP_VERSION = 'v3.80';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Job Allocation: the driver dropdown now always lists everyone — instead of hiding people used elsewhere that day, it shows a note on where else they are assigned so you can judge for yourself if the times actually clash.';
+const APP_UPDATE_NOTES = 'Redesigned the News Room and Quick Job Switch handles to be molded into the screen edge (like a camera-control notch), instead of floating separately off it.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
