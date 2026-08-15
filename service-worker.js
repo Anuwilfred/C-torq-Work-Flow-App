@@ -1,6 +1,9 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.81';
+const CACHE_NAME = 'ctorq-workflow-v3.82';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
+// Resumable/chunked uploads for larger chat attachments (photos/videos) —
+// see the TUS_UPLOAD block in app.js for how this is used.
+const TUS_SDK_URL = 'https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js';
 
 // RELIABILITY FIX #3: an installed app (tapped from the home screen / Start
 // Menu icon) opens through this service worker on every single launch, not
@@ -25,6 +28,7 @@ const STATIC_ASSETS = [
   './icon-512.png',
   './notify.mp3',
   SUPABASE_SDK_URL,
+  TUS_SDK_URL,
 ];
 
 async function cacheEach(cache, urls) {
@@ -56,8 +60,8 @@ self.addEventListener('fetch', (event) => {
   const reqUrl = event.request.url;
   const url = new URL(reqUrl);
   const isAppShell = url.origin === self.location.origin;
-  const isSupabaseSdk = reqUrl === SUPABASE_SDK_URL;
-  if (!isAppShell && !isSupabaseSdk) return; // don't touch Supabase auth/API/Edge Function calls
+  const isThirdPartySdk = reqUrl === SUPABASE_SDK_URL || reqUrl === TUS_SDK_URL;
+  if (!isAppShell && !isThirdPartySdk) return; // don't touch Supabase auth/API/Edge Function calls, or the large-file upload traffic itself
 
   const isStatic = STATIC_ASSETS.some((a) => reqUrl === a || reqUrl.endsWith(a.replace('./', '')));
 

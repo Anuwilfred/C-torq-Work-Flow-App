@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.81';
+const APP_VERSION = 'v3.82';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Job Allocation → Manage now has an ✏️ Edit button per job — reopens it in Plan & Publish with everyone already loaded, so you can change and republish instead of only deleting/removing people one by one.';
+const APP_UPDATE_NOTES = 'Team Chat can now send much larger photos/videos (up to 50MB) with an upload progress indicator, instead of failing on anything past a few MB.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -5057,14 +5057,30 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---------- Sending messages ----------
+// Free-tier Supabase Storage hard-caps every single upload at 50MB, project-
+// wide, regardless of any bucket setting — so this is checked client-side
+// up front with a clear message, rather than letting a big file fail late
+// with a confusing storage error. If you ever move to a paid plan and raise
+// the bucket's file_size_limit, raise this number to match.
+const MAX_CHAT_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+// Supabase's own guidance: plain upload() is fine under ~6MB; above that,
+// use resumable (TUS) uploads so a dropped connection can pick back up
+// instead of failing outright and making the person start over.
+const TUS_CHUNK_THRESHOLD_BYTES = 6 * 1024 * 1024;
+
 $('chatAttachBtn').addEventListener('click', () => $('chatFileInput').click());
 $('chatFileInput').addEventListener('change', () => {
   const file = $('chatFileInput').files[0];
   if (!file) return;
+  if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
+    showToast(`That file is ${(file.size / (1024 * 1024)).toFixed(1)}MB — the largest file this app can send right now is 50MB.`);
+    $('chatFileInput').value = '';
+    return;
+  }
   pendingChatAttachment = file;
   const preview = $('chatAttachPreview');
   preview.style.display = 'flex';
-  preview.innerHTML = `📎 ${escapeHtml(file.name)} <button type="button" id="chatAttachRemoveBtn">✕</button>`;
+  preview.innerHTML = `📎 ${escapeHtml(file.name)} (${(file.size / (1024 * 1024)).toFixed(1)}MB) <button type="button" id="chatAttachRemoveBtn">✕</button>`;
   $('chatAttachRemoveBtn').addEventListener('click', () => {
     pendingChatAttachment = null;
     $('chatFileInput').value = '';
@@ -5079,6 +5095,53 @@ function withTimeout(promise, ms, label) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out — check your connection and try again`)), ms)),
   ]);
+}
+
+// Resumable (TUS) upload for larger chat attachments (photos/videos over the
+// ~6MB "safe zone" for a plain upload()). Uploads in fixed 6MB chunks — that
+// exact size is required by Supabase's resumable endpoint — and can resume
+// a dropped upload instead of restarting from zero on a shaky connection.
+// onProgress(fraction) is called repeatedly with a 0–1 value for UI feedback.
+function uploadChatAttachmentResumable(file, path, accessToken, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (!window.tus) {
+      reject(new Error('Large-file upload support failed to load — fully close and reopen the app, then try again.'));
+      return;
+    }
+    let projectRef;
+    try {
+      projectRef = new URL(window.CTORQ_CONFIG.SUPABASE_URL).hostname.split('.')[0];
+    } catch {
+      reject(new Error('Missing Supabase configuration for large-file upload.'));
+      return;
+    }
+    const upload = new window.tus.Upload(file, {
+      endpoint: `https://${projectRef}.storage.supabase.co/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        apikey: window.CTORQ_CONFIG.SUPABASE_ANON_KEY,
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      metadata: {
+        bucketName: 'chat-attachments',
+        objectName: path,
+        contentType: file.type || 'application/octet-stream',
+        cacheControl: '3600',
+      },
+      chunkSize: 6 * 1024 * 1024, // required exact value for Supabase's resumable endpoint
+      onError: (error) => reject(error),
+      onProgress: (bytesUploaded, bytesTotal) => {
+        if (onProgress) onProgress(bytesUploaded / bytesTotal);
+      },
+      onSuccess: () => resolve(),
+    });
+    upload.findPreviousUploads().then((previousUploads) => {
+      if (previousUploads.length) upload.resumeFromPreviousUpload(previousUploads[0]);
+      upload.start();
+    }).catch(reject);
+  });
 }
 
 // Photos straight from a phone camera can be several MB, which stalls on
@@ -5122,12 +5185,25 @@ async function sendChatMessage() {
       const file = await compressImageIfNeeded(pendingChatAttachment);
       const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
       const path = `${activeChatId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${safeName}`;
-      const { error: upErr } = await withTimeout(
-        sb.storage.from('chat-attachments').upload(path, file),
-        25000,
-        'Upload'
-      );
-      if (upErr) throw upErr;
+
+      if (file.size > TUS_CHUNK_THRESHOLD_BYTES) {
+        // Larger file (video, uncompressed photo, PDF, etc.) — use resumable
+        // chunked upload with visible progress instead of a single request
+        // that either succeeds or fails silently on a weak connection.
+        const { data: { session } } = await getSessionSafe();
+        if (!session?.access_token) throw new Error('Not signed in — please sign out and back in.');
+        sendBtn.textContent = 'Uploading… 0%';
+        await uploadChatAttachmentResumable(file, path, session.access_token, (fraction) => {
+          sendBtn.textContent = `Uploading… ${Math.round(fraction * 100)}%`;
+        });
+      } else {
+        const { error: upErr } = await withTimeout(
+          sb.storage.from('chat-attachments').upload(path, file),
+          25000,
+          'Upload'
+        );
+        if (upErr) throw upErr;
+      }
       attachment_path = path;
       attachment_name = file.name;
       attachment_mime = file.type || 'application/octet-stream';
