@@ -117,6 +117,10 @@
           <span class="home-tile-icon">🗂️</span>
           <span class="home-tile-label">My Jobs</span>
         </button>
+        <button type="button" class="home-tile" data-open="liveDrivers" data-feature="liveDrivers">
+          <span class="home-tile-icon">🚗</span>
+          <span class="home-tile-label">Live Drivers</span>
+        </button>
         <button type="button" class="home-tile" data-open="departments" data-feature="departments">
           <span class="home-tile-icon home-tile-icon-departments">🏢</span>
           <span class="home-tile-label">Departments</span>
@@ -206,6 +210,7 @@
             <div id="modeGrid" class="mode-grid">
               <div class="mode-chip" data-mode="office"><span class="emoji">🏢</span>Office</div>
               <div class="mode-chip" data-mode="site"><span class="emoji">🏗️</span>Site</div>
+              <div class="mode-chip" data-mode="workshop"><span class="emoji">🔧</span>Workshop</div>
               <div class="mode-chip" data-mode="driver"><span class="emoji">🚗</span>Driver</div>
               <div class="mode-chip" data-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
               <div class="mode-chip" data-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
@@ -305,18 +310,27 @@
 
           <!-- ===== DAILY PROGRESS / PROJECT REPORT FIELDS ===== -->
           <div id="simpleBlock">
+            <label for="jobIdSimple">Job ID (optional)</label>
+            <div class="job-search-wrap" style="position:relative;">
+              <input id="jobIdSimple" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+              <div id="jobIdSimpleResults" class="job-search-results" style="display:none;"></div>
+            </div>
+
             <label for="projectSimple">Project</label>
             <input id="projectSimple" type="text" placeholder="e.g. Website Redesign" />
 
             <label for="dateSimple">Date</label>
             <input id="dateSimple" type="date" />
 
+            <label for="timeSimple">Time</label>
+            <input id="timeSimple" type="time" />
+
             <label for="descriptionSimple">Description / Notes</label>
             <textarea id="descriptionSimple" placeholder="What did you work on?"></textarea>
 
-            <label for="filesSimple">Attachments (PDF or images, multiple allowed)</label>
-            <input id="filesSimple" type="file" accept="application/pdf,image/*" multiple />
-            <p class="hint">Keep files reasonably small — large uploads take longer to sync.</p>
+            <label for="filesSimple">Attachments (photo, video, PDF, or zip — up to 50MB each)</label>
+            <input id="filesSimple" type="file" accept="application/pdf,image/*,video/*,.zip,application/zip,application/x-zip-compressed" multiple />
+            <p class="hint">Larger files (over ~6MB) upload in the background with a progress notice — just keep the app open until the queue finishes syncing.</p>
           </div>
 
           <button type="button" id="reviewBtn" class="primary">Review &amp; Submit</button>
@@ -528,6 +542,7 @@
     <label style="margin-top:14px;">Mode of work</label>
     <div class="mode-grid" id="qsrModeGrid" style="max-height:none;">
       <div class="qsr-mode-chip selected" data-qsr-mode="site"><span class="emoji">🏗️</span>Site</div>
+      <div class="qsr-mode-chip" data-qsr-mode="workshop"><span class="emoji">🔧</span>Workshop</div>
       <div class="qsr-mode-chip" data-qsr-mode="office"><span class="emoji">🏢</span>Office</div>
       <div class="qsr-mode-chip" data-qsr-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
       <div class="qsr-mode-chip" data-qsr-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
@@ -646,16 +661,7 @@
         <input id="newProjectJobId" type="text" placeholder="e.g. JOB-1042" />
         <label for="newProjectName">Name (optional)</label>
         <input id="newProjectName" type="text" placeholder="e.g. Tower 3 site inspection" />
-        <div class="row-2" style="margin-top:6px;">
-          <div>
-            <label for="newProjectEngHours">Engineer hours</label>
-            <input id="newProjectEngHours" type="number" min="0" step="0.5" placeholder="0" />
-          </div>
-          <div>
-            <label for="newProjectTechHours">Technician hours</label>
-            <input id="newProjectTechHours" type="number" min="0" step="0.5" placeholder="0" />
-          </div>
-        </div>
+        <p class="hint" style="margin-top:6px;">Set each department's hour budget after creating the project, from its detail screen.</p>
         <button id="createProjectBtn" class="primary" style="margin-top:12px;">Create project</button>
       </div>
 
@@ -675,6 +681,19 @@
     </div>
     <div class="panel-body">
       <div id="projectRingsArea"></div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Department hours</strong>
+        <p class="hint" style="margin-top:4px;">Each department's hour budget for this project — hours a person logs count toward whichever department they belong to (Admin → Team).</p>
+        <div id="deptHoursListArea" style="margin-top:12px;"></div>
+        <div id="newDeptHoursCard" style="display:none; margin-top:14px;">
+          <div class="section-divider"></div>
+          <label for="deptHoursSelect">Department</label>
+          <select id="deptHoursSelect"></select>
+          <label for="deptHoursValue" style="margin-top:6px;">Allocated hours</label>
+          <input id="deptHoursValue" type="number" min="0" step="0.5" placeholder="0" />
+          <button type="button" id="addDeptHoursBtn" class="primary" style="margin-top:12px;">Set hours</button>
+        </div>
+      </div>
       <div id="projectStageArea" style="margin-top:16px;"></div>
       <div class="card glass" style="margin-top:16px;">
         <strong style="font-size:14px;">Bill of Quantities</strong>
@@ -907,6 +926,26 @@
     </div>
     <div class="panel-body">
       <div id="myJobsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- LIVE DRIVERS OVERLAY — where each person with the "Driver" role last
+     showed up while the app was open. Not true background tracking (a
+     browser/PWA can't do that while fully closed) — location only updates
+     while a driver's app is open in the foreground. -->
+<div id="liveDriversOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="liveDriversOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🚗 Live Drivers</strong>
+      <button type="button" class="ghost" data-close="liveDrivers">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Last known location while each driver's app was open — not a continuous live feed.</p>
+      <button type="button" class="secondary" id="refreshLiveDriversBtn" style="margin-top:8px;">🔄 Refresh</button>
+      <div id="liveDriversMapArea" style="margin-top:12px;"></div>
+      <div id="liveDriversList" style="margin-top:12px;"></div>
     </div>
   </div>
 </div>

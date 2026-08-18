@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.82';
+const APP_VERSION = 'v3.85';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Team Chat can now send much larger photos/videos (up to 50MB) with an upload progress indicator, instead of failing on anything past a few MB.';
+const APP_UPDATE_NOTES = 'AEON Ai replies now sound fully human when spoken aloud — no more reading out symbols like asterisks, slashes, or parentheses.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -99,7 +99,7 @@ let selectedMode = null; // mode-of-work chip currently selected
 
 const LEAVE_MODES = ['sick_leave', 'holiday', 'emergency_leave'];
 const MODE_LABEL = {
-  office: 'Office', site: 'Site', driver: 'Driver', wfh: 'Work from Home',
+  office: 'Office', site: 'Site', workshop: 'Workshop', driver: 'Driver', wfh: 'Work from Home',
   exhibition: 'Exhibition', inspection: 'Inspection', field_work: 'Field Work', other: 'Other',
   sick_leave: 'Sick Leave', holiday: 'Holiday', emergency_leave: 'Emergency Leave'
 };
@@ -824,6 +824,109 @@ function fetchAndFillLocation(opts = {}) {
 }
 $('fetchLocationBtn').addEventListener('click', () => fetchAndFillLocation());
 
+// =====================================================================
+// LIVE DRIVERS — anyone with a Role named "Driver" has their location
+// captured every couple of minutes WHILE THEIR APP IS OPEN, so the rest of
+// the team can see roughly where each driver currently is. IMPORTANT
+// HONESTY NOTE: this is not true background tracking — a browser/PWA
+// cannot capture location while fully closed (this is an OS-level
+// restriction on both iOS and Android, not something this app can work
+// around). A driver's dot only updates while they actually have the app
+// open in the foreground; if they close it, their last-known location just
+// sits there until they reopen it.
+// =====================================================================
+
+let driverLocationIntervalId = null;
+const DRIVER_LOCATION_INTERVAL_MS = 2 * 60 * 1000; // every 2 minutes while open
+
+async function isCurrentUserDriverRole() {
+  if (!currentProfile?.role_id) return false;
+  try {
+    const roles = await fetchRoles();
+    const match = roles.find((r) => r.id === currentProfile.role_id);
+    return !!match && String(match.name || '').trim().toLowerCase() === 'driver';
+  } catch {
+    return false;
+  }
+}
+
+async function updateMyDriverLocation() {
+  const r = await fetchAndFillLocation({ silent: true, fillField: false });
+  if (!r.ok) return;
+  await sb.from('driver_locations').upsert({
+    person_id: currentUser.id,
+    lat: r.lat,
+    lng: r.lng,
+    address: r.address,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'person_id' });
+}
+
+async function startDriverLocationLoopIfNeeded() {
+  if (driverLocationIntervalId) return; // already running
+  const isDriver = await isCurrentUserDriverRole();
+  if (!isDriver || !navigator.geolocation) return;
+  updateMyDriverLocation();
+  driverLocationIntervalId = setInterval(updateMyDriverLocation, DRIVER_LOCATION_INTERVAL_MS);
+}
+
+function minutesAgoLabel(iso) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins === 1) return '1 minute ago';
+  if (mins < 60) return `${mins} minutes ago`;
+  const hrs = Math.round(mins / 60);
+  return hrs === 1 ? '1 hour ago' : `${hrs} hours ago`;
+}
+
+// One combined map with every driver pinned on it at once — refreshed each
+// time this panel opens or Refresh is tapped. Not a moving live feed (it's
+// a static image), but it shows everyone's last-known spot together on one
+// map instead of only separate per-driver thumbnails.
+function combinedDriverMapUrl(points, size = '640x280') {
+  if (!points.length) return '';
+  // Center on the average position so every pin fits reasonably on screen.
+  const avgLat = points.reduce((s, p) => s + p.lat, 0) / points.length;
+  const avgLng = points.reduce((s, p) => s + p.lng, 0) / points.length;
+  const markers = points.map((p) => `${p.lat},${p.lng},red-dot`).join('|');
+  const zoom = points.length > 1 ? 11 : 15;
+  return `https://staticmap.openstreetmap.de/staticmap.php?center=${avgLat},${avgLng}&zoom=${zoom}&size=${size}&maptype=mapnik&markers=${markers}`;
+}
+
+async function renderLiveDrivers() {
+  const wrap = $('liveDriversList');
+  const mapWrap = $('liveDriversMapArea');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  if (mapWrap) mapWrap.innerHTML = '';
+  const { data, error } = await sb
+    .from('driver_locations')
+    .select('person_id, lat, lng, address, updated_at, profiles(full_name, email)')
+    .order('updated_at', { ascending: false });
+  if (error) {
+    wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  if (!data || !data.length) {
+    wrap.innerHTML = '<div class="empty">No driver locations yet — a driver needs to open the app at least once with location access allowed. (Make sure at least one person has the "Driver" role set in Admin → Team.)</div>';
+    return;
+  }
+  if (mapWrap) {
+    mapWrap.innerHTML = `<img src="${combinedDriverMapUrl(data)}" onerror="this.style.display='none'" alt="All drivers map" style="width:100%; border-radius:14px; display:block;" />`;
+  }
+  wrap.innerHTML = data.map((d) => `
+    <div class="entry">
+      <span class="type-icon">🚗</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(d.profiles?.full_name || d.profiles?.email || 'Driver')}</div>
+        <div class="entry-meta">${escapeHtml(d.address || `${d.lat}, ${d.lng}`)} · ${minutesAgoLabel(d.updated_at)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+if ($('refreshLiveDriversBtn')) $('refreshLiveDriversBtn').addEventListener('click', renderLiveDrivers);
+
 // ---------- File -> base64 helpers ----------
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -952,6 +1055,16 @@ async function buildDraftFromForm() {
       }
     }
 
+    // Break In / Break Out — the actual clock times (local "HH:MM", same
+    // format as Start/End Time) of the first break started and the last
+    // break ended today, not just a duration — for the Time Entry sheet's
+    // own Break In / Break Out columns. A person who never took a break
+    // simply has both blank.
+    const firstBreak = Array.isArray(clk.breaks) && clk.breaks.length ? clk.breaks[0] : null;
+    const lastBreak = Array.isArray(clk.breaks) && clk.breaks.length ? clk.breaks[clk.breaks.length - 1] : null;
+    const breakStart = firstBreak?.start ? toTimeInputValue(firstBreak.start) : null;
+    const breakEnd = lastBreak?.end ? toTimeInputValue(lastBreak.end) : null;
+
     return {
       ...base,
       category: 'timesheet',
@@ -966,6 +1079,8 @@ async function buildDraftFromForm() {
       lunchMinutes: lunchMinutesRaw + qsrDeductedMinutes,
       lunchMinutesRaw,
       qsrDeductedMinutes,
+      breakStart,
+      breakEnd,
       description: $('workNotes').value.trim(),
       clockInLocation: clk.clockInLocation || null,
       clockInLat: clk.clockInLat ?? null,
@@ -985,8 +1100,10 @@ async function buildDraftFromForm() {
   return {
     ...base,
     category: type === 'progress' ? 'daily-progress' : 'project-report',
+    jobId: $('jobIdSimple') && $('jobIdSimple').value.trim() ? $('jobIdSimple').value.trim() : null,
     project: $('projectSimple').value.trim(),
     date: $('dateSimple').value,
+    time: $('timeSimple') && $('timeSimple').value ? $('timeSimple').value : null,
     description: $('descriptionSimple').value.trim(),
     attachments: await filesToAttachments($('filesSimple').files)
   };
@@ -1378,6 +1495,7 @@ async function enterApp(knownUser) {
 
   renderQueue();
   syncQueue();
+  startDriverLocationLoopIfNeeded();
  } catch (err) {
   // Anything unexpected here (a Supabase error, a network hiccup loading
   // the profile, anything at all) used to leave the page permanently
@@ -1694,6 +1812,50 @@ if ($('jobId')) {
     // Covers a Job ID typed out fully by hand (no result tapped) — still
     // auto-fills Project if it's a real, known job.
     autoFillProjectFromJobId($('jobId').value.trim());
+  });
+}
+
+// Same searchable Job ID box, reused on the Daily Progress / Project Report
+// form (jobIdSimple) — kept separate from jobId above since the two forms
+// aren't visible at the same time but share the same jobSearchOptions cache.
+function renderJobSearchResultsSimple(matches) {
+  const box = $('jobIdSimpleResults');
+  if (!box) return;
+  if (!matches.length) {
+    box.innerHTML = '<div class="job-search-empty">No matching job found — you can still type a Job ID manually.</div>';
+  } else {
+    box.innerHTML = matches.slice(0, 8).map((r) => `
+      <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
+        <div class="jid">${escapeHtml(r.job_id)}</div>
+        <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
+      </div>
+    `).join('');
+  }
+  box.style.display = 'block';
+  box.querySelectorAll('.job-search-item[data-job-id]').forEach((item) => {
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('jobIdSimple').value = item.dataset.jobId;
+      const jobMatch = jobSearchOptions.find((r) => r.job_id === item.dataset.jobId);
+      if ($('projectSimple') && !$('projectSimple').value.trim()) $('projectSimple').value = jobMatch?.name || item.dataset.jobId;
+      box.style.display = 'none';
+    });
+  });
+}
+if ($('jobIdSimple')) {
+  $('jobIdSimple').addEventListener('input', () => {
+    const q = $('jobIdSimple').value.trim().toLowerCase();
+    if (!q) { $('jobIdSimpleResults').style.display = 'none'; return; }
+    const matches = jobSearchOptions.filter((r) =>
+      String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
+    );
+    renderJobSearchResultsSimple(matches);
+  });
+  $('jobIdSimple').addEventListener('focus', () => {
+    if ($('jobIdSimple').value.trim()) $('jobIdSimple').dispatchEvent(new Event('input'));
+  });
+  $('jobIdSimple').addEventListener('blur', () => {
+    setTimeout(() => { if ($('jobIdSimpleResults')) $('jobIdSimpleResults').style.display = 'none'; }, 150);
   });
 }
 
@@ -2120,6 +2282,7 @@ const FEATURE_LIST = [
   { key: 'tank', label: 'Project Tank' },
   { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
   { key: 'datafeed', label: 'Data Feed (add jobs from pasted WhatsApp messages)' },
+  { key: 'liveDrivers', label: 'Live Drivers (see driver locations)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -3348,10 +3511,12 @@ const PANEL_IDS = {
   entryDetail: ['entryDetailOverlay', 'entryDetailOverlayBackdrop'],
   datafeed: ['dataFeedOverlay', 'dataFeedOverlayBackdrop'],
   recalledEdit: ['recalledEditOverlay', 'recalledEditOverlayBackdrop'],
+  liveDrivers: ['liveDriversOverlay', 'liveDriversOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
   if (!ids) return;
+  if (name === 'liveDrivers') renderLiveDrivers();
   $(ids[0]).classList.add('show');
   $(ids[1]).classList.add('show');
   if (name === 'projects') {
@@ -3887,7 +4052,7 @@ async function fetchProjects() {
   try {
     const { data, error } = await sb
       .from('projects')
-      .select('job_id, name, allocated_hours_engineer, allocated_hours_technician, status, received_date')
+      .select('job_id, name, status, received_date')
       .order('created_at', { ascending: false });
     if (error) { console.error('fetchProjects failed:', error); return { rows: [], error }; }
     return { rows: data || [], error: null };
@@ -3919,7 +4084,7 @@ async function renderProjectsList(isRetry = false) {
       <span class="type-icon">📁</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
-        <div class="entry-meta">${r.received_date ? escapeHtml(r.received_date) + ' · ' : ''}Engineer: ${r.allocated_hours_engineer}h · Technician: ${r.allocated_hours_technician}h</div>
+        ${r.received_date ? `<div class="entry-meta">${escapeHtml(r.received_date)}</div>` : ''}
       </div>
       ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
     </div>
@@ -3944,19 +4109,14 @@ if ($('createProjectBtn')) {
   $('createProjectBtn').addEventListener('click', async () => {
     const jobId = $('newProjectJobId').value.trim();
     const name = $('newProjectName').value.trim();
-    const eng = parseFloat($('newProjectEngHours').value) || 0;
-    const tech = parseFloat($('newProjectTechHours').value) || 0;
     if (!jobId) { showToast('Enter a Job ID.'); return; }
     const { error } = await sb.from('projects').insert({
       job_id: jobId, name: name || null,
-      allocated_hours_engineer: eng, allocated_hours_technician: tech,
       created_by: currentUser.id,
     });
     if (error) { showToast(`Couldn't create project: ${error.message}`); return; }
     $('newProjectJobId').value = '';
     $('newProjectName').value = '';
-    $('newProjectEngHours').value = '';
-    $('newProjectTechHours').value = '';
     renderProjectsList();
     populateJobIdDropdown();
     showToast('Project created.');
@@ -4010,8 +4170,6 @@ function renderImportJobsResults(newJobs, alreadyExists) {
         name: j.description || null,
         client: j.client || null,
         received_date: j.date || null,
-        allocated_hours_engineer: 0,
-        allocated_hours_technician: 0,
         created_by: currentUser.id,
       }));
       const { error } = await sb.from('projects').insert(rowsToInsert);
@@ -4125,20 +4283,18 @@ function renderProjectContributors(data) {
   // for this project (capped at 100%) -- not relative to other contributors.
   // Relative-to-max was wrong: with a single contributor it always came out
   // to 100%, making the bar look "full" even at 1 of 40 hours.
-  const allocatedForRole = {
-    engineer: Number(data.project?.allocatedEngineer) || 0,
-    technician: Number(data.project?.allocatedTechnician) || 0,
-  };
+  const allocatedByDept = {};
+  (data.project?.departments || []).forEach((d) => { allocatedByDept[d.id] = Number(d.allocatedHours) || 0; });
   const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
   wrap.innerHTML = contributors.map((c) => {
-    const allocated = allocatedForRole[c.position];
+    const allocated = allocatedByDept[c.departmentId] || 0;
     const pct = allocated > 0
       ? Math.min(Math.round((c.hours / allocated) * 100), 100)
       : Math.round((c.hours / maxHours) * 100);
     return `
     <div class="contrib-row">
       <div class="contrib-top">
-        <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${POSITION_LABEL[c.position] || c.position}</span></span>
+        <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(c.departmentName)}</span></span>
         <span class="contrib-hours">${c.hours}h</span>
       </div>
       <div class="contrib-bar-track"><div class="contrib-bar-fill" style="width:${pct}%"></div></div>
@@ -4291,6 +4447,7 @@ async function openProjectDetail(jobId, name) {
   $('projectStageArea').innerHTML = '';
   $('boqListArea').innerHTML = '';
   $('boqTotalRow').innerHTML = '';
+  $('deptHoursListArea').innerHTML = '';
   openPanel('projectDetail');
   populateShareGroupPicker();
   renderProjectStages(jobId);
@@ -4305,8 +4462,65 @@ async function openProjectDetail(jobId, name) {
     return;
   }
   currentProjectReport = data;
-  $('projectRingsArea').innerHTML = `<div class="project-rings">${ringCard('Engineer', data.totals.engineerHours, data.project.allocatedEngineer)}${ringCard('Technician', data.totals.technicianHours, data.project.allocatedTechnician)}</div>`;
+  const departments = data.project.departments || [];
+  $('projectRingsArea').innerHTML = departments.length
+    ? `<div class="project-rings">${departments.map((d) => ringCard(d.name, d.usedHours, d.allocatedHours)).join('')}</div>`
+    : '<div class="empty">No department hours logged or allocated yet.</div>';
   renderProjectContributors(data);
+  renderDeptHoursManager(jobId, departments);
+}
+
+// ---------- Department hours — admin sets an hour budget PER DEPARTMENT for
+// this project (replaces the old fixed Engineer/Technician split). Same
+// add/list/delete pattern as BOQ items below. ----------
+async function renderDeptHoursManager(jobId, departments) {
+  const isAdmin = currentProfile?.role === 'admin';
+  $('newDeptHoursCard').style.display = isAdmin ? 'block' : 'none';
+
+  const { rows: allDepartments } = await fetchDepartments();
+  const select = $('deptHoursSelect');
+  if (select) {
+    select.innerHTML = allDepartments.map((d) => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('')
+      || '<option value="">No departments yet — add one from Admin → Team → Departments</option>';
+  }
+
+  const list = $('deptHoursListArea');
+  const withAllocation = departments.filter((d) => d.allocatedHours > 0);
+  if (!withAllocation.length) {
+    list.innerHTML = '<div class="empty">No department hours set yet.</div>';
+  } else {
+    list.innerHTML = withAllocation.map((d) => `
+      <div class="entry" data-dept-hours-row="${escapeHtml(d.id)}">
+        <div class="entry-body">
+          <div class="entry-desc">${escapeHtml(d.name)}</div>
+          <div class="entry-meta">${d.allocatedHours}h allocated · ${d.usedHours}h used</div>
+        </div>
+        ${isAdmin ? `<button type="button" class="ghost" data-delete-dept-hours="${escapeHtml(d.id)}">✕</button>` : ''}
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-delete-dept-hours]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await sb.from('project_department_hours').delete().eq('job_id', jobId).eq('department_id', btn.dataset.deleteDeptHours);
+        openProjectDetail(jobId, currentProjectReport?.project?.name || null);
+      });
+    });
+  }
+}
+
+if ($('addDeptHoursBtn')) {
+  $('addDeptHoursBtn').addEventListener('click', async () => {
+    const jobId = currentProjectJobId;
+    if (!jobId) return;
+    const departmentId = $('deptHoursSelect').value;
+    if (!departmentId) { showToast('Pick a department first.'); return; }
+    const hours = parseFloat($('deptHoursValue').value) || 0;
+    const { error } = await sb.from('project_department_hours')
+      .upsert({ job_id: jobId, department_id: departmentId, allocated_hours: hours, created_by: currentUser.id }, { onConflict: 'job_id,department_id' });
+    if (error) { showToast(`Couldn't set hours: ${error.message}`); return; }
+    $('deptHoursValue').value = '';
+    showToast('Department hours updated.');
+    openProjectDetail(jobId, currentProjectReport?.project?.name || null);
+  });
 }
 
 // ---------- Bill of Quantities (BOQ) — itemized rows per project ----------
@@ -5097,12 +5311,14 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-// Resumable (TUS) upload for larger chat attachments (photos/videos over the
-// ~6MB "safe zone" for a plain upload()). Uploads in fixed 6MB chunks — that
+// Resumable (TUS) upload for larger files (photos/videos/zips over the ~6MB
+// "safe zone" for a plain upload()). Uploads in fixed 6MB chunks — that
 // exact size is required by Supabase's resumable endpoint — and can resume
 // a dropped upload instead of restarting from zero on a shaky connection.
+// Shared by Team Chat attachments AND Daily Progress / Project Report
+// attachments — only the bucket differs.
 // onProgress(fraction) is called repeatedly with a 0–1 value for UI feedback.
-function uploadChatAttachmentResumable(file, path, accessToken, onProgress) {
+function uploadFileResumable(file, bucket, path, accessToken, onProgress) {
   return new Promise((resolve, reject) => {
     if (!window.tus) {
       reject(new Error('Large-file upload support failed to load — fully close and reopen the app, then try again.'));
@@ -5125,9 +5341,9 @@ function uploadChatAttachmentResumable(file, path, accessToken, onProgress) {
       uploadDataDuringCreation: true,
       removeFingerprintOnSuccess: true,
       metadata: {
-        bucketName: 'chat-attachments',
+        bucketName: bucket,
         objectName: path,
-        contentType: file.type || 'application/octet-stream',
+        contentType: (file.type || 'application/octet-stream'),
         cacheControl: '3600',
       },
       chunkSize: 6 * 1024 * 1024, // required exact value for Supabase's resumable endpoint
@@ -5193,7 +5409,7 @@ async function sendChatMessage() {
         const { data: { session } } = await getSessionSafe();
         if (!session?.access_token) throw new Error('Not signed in — please sign out and back in.');
         sendBtn.textContent = 'Uploading… 0%';
-        await uploadChatAttachmentResumable(file, path, session.access_token, (fraction) => {
+        await uploadFileResumable(file, 'chat-attachments', path, session.access_token, (fraction) => {
           sendBtn.textContent = `Uploading… ${Math.round(fraction * 100)}%`;
         });
       } else {
@@ -5445,6 +5661,56 @@ $('syncNowBtn').addEventListener('click', () => syncQueue());
 
 let syncing = false;
 
+// Daily Progress / Project Report attachments are stored locally as base64
+// (same as ever) so an entry can still be created offline at a job site with
+// no signal. The actual upload to Supabase Storage only happens here, right
+// before syncing — this is the one place that already knows we're online.
+// Once uploaded, the base64 is replaced with a lightweight Storage
+// reference, so submit-entry never has to push a big file through GitHub's
+// Contents API (which hard-caps around 100MB and recommends staying under
+// 1MB) — GitHub only ever sees a small JSON record with a link to the file.
+const ENTRY_ATTACHMENT_BUCKET = 'entry-attachments';
+const MAX_ENTRY_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches the Free-tier Storage ceiling
+
+function base64ToBlob(base64, mime) {
+  const byteChars = atob(base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  return new Blob([new Uint8Array(byteNumbers)], { type: mime || 'application/octet-stream' });
+}
+
+async function uploadEntryAttachmentsIfNeeded(entry, accessToken) {
+  if (entry.category !== 'daily-progress' && entry.category !== 'project-report') return entry.attachments || [];
+  if (!Array.isArray(entry.attachments) || !entry.attachments.length) return entry.attachments || [];
+
+  const safeUser = String(entry.userLabel || '').replace(/[^a-z0-9_-]/gi, '_') || 'unknown';
+  const refs = [];
+  for (let i = 0; i < entry.attachments.length; i++) {
+    const att = entry.attachments[i];
+    if (att?.storage && att?.path) { refs.push(att); continue; } // already uploaded on a previous, partially-failed sync attempt
+    if (!att?.base64 || !att?.name) continue;
+
+    const blob = base64ToBlob(att.base64, att.mime);
+    if (blob.size > MAX_ENTRY_ATTACHMENT_BYTES) {
+      throw new Error(`"${att.name}" is over 50MB — remove it from this entry and try again with a smaller file.`);
+    }
+    const safeName = String(att.name).replace(/[^a-z0-9_.-]/gi, '_');
+    const path = `${entry.category}/${safeUser}/${entry.id}_${i}_${safeName}`;
+
+    if (blob.size > TUS_CHUNK_THRESHOLD_BYTES) {
+      await uploadFileResumable(blob, ENTRY_ATTACHMENT_BUCKET, path, accessToken, () => {});
+    } else {
+      const { error } = await sb.storage.from(ENTRY_ATTACHMENT_BUCKET).upload(path, blob, {
+        contentType: att.mime || 'application/octet-stream',
+        upsert: true, // safe to retry the same path if a previous sync attempt got this far but failed later
+      });
+      if (error) throw error;
+    }
+    refs.push({ name: att.name, mime: att.mime || 'application/octet-stream', path, bucket: ENTRY_ATTACHMENT_BUCKET, storage: true });
+  }
+  return refs;
+}
+
 async function syncQueue() {
   if (syncing || !navigator.onLine || !currentUser) return;
   syncing = true;
@@ -5456,6 +5722,7 @@ async function syncQueue() {
     const pending = entries.filter(e => e.status !== 'synced');
     for (const entry of pending) {
       try {
+        entry.attachments = await uploadEntryAttachmentsIfNeeded(entry, session.access_token);
         // Timeout guard: this runs automatically every few minutes with no
         // one watching. Without a limit, one hung request here would keep
         // "syncing" stuck true forever, silently disabling every future
@@ -5610,6 +5877,29 @@ function addAiMessage(role, text) {
   return div;
 }
 
+// Cleans up AEON Ai's reply so it reads like a real person typed it, both on
+// screen and out loud — the model is already instructed not to use markdown/
+// symbols, but this is a second, guaranteed line of defense so a stray "**"
+// or "(" never shows up as literal text or gets read aloud as "asterisk" /
+// "open paren" by the browser's speech engine.
+function humanizeAiReply(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/`+/g, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[-•]\s+/gm, '')
+    .replace(/[*_#~>`]/g, '')
+    .replace(/[()]/g, '')
+    .replace(/@/g, ' at ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function sendAiMessage() {
   const input = $('aiInput');
   const text = input.value.trim();
@@ -5637,11 +5927,12 @@ async function sendAiMessage() {
       'AEON Ai'
     );
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
-    loadingEl.textContent = data.reply;
+    const cleanReply = humanizeAiReply(data.reply);
+    loadingEl.textContent = cleanReply;
     loadingEl.className = 'ai-msg assistant';
-    aiHistory.push({ role: 'user', text }, { role: 'assistant', text: data.reply });
+    aiHistory.push({ role: 'user', text }, { role: 'assistant', text: cleanReply });
     aiHistory = aiHistory.slice(-16);
-    speakText(data.reply);
+    speakText(cleanReply);
   } catch (err) {
     loadingEl.textContent = `Couldn't get an answer: ${err.message || err}`;
     loadingEl.className = 'ai-msg assistant';
