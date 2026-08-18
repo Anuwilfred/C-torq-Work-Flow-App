@@ -441,6 +441,12 @@
         <div id="teamList" style="margin-top:12px;"></div>
       </div>
       <div class="card glass">
+        <strong style="font-size:14px;">⚡ Job Hours Ledger</strong>
+        <p class="hint" style="margin-top:4px;">Project Detail, the Project Tank gauge, and AEON Ai now read project hours from a running total that updates automatically as new entries come in — instead of rescanning every timesheet in GitHub every time (that's what was making those screens slow to open). Run this once to fill it in for every entry already submitted before today. Safe to run again any time if numbers ever look off.</p>
+        <button type="button" id="backfillJobHoursBtn" class="secondary" style="margin-top:8px;">Run one-time backfill</button>
+        <div id="backfillJobHoursStatus" class="hint" style="margin-top:8px;"></div>
+      </div>
+      <div class="card glass">
         <strong style="font-size:14px;">🔁 Recalled Entries</strong>
         <p class="hint" style="margin-top:4px;">Timesheet/leave entries people have pulled back before you've reviewed them — already off every dashboard and report. Correct, restore, or delete each one below.</p>
         <button type="button" id="refreshRecalledBtn" class="secondary" style="margin-top:8px;">Refresh list</button>

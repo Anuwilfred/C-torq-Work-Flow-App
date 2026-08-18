@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.85';
+const APP_VERSION = 'v3.86';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'AEON Ai replies now sound fully human when spoken aloud — no more reading out symbols like asterisks, slashes, or parentheses.';
+const APP_UPDATE_NOTES = 'Project Detail, the Project Tank gauge, and AEON Ai now open project hours instantly instead of re-scanning every timesheet — run the one-time backfill in Admin → Team once you deploy this.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -2597,6 +2597,31 @@ $('recalledDeleteBtn')?.addEventListener('click', async () => {
 });
 
 $('refreshRecalledBtn')?.addEventListener('click', renderRecalledEntriesList);
+
+// One-time backfill for the fast job_hours_ledger table — see
+// job_hours_ledger_schema.sql / backfill-job-hours Edge Function. Safe to
+// tap more than once (every write is an upsert keyed by entry id).
+$('backfillJobHoursBtn')?.addEventListener('click', async () => {
+  const btn = $('backfillJobHoursBtn');
+  const status = $('backfillJobHoursStatus');
+  btn.disabled = true;
+  status.textContent = 'Scanning every timesheet in GitHub — this can take a little while on a team with a lot of history…';
+  try {
+    const { data: { session } } = await getSessionSafe();
+    const { data, error } = await withTimeout(
+      sb.functions.invoke('backfill-job-hours', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+      120000,
+      'Job hours backfill'
+    );
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+    status.textContent = `Done — scanned ${data.entriesScanned} timesheet entries, updated ${data.rowsWritten} project-hour records.`;
+    showToast('Job hours backfill complete.');
+  } catch (err) {
+    status.textContent = `Backfill failed: ${err.message || err}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // =====================================================================
 // MAP ACCESS — admin ticks which dashboard features one person can see.
