@@ -66,10 +66,16 @@
     <h1>C-TORQ Digital Organization</h1>
     <div style="display:flex; align-items:center; gap:10px;">
       <span id="statusBadge">checking…</span>
-      <button type="button" id="updateStatusBtn" class="admin-corner-btn update-status-btn" title="Check for updates">
-        🔄
-        <span id="updateStatusDot" class="update-status-dot" style="display:none;"></span>
-      </button>
+      <div style="position:relative;">
+        <button type="button" id="updateStatusBtn" class="admin-corner-btn update-status-btn" title="Check for updates">
+          🔄
+          <span id="updateStatusDot" class="update-status-dot" style="display:none;"></span>
+        </button>
+        <div id="updatePopup" class="update-popup">
+          <strong id="updatePopupVersion">Update ready</strong>
+          <p id="updatePopupNotes" class="hint"></p>
+        </div>
+      </div>
       <button type="button" id="adminHomeBtn" class="admin-corner-btn" style="display:none" title="Admin">⚙️</button>
     </div>
   </header>

@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.91';
+const APP_VERSION = 'v3.92';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a gap where opening the app in a normal (non-incognito) tab right after a deploy could still silently run yesterday\'s cached code for one load — it now checks itself against the live file on open and auto-refreshes once if they don\'t match, instead of relying on someone noticing the update icon.';
+const APP_UPDATE_NOTES = 'The update icon now shows a clear glass popup with the version and what changed as soon as a new build is ready, instead of just a small red dot — it fades away on its own after about 10 seconds, or the next time you tap anywhere.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6421,6 +6421,29 @@ function setUpdateDot(state) {
   dot.style.display = state === 'none' ? 'none' : 'block';
 }
 
+// Glass popup under the update icon spelling out what changed, instead of
+// leaving people to guess from a plain dot. Shows on its own once a new
+// build finishes downloading; fades away after a while, or the next time
+// anyone taps/touches anywhere at all.
+function showUpdatePopup() {
+  const popup = $('updatePopup');
+  if (!popup) return;
+  $('updatePopupVersion').textContent = pendingUpdateVersion ? `Update ready — ${pendingUpdateVersion}` : 'Update ready';
+  $('updatePopupNotes').textContent = pendingUpdateNotes || 'Tap the refresh icon above to apply it.';
+  popup.classList.add('show');
+  clearTimeout(showUpdatePopup._t);
+  showUpdatePopup._t = setTimeout(hideUpdatePopup, 10000);
+  // pointerdown (not click) so this also dismisses on a touch tap anywhere,
+  // not just a mouse click — { once: true } means it never needs manual
+  // removal, and re-showing the popup later just adds a fresh one-shot.
+  document.addEventListener('pointerdown', hideUpdatePopup, { once: true });
+}
+function hideUpdatePopup() {
+  const popup = $('updatePopup');
+  if (popup) popup.classList.remove('show');
+  clearTimeout(showUpdatePopup._t);
+}
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js').then((reg) => {
@@ -6455,6 +6478,7 @@ if ('serviceWorker' in navigator) {
       pendingUpdateNotes = (text.match(/const APP_UPDATE_NOTES\s*=\s*'([^']*)'/) || [])[1] || '';
     } catch { /* light up the dot anyway, just without the version/notes detail */ }
     setUpdateDot('red');
+    showUpdatePopup();
   });
 
   // If we just reloaded to apply an update (see applyPendingUpdate below),
