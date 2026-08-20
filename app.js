@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.92';
+const APP_VERSION = 'v3.93';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'The update icon now shows a clear glass popup with the version and what changed as soon as a new build is ready, instead of just a small red dot — it fades away on its own after about 10 seconds, or the next time you tap anywhere.';
+const APP_UPDATE_NOTES = 'Dropdown lists (Roles, Departments, and similar) now flip upward when there isn\'t enough room below — so near the bottom of a screen the last few options no longer run off the edge where they couldn\'t be reached or scrolled to.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6062,6 +6062,19 @@ function initGlassSelect(select) {
       });
     });
     list.style.display = 'block';
+    list.classList.remove('drop-up');
+    // Longer lists (Roles, Departments, etc.) were opening downward
+    // unconditionally, so near the bottom of the screen the list ran off
+    // the edge with no way to reach or scroll to the last few options —
+    // flip it to open upward instead whenever there isn't enough room
+    // below the button but there is above.
+    const btnRect = btn.getBoundingClientRect();
+    const listHeight = list.offsetHeight;
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    if (listHeight > spaceBelow - 12 && spaceAbove > spaceBelow) {
+      list.classList.add('drop-up');
+    }
     document.addEventListener('mousedown', onOutside, true);
   }
   btn.addEventListener('click', () => { list.style.display === 'block' ? closeList() : openList(); });
