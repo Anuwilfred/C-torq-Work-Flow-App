@@ -205,6 +205,7 @@
               <input id="jobId" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
               <div id="jobIdResults" class="job-search-results" style="display:none;"></div>
             </div>
+            <p class="hint">Pick the job from the list that appears — leave it blank if this isn't tied to a specific job.</p>
 
             <label>Mode of work</label>
             <div id="modeGrid" class="mode-grid">
@@ -279,8 +280,8 @@
               <input id="lunchMinutes" type="number" min="0" step="5" value="0" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
               <p class="hint">Filled automatically by Start Break / Stop Break above — it's subtracted from your total hours for the day.</p>
 
-              <label for="workNotes">Notes (optional)</label>
-              <textarea id="workNotes" placeholder="Anything worth noting?"></textarea>
+              <label for="workNotes">Notes — what did you work on?</label>
+              <textarea id="workNotes" placeholder="What did you work on?"></textarea>
             </div>
 
             <!-- leave-type fields -->
@@ -418,27 +419,9 @@
         <button type="button" class="secondary" data-open="health">💪 Health Challenges</button>
       </div>
       <div class="card glass">
-        <label for="inviteEmail">Teammate's email</label>
-        <input id="inviteEmail" type="email" placeholder="name@example.com" />
-        <label for="inviteName">Full name (optional)</label>
-        <input id="inviteName" type="text" placeholder="e.g. Priya" />
-        <label for="inviteRole">Role</label>
-        <select id="inviteRole">
-          <option value="">No role yet</option>
-        </select>
-        <button id="sendInviteBtn" class="primary">Send invite</button>
-        <p class="hint">They'll get an email to confirm and set their own password. Once accepted, they show up as "active" below. They'll start with basic access (New Entry, Queue, Chat) — use Map Access below to open up more.</p>
-      </div>
-      <div class="card glass">
-        <strong style="font-size:14px;">Roles</strong>
-        <div class="location-row" style="margin-top:8px;">
-          <input id="newRoleName" type="text" placeholder="Add a new role (e.g. Quality Inspector)" />
-          <button type="button" id="addRoleBtn" class="secondary">+ Add Role</button>
-        </div>
-      </div>
-      <div class="card glass">
-        <strong style="font-size:14px;">Team</strong>
-        <div id="teamList" style="margin-top:12px;"></div>
+        <strong style="font-size:14px;">Employee Role &amp; Invitation Management</strong>
+        <p class="hint" style="margin-top:4px;">Invite one or several teammates at once, assign roles and Map Access before they even accept, and manage everyone already on the team — all from one screen instead of scattered across this page.</p>
+        <button type="button" class="primary" data-open="people" style="margin-top:10px;">👥 Open Employee &amp; Invitation Manager</button>
       </div>
       <div class="card glass">
         <strong style="font-size:14px;">⚡ Job Hours Ledger</strong>
@@ -671,7 +654,12 @@
         <button id="createProjectBtn" class="primary" style="margin-top:12px;">Create project</button>
       </div>
 
-      <div id="projectsListArea" style="margin-top:16px;"></div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:16px; font-size:13px; font-weight:400;">
+        <input type="checkbox" id="showClosedProjectsToggle" style="width:auto;" />
+        Show closed jobs
+      </label>
+      <p class="hint" style="margin-top:2px;">Closed jobs are hidden here by default and no longer appear in the Job ID search — mark a finished job Closed instead of deleting it to keep this list short without losing its history.</p>
+      <div id="projectsListArea" style="margin-top:12px;"></div>
     </div>
   </div>
 </div>
@@ -686,6 +674,7 @@
       <button type="button" class="ghost" data-close="projectDetail">✕</button>
     </div>
     <div class="panel-body">
+      <div id="projectStatusArea" style="margin-bottom:12px;"></div>
       <div id="projectRingsArea"></div>
       <div class="card glass" style="margin-top:16px;">
         <strong style="font-size:14px;">Department hours</strong>
@@ -733,6 +722,11 @@
         <p class="hint" style="margin-top:4px;">Post the current status into one of your group chats.</p>
         <select id="shareProjectGroupSelect" style="margin-top:8px;"></select>
         <button id="shareProjectBtn" class="primary" style="margin-top:10px;">Share to group</button>
+      </div>
+      <div id="deleteProjectCard" class="card glass" style="margin-top:16px; display:none; border-color:rgba(220,90,70,0.4);">
+        <strong style="font-size:14px;">Danger zone</strong>
+        <p class="hint" style="margin-top:4px;">Permanently removes this project and its department hour budgets. Use this to clean up a duplicate or mistyped Job ID — it does not change the Job ID already saved on past timesheet entries, so lock the Job ID field going forward to avoid creating new duplicates.</p>
+        <button type="button" id="deleteProjectBtn" class="secondary" style="margin-top:10px; color:#e5867a; border-color:rgba(220,90,70,0.5);">Delete this project</button>
       </div>
     </div>
   </div>
@@ -1209,6 +1203,63 @@
       </label>
       <div id="mapAccessList" style="display:flex; flex-direction:column; gap:8px; margin:10px 0;"></div>
       <button type="button" id="mapAccessSaveBtn" class="primary">Save access</button>
+    </div>
+  </div>
+</div>
+
+<!-- EMPLOYEE ROLE & INVITATION MANAGEMENT OVERLAY -->
+<div id="peopleOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="peopleOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Employee Role &amp; Invitation Management</strong>
+      <button type="button" class="ghost" data-close="people">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">Roles</strong>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newRoleName" type="text" placeholder="Add a new role (e.g. Quality Inspector)" />
+          <button type="button" id="addRoleBtn" class="secondary">+ Add Role</button>
+        </div>
+      </div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">Invite people</strong>
+        <p class="hint" style="margin-top:4px;">Add as many rows as you like, set each person's email, role, and Map Access, then invite them one by one with each row's own Invite button — or send everyone at once with Invite All below.</p>
+        <button type="button" id="addInviteRowBtn" class="secondary" style="margin-top:10px;">+ Add person</button>
+        <div id="pendingInviteRows" style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+          <div class="empty" id="pendingInviteRowsEmpty">No pending invites — tap "+ Add person" to start.</div>
+        </div>
+        <button type="button" id="inviteAllBtn" class="primary" style="margin-top:12px;">Invite All</button>
+        <p class="hint" style="margin-top:6px;">They'll get an email to confirm and set their own password. Once accepted, they show up as "active" in Team below. Anyone without custom Map Access starts with basic access (New Entry, Queue, Chat).</p>
+      </div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">Team</strong>
+        <div id="teamList" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- INVITE ROW ACCESS OVERLAY — same feature checklist as Map Access, but for
+     a not-yet-sent invite row instead of an existing person -->
+<div id="inviteAccessOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="inviteAccessOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Access for this invite</strong>
+      <button type="button" class="ghost" data-close="inviteAccess">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Tick what this person should be able to see once they accept. Leave everything unticked to use the default basic access.</p>
+      <label class="map-access-row" id="inviteAccessAllRow">
+        <input type="checkbox" id="inviteAccessAllCb" />
+        <span>🔑 Admin access — permit them to do anything (ticks every feature below)</span>
+      </label>
+      <div id="inviteAccessList" style="display:flex; flex-direction:column; gap:8px; margin:10px 0;"></div>
+      <button type="button" id="inviteAccessSaveBtn" class="primary">Save access</button>
     </div>
   </div>
 </div>

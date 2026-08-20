@@ -647,6 +647,24 @@ button.ghost:hover { color: var(--text); }
   white-space: nowrap;
 }
 
+/* Pending-invite rows (Admin → Employee Role & Invitation Management) reuse
+   .entry.team-entry, but also include an email input and a primary/ghost
+   button per row — those normally come with full-width/margin-top styling
+   meant for standalone buttons, which would break a packed row like this. */
+.entry.team-entry input.invite-row-email {
+  flex: 1 1 150px;
+  min-width: 140px;
+  width: auto;
+}
+.entry.team-entry button.primary,
+.entry.team-entry button.ghost {
+  flex: none;
+  width: auto;
+  margin-top: 0;
+  padding: 9px 16px;
+  white-space: nowrap;
+}
+
 .type-icon {
   flex: none;
   width: 36px;

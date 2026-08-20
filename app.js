@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.86';
+const APP_VERSION = 'v3.89';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Detail, the Project Tank gauge, and AEON Ai now open project hours instantly instead of re-scanning every timesheet — run the one-time backfill in Admin → Team once you deploy this.';
+const APP_UPDATE_NOTES = 'Admin → Employee Role & Invitation Management is now one screen: add several people at once (email, role, Map Access set before they even accept), invite each one or all together, and manage the whole Team from the same place.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Supabase client ----------
@@ -161,7 +161,7 @@ function setActiveTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('section.panel').forEach(s => s.classList.toggle('active', s.id === name));
   if (name === 'queue') renderQueue();
-  if (name === 'admin') { renderTeamList(); renderLocationList(); renderRecalledEntriesList(); }
+  if (name === 'admin') { renderLocationList(); renderRecalledEntriesList(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
   if (name === 'home') renderJobBoard();
@@ -988,6 +988,15 @@ async function buildDraftFromForm() {
     if (!selectedMode) { showToast('Pick a mode of work first.'); return null; }
     const isLeave = LEAVE_MODES.includes(selectedMode);
 
+    // DATA QUALITY FIX: a typed-but-unmatched Job ID used to be saved as-is —
+    // that's how a single letter-O/digit-0 typo turned one real project into
+    // two in reports. If anything is typed here, it must resolve to a real
+    // job (picked from the list, or typed exactly) before this can be saved.
+    if ($('jobId').value.trim() && !jobIdConfirmed) {
+      showToast('Pick the Job ID from the list below the field — free-typed Job IDs cause duplicate/mismatched projects.');
+      return null;
+    }
+
     if (isLeave) {
       if (!$('leaveStart').value || !$('leaveEnd').value) {
         showToast('Fill in the start and end date.');
@@ -1055,6 +1064,43 @@ async function buildDraftFromForm() {
       }
     }
 
+    // DATA QUALITY FIX: nothing used to stop an entry saving with a blank
+    // clock-in or clock-out time (it just showed as "?" everywhere, and
+    // silently broke every hour total that read it). Both are required now.
+    const startTimeVal = $('startTime').value;
+    if (!startTimeVal || !endTimeVal) {
+      showToast('Clock in and clock out (or use Start/Stop) before submitting — both times are required.');
+      return null;
+    }
+
+    // DATA QUALITY FIX: an end time earlier than the start time used to be
+    // silently treated as "ran past midnight" by every hour calculation,
+    // with nobody ever told — including a genuine typo that produced a
+    // ~14-hour phantom overnight shift. Now it has to be confirmed.
+    let isOvernightShift = false;
+    const startMins = timeToMinutesLocal(startTimeVal);
+    const endMins = timeToMinutesLocal(endTimeVal);
+    if (startMins !== null && endMins !== null && endMins < startMins) {
+      const confirmed = confirm(
+        `Your clock-out time (${timeLabel12h(endTimeVal)}) is earlier than your clock-in time (${timeLabel12h(startTimeVal)}). ` +
+        `Was this a genuine overnight shift that ran past midnight?\n\nTap OK if yes — it will be recorded as an overnight shift. ` +
+        `Tap Cancel to go back and fix the time instead.`
+      );
+      if (!confirmed) {
+        showToast('Please fix the clock-out time before submitting.');
+        return null;
+      }
+      isOvernightShift = true;
+    }
+
+    // DATA QUALITY FIX: notes were the only place real work detail ever got
+    // recorded, and a lot of entries had none at all — required now, same
+    // as Daily Progress/Report already requires a description.
+    if (!$('workNotes').value.trim()) {
+      showToast('Add a quick note about what you worked on before submitting.');
+      return null;
+    }
+
     // Break In / Break Out — the actual clock times (local "HH:MM", same
     // format as Start/End Time) of the first break started and the last
     // break ended today, not just a duration — for the Time Entry sheet's
@@ -1074,8 +1120,9 @@ async function buildDraftFromForm() {
       location: $('location').value.trim(),
       allowanceLocation,
       date: $('date').value,
-      startTime: $('startTime').value,
+      startTime: startTimeVal,
       endTime: endTimeVal,
+      overnight: isOvernightShift,
       lunchMinutes: lunchMinutesRaw + qsrDeductedMinutes,
       lunchMinutesRaw,
       qsrDeductedMinutes,
@@ -1093,6 +1140,10 @@ async function buildDraftFromForm() {
   }
 
   // progress / data
+  if ($('jobIdSimple') && $('jobIdSimple').value.trim() && !jobIdSimpleConfirmed) {
+    showToast('Pick the Job ID from the list below the field — free-typed Job IDs cause duplicate/mismatched projects.');
+    return null;
+  }
   if (!$('projectSimple').value.trim() || !$('dateSimple').value || !$('descriptionSimple').value.trim()) {
     showToast('Fill in project, date and description.');
     return null;
@@ -1242,8 +1293,35 @@ $('reviewBackBtn').addEventListener('click', () => {
   $('reviewOverlay').classList.remove('show');
 });
 
+// DATA QUALITY FIX: nothing used to stop the exact same job/date/time-window
+// entry being submitted more than once (e.g. tapping Submit again before
+// the last one finished, or resuming a job that was actually already
+// logged) — checked against this device's own entry history, since that's
+// where a repeat submit would show up without needing a server round trip.
+async function findLikelyDuplicateEntry(draft) {
+  if (draft.category !== 'timesheet' || !draft.jobId) return null;
+  const existing = await getAllEntries();
+  return existing.find((e) =>
+    e.id !== draft.id &&
+    e.category === 'timesheet' &&
+    e.jobId === draft.jobId &&
+    e.date === draft.date &&
+    e.startTime === draft.startTime &&
+    e.endTime === draft.endTime &&
+    e.status !== 'recalled'
+  ) || null;
+}
+
 $('reviewConfirmBtn').addEventListener('click', async () => {
   if (!pendingEntryDraft) return;
+  const dupe = await findLikelyDuplicateEntry(pendingEntryDraft);
+  if (dupe) {
+    const proceed = confirm(
+      `You already have an entry logged for ${pendingEntryDraft.jobId} on ${pendingEntryDraft.date} with the same clock-in and clock-out time ` +
+      `(${timeLabel12h(pendingEntryDraft.startTime)}–${timeLabel12h(pendingEntryDraft.endTime)}). Submit this one anyway?`
+    );
+    if (!proceed) return;
+  }
   await addEntry(pendingEntryDraft);
   // A submitted work-day entry means today's clock cycle is done — reset it
   // so tomorrow's Clock In starts fresh instead of showing yesterday's times.
@@ -1592,6 +1670,17 @@ function timeLabel12h(hhmm) {
   return `${h12}:${String(m || 0).padStart(2, '0')} ${period}`;
 }
 
+// Client-side counterpart to the "HH:MM" -> minutes-since-midnight helper
+// every Edge Function already has server-side — used at submit time to
+// detect an end-time-earlier-than-start-time entry so it can be confirmed
+// as a genuine overnight shift instead of silently accepted as one.
+function timeToMinutesLocal(hhmm) {
+  if (!hhmm) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
 // TODAY'S JOB BOARD — a message-board style broadcast on Home, visible to
 // EVERYONE (not just people assigned), so the whole team can see what's
 // been published for today at a glance: job id, location, arrival time,
@@ -1769,11 +1858,27 @@ async function populateJobIdDropdown() {
   jobSearchOptions = error ? [] : (data || []);
 }
 
+// DATA QUALITY FIX: free-typed Job IDs used to be accepted as-is, which is
+// how look-alike typos (letter-O vs digit-0, e.g. "TVD/OS/26/0037" vs
+// "TVD/0S/26/0037") turned one real project into two in reports. Now a
+// non-empty Job ID field must resolve to a REAL project before submit is
+// allowed — either by tapping a suggestion, or by typing the exact ID of a
+// job that already exists. `jobIdConfirmed`/`jobIdSimpleConfirmed` track
+// that; buildDraftFromForm() checks them before saving.
+let jobIdConfirmed = false;
+let jobIdSimpleConfirmed = false;
+
+function jobIdExactMatch(value) {
+  const q = String(value || '').trim().toLowerCase();
+  if (!q) return null;
+  return jobSearchOptions.find((r) => String(r.job_id).toLowerCase() === q) || null;
+}
+
 function renderJobSearchResults(matches) {
   const box = $('jobIdResults');
   if (!box) return;
   if (!matches.length) {
-    box.innerHTML = '<div class="job-search-empty">No matching job found — you can still type a Job ID manually.</div>';
+    box.innerHTML = '<div class="job-search-empty">No matching job found — pick one from the list, or clear this field to leave it blank.</div>';
   } else {
     box.innerHTML = matches.slice(0, 8).map((r) => `
       <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
@@ -1788,6 +1893,7 @@ function renderJobSearchResults(matches) {
       // mousedown (not click) so this fires before the input's blur hides the box
       e.preventDefault();
       $('jobId').value = item.dataset.jobId;
+      jobIdConfirmed = true;
       autoFillProjectFromJobId(item.dataset.jobId);
       box.style.display = 'none';
     });
@@ -1796,6 +1902,7 @@ function renderJobSearchResults(matches) {
 
 if ($('jobId')) {
   $('jobId').addEventListener('input', () => {
+    jobIdConfirmed = false; // any manual edit un-confirms it until it resolves to a real job again
     const q = $('jobId').value.trim().toLowerCase();
     if (!q) { $('jobIdResults').style.display = 'none'; return; }
     const matches = jobSearchOptions.filter((r) =>
@@ -1809,8 +1916,10 @@ if ($('jobId')) {
   $('jobId').addEventListener('blur', () => {
     // Small delay so a click/mousedown on a result registers first.
     setTimeout(() => { if ($('jobIdResults')) $('jobIdResults').style.display = 'none'; }, 150);
-    // Covers a Job ID typed out fully by hand (no result tapped) — still
-    // auto-fills Project if it's a real, known job.
+    // Typing the exact ID of a real job (not just tapping a suggestion) is
+    // also accepted — it's unambiguous, so there's no typo risk.
+    const match = jobIdExactMatch($('jobId').value);
+    if (match) { jobIdConfirmed = true; $('jobId').value = match.job_id; }
     autoFillProjectFromJobId($('jobId').value.trim());
   });
 }
@@ -1822,7 +1931,7 @@ function renderJobSearchResultsSimple(matches) {
   const box = $('jobIdSimpleResults');
   if (!box) return;
   if (!matches.length) {
-    box.innerHTML = '<div class="job-search-empty">No matching job found — you can still type a Job ID manually.</div>';
+    box.innerHTML = '<div class="job-search-empty">No matching job found — pick one from the list, or clear this field to leave it blank.</div>';
   } else {
     box.innerHTML = matches.slice(0, 8).map((r) => `
       <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
@@ -1836,6 +1945,7 @@ function renderJobSearchResultsSimple(matches) {
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
       $('jobIdSimple').value = item.dataset.jobId;
+      jobIdSimpleConfirmed = true;
       const jobMatch = jobSearchOptions.find((r) => r.job_id === item.dataset.jobId);
       if ($('projectSimple') && !$('projectSimple').value.trim()) $('projectSimple').value = jobMatch?.name || item.dataset.jobId;
       box.style.display = 'none';
@@ -1844,6 +1954,7 @@ function renderJobSearchResultsSimple(matches) {
 }
 if ($('jobIdSimple')) {
   $('jobIdSimple').addEventListener('input', () => {
+    jobIdSimpleConfirmed = false;
     const q = $('jobIdSimple').value.trim().toLowerCase();
     if (!q) { $('jobIdSimpleResults').style.display = 'none'; return; }
     const matches = jobSearchOptions.filter((r) =>
@@ -1856,6 +1967,8 @@ if ($('jobIdSimple')) {
   });
   $('jobIdSimple').addEventListener('blur', () => {
     setTimeout(() => { if ($('jobIdSimpleResults')) $('jobIdSimpleResults').style.display = 'none'; }, 150);
+    const match = jobIdExactMatch($('jobIdSimple').value);
+    if (match) { jobIdSimpleConfirmed = true; $('jobIdSimple').value = match.job_id; }
   });
 }
 
@@ -2232,28 +2345,10 @@ document.addEventListener('touchmove', (e) => {
 document.addEventListener('touchend', () => { newsDragStartX = null; });
 
 // =====================================================================
-// ADMIN — invite teammates by email
+// ADMIN — invite teammates by email (bulk row builder, see further below
+// for the row rendering / per-row Access modal / Invite All logic — those
+// need FEATURE_LIST and fetchRoles(), defined just after this block).
 // =====================================================================
-
-$('sendInviteBtn').addEventListener('click', async () => {
-  const email = $('inviteEmail').value.trim();
-  const fullName = $('inviteName').value.trim();
-  const roleId = $('inviteRole').value || null;
-  if (!email) return;
-  const { data: { session } } = await getSessionSafe();
-  const { data, error } = await sb.functions.invoke('invite-user', {
-    body: { email, fullName, roleId },
-    headers: { Authorization: `Bearer ${session.access_token}` }
-  });
-  if (error || data?.error) {
-    showToast(`Invite failed: ${data?.error || await readFunctionsError(error)}`);
-    return;
-  }
-  showToast(`Invite sent to ${email}.`);
-  $('inviteEmail').value = '';
-  $('inviteName').value = '';
-  renderTeamList();
-});
 
 const POSITION_LABEL = { engineer: 'Engineer', technician: 'Technician', other: 'Other' };
 
@@ -2332,14 +2427,11 @@ async function fetchRoles() {
   return error ? [] : (data || []);
 }
 
-async function populateInviteRoleDropdown() {
-  const sel = $('inviteRole');
-  if (!sel) return;
+async function buildRoleSelectHtml(selectedId = '') {
   const roles = await fetchRoles();
-  sel.innerHTML = '<option value="">No role yet</option>' +
-    roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
+  return '<option value="">No role yet</option>' +
+    roles.map((r) => `<option value="${r.id}" ${r.id === selectedId ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
 }
-populateInviteRoleDropdown();
 
 $('addRoleBtn')?.addEventListener('click', async () => {
   const name = $('newRoleName').value.trim();
@@ -2348,8 +2440,146 @@ $('addRoleBtn')?.addEventListener('click', async () => {
   if (error) { showToast(`Couldn't add role: ${error.message}`); return; }
   $('newRoleName').value = '';
   showToast('Role added.');
-  populateInviteRoleDropdown();
   renderTeamList();
+});
+
+// ---------------------------------------------------------------------
+// BULK INVITE ROW BUILDER — add several people at once before sending
+// anything. Each row has its own email, role, Map Access (via a small
+// popup reusing the same FEATURE_LIST checklist as Map Access), a delete
+// button, and its own Invite button; Invite All at the bottom sends
+// everyone still on the list in one go.
+// ---------------------------------------------------------------------
+
+let pendingInviteRows = []; // { id, allowedFeatures: [], customized: bool }
+let inviteRowSeq = 0;
+
+function updateInviteRowsEmptyState() {
+  const empty = $('pendingInviteRowsEmpty');
+  if (empty) empty.style.display = pendingInviteRows.length ? 'none' : '';
+}
+
+async function addInviteRow() {
+  const rowId = `row_${++inviteRowSeq}`;
+  pendingInviteRows.push({ id: rowId, allowedFeatures: [], customized: false });
+  const roleHtml = await buildRoleSelectHtml();
+  const div = document.createElement('div');
+  div.className = 'entry team-entry';
+  div.dataset.inviteRow = rowId;
+  div.innerHTML = `
+    <input type="email" class="invite-row-email" placeholder="name@example.com" style="flex:1; min-width:150px;" />
+    <select class="position-select invite-row-role">${roleHtml}</select>
+    <button type="button" class="secondary invite-row-access" data-row="${rowId}">🔐 Access</button>
+    <button type="button" class="primary invite-row-send" data-row="${rowId}">✉️ Invite</button>
+    <button type="button" class="ghost invite-row-delete" data-row="${rowId}">✕</button>
+  `;
+  $('pendingInviteRows').appendChild(div);
+  initAllGlassSelects(div);
+  updateInviteRowsEmptyState();
+
+  div.querySelector('.invite-row-access').addEventListener('click', () => openInviteAccessModal(rowId));
+  div.querySelector('.invite-row-delete').addEventListener('click', () => {
+    pendingInviteRows = pendingInviteRows.filter((r) => r.id !== rowId);
+    div.remove();
+    updateInviteRowsEmptyState();
+  });
+  div.querySelector('.invite-row-send').addEventListener('click', () => sendInviteRow(rowId));
+}
+
+$('addInviteRowBtn')?.addEventListener('click', addInviteRow);
+
+async function sendInviteRow(rowId) {
+  const div = document.querySelector(`[data-invite-row="${rowId}"]`);
+  if (!div) return;
+  const row = pendingInviteRows.find((r) => r.id === rowId);
+  const email = div.querySelector('.invite-row-email').value.trim();
+  const roleId = div.querySelector('.invite-row-role').value || null;
+  if (!email) { showToast('Enter an email for this row first.'); return; }
+
+  const sendBtn = div.querySelector('.invite-row-send');
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Sending…';
+
+  const { data: { session } } = await getSessionSafe();
+  const body = { email, roleId };
+  if (row?.customized) body.allowedFeatures = row.allowedFeatures;
+  const { data, error } = await sb.functions.invoke('invite-user', {
+    body,
+    headers: { Authorization: `Bearer ${session.access_token}` }
+  });
+
+  if (error || data?.error) {
+    showToast(`Invite failed for ${email}: ${data?.error || await readFunctionsError(error)}`);
+    sendBtn.disabled = false;
+    sendBtn.textContent = '✉️ Invite';
+    return { ok: false, email };
+  }
+
+  showToast(`Invite sent to ${email}.`);
+  pendingInviteRows = pendingInviteRows.filter((r) => r.id !== rowId);
+  div.remove();
+  updateInviteRowsEmptyState();
+  renderTeamList();
+  return { ok: true, email };
+}
+
+$('inviteAllBtn')?.addEventListener('click', async () => {
+  const rowIds = pendingInviteRows.map((r) => r.id);
+  if (!rowIds.length) { showToast('No pending invites to send.'); return; }
+  const btn = $('inviteAllBtn');
+  btn.disabled = true;
+  btn.textContent = 'Inviting…';
+  let sent = 0, failed = 0;
+  for (const rowId of rowIds) {
+    // sendInviteRow removes the row from pendingInviteRows/DOM as it goes,
+    // so this loop is safe to run over the original snapshot of ids.
+    const result = await sendInviteRow(rowId);
+    if (result?.ok) sent++; else failed++;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Invite All';
+  showToast(`${sent} invited${failed ? `, ${failed} failed` : ''}.`);
+});
+
+// ---------------------------------------------------------------------
+// Per-row Map Access popup for a not-yet-sent invite (mirrors
+// openMapAccessModal below, but writes into the in-memory row instead of
+// an existing profile).
+// ---------------------------------------------------------------------
+
+let inviteAccessRowId = null;
+
+function openInviteAccessModal(rowId) {
+  inviteAccessRowId = rowId;
+  const row = pendingInviteRows.find((r) => r.id === rowId);
+  const current = row?.allowedFeatures || [];
+  $('inviteAccessList').innerHTML = FEATURE_LIST.map((f) => `
+    <label class="map-access-row">
+      <input type="checkbox" value="${f.key}" ${current.includes(f.key) ? 'checked' : ''} />
+      <span>${escapeHtml(f.label)}</span>
+    </label>
+  `).join('');
+
+  const featureCbs = () => [...$('inviteAccessList').querySelectorAll('input[type="checkbox"]')];
+  const allCb = $('inviteAccessAllCb');
+  allCb.checked = featureCbs().every((cb) => cb.checked);
+  allCb.onchange = () => { featureCbs().forEach((cb) => { cb.checked = allCb.checked; }); };
+  featureCbs().forEach((cb) => {
+    cb.addEventListener('change', () => { allCb.checked = featureCbs().every((c) => c.checked); });
+  });
+
+  openPanel('inviteAccess');
+}
+
+$('inviteAccessSaveBtn')?.addEventListener('click', () => {
+  if (!inviteAccessRowId) return;
+  const checked = [...$('inviteAccessList').querySelectorAll('input[type="checkbox"]:checked')].map((i) => i.value);
+  const row = pendingInviteRows.find((r) => r.id === inviteAccessRowId);
+  if (row) { row.allowedFeatures = checked; row.customized = true; }
+  const btn = document.querySelector(`.invite-row-access[data-row="${inviteAccessRowId}"]`);
+  if (btn) btn.textContent = checked.length ? `🔐 Access (${checked.length})` : '🔐 Access';
+  showToast('Access set for this invite.');
+  closePanel('inviteAccess');
 });
 
 async function renderTeamList() {
@@ -3531,6 +3761,8 @@ const PANEL_IDS = {
   quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
+  people: ['peopleOverlay', 'peopleOverlayBackdrop'],
+  inviteAccess: ['inviteAccessOverlay', 'inviteAccessOverlayBackdrop'],
   allocation: ['allocationOverlay', 'allocationOverlayBackdrop'],
   myjobs: ['myJobsOverlay', 'myJobsOverlayBackdrop'],
   entryDetail: ['entryDetailOverlay', 'entryDetailOverlayBackdrop'],
@@ -3574,6 +3806,9 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'myjobs') {
     renderMyJobsPanel();
+  }
+  if (name === 'people') {
+    renderTeamList();
   }
 }
 function closePanel(name) {
@@ -4092,37 +4327,72 @@ async function fetchProjects() {
   }
 }
 
+// Closed jobs stay hidden from this list by default (and were already
+// invisible to the Job ID search everywhere — see populateJobIdDropdown's
+// .eq('status','active')) so the list doesn't keep growing forever with
+// finished work. Nothing about a closed job's history is touched — this is
+// the non-destructive alternative to actually deleting a project.
+let showClosedProjects = false;
+if ($('showClosedProjectsToggle')) {
+  $('showClosedProjectsToggle').addEventListener('change', (e) => {
+    showClosedProjects = e.target.checked;
+    renderProjectsList();
+  });
+}
+
+async function toggleProjectStatus(jobId, currentStatus) {
+  const nextStatus = currentStatus === 'active' ? 'closed' : 'active';
+  const { error } = await sb.from('projects').update({ status: nextStatus }).eq('job_id', jobId);
+  if (error) { showToast(`Couldn't update status: ${error.message}`); return; }
+  showToast(nextStatus === 'closed' ? `${jobId} marked closed.` : `${jobId} reopened.`);
+  renderProjectsList();
+  populateJobIdDropdown();
+}
+
 async function renderProjectsList(isRetry = false) {
   const wrap = $('projectsListArea');
   if (!wrap) return;
   if (!isRetry) wrap.innerHTML = '<div class="empty">Loading…</div>';
-  const { rows, error } = await fetchProjects();
+  const { rows: allRows, error } = await fetchProjects();
   if (error) {
     if (!isRetry) { await new Promise((r) => setTimeout(r, 400)); return renderProjectsList(true); }
     wrap.innerHTML = `<div class="empty">Couldn't load projects: ${escapeHtml(error.message || String(error))}</div>`;
     return;
   }
-  if (!rows.length) { wrap.innerHTML = '<div class="empty">No projects yet' + (currentProfile?.role === 'admin' ? ' — add one above.' : ' yet.') + '</div>'; return; }
+  const rows = showClosedProjects ? allRows : allRows.filter((r) => (r.status || 'active') === 'active');
+  if (!allRows.length) { wrap.innerHTML = '<div class="empty">No projects yet' + (currentProfile?.role === 'admin' ? ' — add one above.' : ' yet.') + '</div>'; return; }
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">No active projects — tap "Show closed jobs" above to see them.</div>'; return; }
   const isAdmin = currentProfile?.role === 'admin';
-  wrap.innerHTML = rows.map((r) => `
+  wrap.innerHTML = rows.map((r) => {
+    const isClosed = (r.status || 'active') !== 'active';
+    return `
     <div class="entry" data-project-row="${escapeHtml(r.job_id)}" data-project-name="${escapeHtml(r.name || '')}" style="cursor:pointer;">
       <span class="type-icon">📁</span>
       <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</div>
+        <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}${isClosed ? ' <span style="opacity:0.6; font-weight:400;">(Closed)</span>' : ''}</div>
         ${r.received_date ? `<div class="entry-meta">${escapeHtml(r.received_date)}</div>` : ''}
       </div>
+      ${isAdmin ? `<button type="button" class="ghost" data-toggle-status="${escapeHtml(r.job_id)}" data-status="${escapeHtml(r.status || 'active')}" style="font-size:11px;">${isClosed ? 'Reopen' : 'Close'}</button>` : ''}
       ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
   wrap.querySelectorAll('[data-project-row]').forEach((row) => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('[data-delete-project]')) return;
+      if (e.target.closest('[data-delete-project]') || e.target.closest('[data-toggle-status]')) return;
       openProjectDetail(row.dataset.projectRow, row.dataset.projectName);
+    });
+  });
+  wrap.querySelectorAll('[data-toggle-status]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleProjectStatus(btn.dataset.toggleStatus, btn.dataset.status);
     });
   });
   wrap.querySelectorAll('[data-delete-project]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (!confirm(`Permanently delete ${btn.dataset.deleteProject}? If you just want it off this list, use Close instead — that can be undone.`)) return;
       await sb.from('projects').delete().eq('job_id', btn.dataset.deleteProject);
       renderProjectsList();
       populateJobIdDropdown();
@@ -4463,6 +4733,29 @@ async function renderProjectStages(jobId) {
 let currentProjectReport = null;
 let currentProjectJobId = null;
 
+// Non-destructive Close/Reopen control, shown right at the top of Project
+// Detail so it's visible however the screen was opened (list row, search,
+// My Jobs, etc.) without needing status threaded through every call site —
+// it just looks the current status up fresh each time.
+async function renderProjectStatusArea(jobId) {
+  const area = $('projectStatusArea');
+  if (!area) return;
+  const { data: row } = await sb.from('projects').select('status').eq('job_id', jobId).maybeSingle();
+  const status = row?.status || 'active';
+  const isClosed = status !== 'active';
+  const isAdmin = currentProfile?.role === 'admin';
+  area.innerHTML = `
+    <div class="card glass" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <span style="font-size:13px;">Status: <strong>${isClosed ? 'Closed' : 'Active'}</strong></span>
+      ${isAdmin ? `<button type="button" class="secondary" id="projectStatusToggleBtn" style="width:auto; padding:8px 16px;">${isClosed ? 'Reopen' : 'Mark as Closed'}</button>` : ''}
+    </div>
+  `;
+  $('projectStatusToggleBtn')?.addEventListener('click', async () => {
+    await toggleProjectStatus(jobId, status);
+    renderProjectStatusArea(jobId);
+  });
+}
+
 async function openProjectDetail(jobId, name) {
   currentProjectReport = null;
   currentProjectJobId = jobId;
@@ -4473,7 +4766,10 @@ async function openProjectDetail(jobId, name) {
   $('boqListArea').innerHTML = '';
   $('boqTotalRow').innerHTML = '';
   $('deptHoursListArea').innerHTML = '';
+  if ($('projectStatusArea')) $('projectStatusArea').innerHTML = '';
+  if ($('deleteProjectCard')) $('deleteProjectCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   openPanel('projectDetail');
+  renderProjectStatusArea(jobId);
   populateShareGroupPicker();
   renderProjectStages(jobId);
   renderBoq(jobId);
@@ -4494,6 +4790,41 @@ async function openProjectDetail(jobId, name) {
   renderProjectContributors(data);
   renderDeptHoursManager(jobId, departments);
 }
+
+// Admin-only cleanup tool for exactly the kind of mistake that started this
+// whole round: a mistyped Job ID (letter-O vs digit-0, etc.) creating a
+// duplicate project. Requires typing the Job ID out to confirm — this is
+// permanent and there's no undo. Deleting the project row itself cascades
+// to remove its department-hour budgets (project_department_hours has an
+// "on delete cascade" foreign key), but job_hours_ledger and
+// project_share_log key on job_id as plain text (not a foreign key), so
+// those are cleaned up here explicitly — otherwise they'd linger as
+// invisible orphaned history for a project that no longer exists.
+$('deleteProjectBtn')?.addEventListener('click', async () => {
+  if (!currentProjectJobId) return;
+  const jobId = currentProjectJobId;
+  const typed = prompt(`This permanently deletes ${jobId} and its department hour budgets. This cannot be undone.\n\nType the Job ID exactly to confirm:`);
+  if (typed === null) return;
+  if (typed.trim() !== jobId) { showToast('Job ID did not match — nothing was deleted.'); return; }
+
+  const btn = $('deleteProjectBtn');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    await sb.from('job_hours_ledger').delete().eq('job_id', jobId);
+    await sb.from('project_share_log').delete().eq('job_id', jobId);
+    const { error } = await sb.from('projects').delete().eq('job_id', jobId);
+    if (error) throw error;
+    showToast(`${jobId} deleted.`);
+    closePanel('projectDetail');
+    renderProjectsList();
+  } catch (err) {
+    showToast(`Couldn't delete: ${err.message || err}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Delete this project';
+  }
+});
 
 // ---------- Department hours — admin sets an hour budget PER DEPARTMENT for
 // this project (replaces the old fixed Engineer/Technician split). Same
@@ -4690,9 +5021,22 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+// BUG FIX: this hadn't been updated for the per-department hour tracking
+// rework earlier in this project — it was still reading project.allocated
+// Engineer/Technician and totals.engineerHours/technicianHours, which no
+// longer exist on get-project-report's response (it now returns
+// project.departments, a dynamic list). Every "Share to group" image was
+// silently rendering with blank/undefined numbers. Rewritten to draw one
+// ring per actual department instead of two fixed ones.
 async function buildProjectShareImage(data) {
-  const { project, totals, contributors = [] } = data;
-  const W = 720, HEADER_H = 260, ROW_H = 56;
+  const { project, contributors = [] } = data;
+  const departments = project.departments || [];
+  const W = 720;
+  const RING_ROW_H = 210;
+  const ringCols = Math.min(Math.max(departments.length, 1), 3);
+  const ringRows = Math.max(1, Math.ceil(departments.length / ringCols));
+  const HEADER_H = 90 + ringRows * RING_ROW_H;
+  const ROW_H = 56;
   const H = HEADER_H + Math.max(contributors.length, 1) * ROW_H + 90;
 
   const canvas = document.createElement('canvas');
@@ -4720,8 +5064,20 @@ async function buildProjectShareImage(data) {
   ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
   ctx.fillText('C-TORQ Digital Organization — project status', 40, 76);
 
-  drawShareRing(ctx, W / 2 - 110, 168, totals.engineerHours, project.allocatedEngineer, 'Engineer');
-  drawShareRing(ctx, W / 2 + 110, 168, totals.technicianHours, project.allocatedTechnician, 'Technician');
+  if (!departments.length) {
+    ctx.fillStyle = '#a8a6a2';
+    ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.fillText('No department hours logged or allocated yet.', 40, 130);
+  } else {
+    const colW = W / ringCols;
+    departments.forEach((d, i) => {
+      const col = i % ringCols;
+      const row = Math.floor(i / ringCols);
+      const cx = colW * col + colW / 2;
+      const cy = 90 + row * RING_ROW_H + 78;
+      drawShareRing(ctx, cx, cy, d.usedHours, d.allocatedHours, d.name);
+    });
+  }
 
   ctx.strokeStyle = 'rgba(255,255,255,0.14)';
   ctx.beginPath();
@@ -4733,10 +5089,8 @@ async function buildProjectShareImage(data) {
   ctx.font = '700 14px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
   ctx.fillText('Who worked on this', 40, HEADER_H + 8);
 
-  const allocatedForRole = {
-    engineer: Number(project.allocatedEngineer) || 0,
-    technician: Number(project.allocatedTechnician) || 0,
-  };
+  const allocatedByDept = {};
+  departments.forEach((d) => { allocatedByDept[d.id] = Number(d.allocatedHours) || 0; });
   const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
 
   let y = HEADER_H + 40;
@@ -4755,7 +5109,7 @@ async function buildProjectShareImage(data) {
 
       ctx.font = '11px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
       ctx.fillStyle = '#a8a6a2';
-      ctx.fillText(POSITION_LABEL[c.position] || c.position, barX + nameW + 10, y);
+      ctx.fillText(c.departmentName || 'No department set', barX + nameW + 10, y);
 
       ctx.textAlign = 'right';
       ctx.font = '800 13.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
@@ -4767,7 +5121,7 @@ async function buildProjectShareImage(data) {
       roundRectPath(ctx, barX, barY, barW, barH, barH / 2);
       ctx.fill();
 
-      const allocated = allocatedForRole[c.position];
+      const allocated = allocatedByDept[c.departmentId] || 0;
       const pct = allocated > 0 ? Math.min(c.hours / allocated, 1) : (c.hours / maxHours);
       const fillW = Math.max(barH, barW * pct);
       const grad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
@@ -4788,11 +5142,41 @@ async function buildProjectShareImage(data) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 }
 
+// SPAM FIX: this button used to post instantly every single tap, with no
+// memory of the last time it was used — that's what was flooding group
+// chats with the same project-status image back to back. Now it checks
+// project_share_log for the last share to this SAME project+group; inside
+// the last hour, it requires an explicit confirm before posting again.
+const SHARE_COOLDOWN_MS = 60 * 60 * 1000;
+
+async function minutesSinceLastShare(jobId, chatId) {
+  const { data } = await sb
+    .from('project_share_log')
+    .select('shared_at')
+    .eq('job_id', jobId)
+    .eq('chat_id', chatId)
+    .order('shared_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data?.shared_at) return null;
+  return Math.round((Date.now() - new Date(data.shared_at).getTime()) / 60000);
+}
+
 if ($('shareProjectBtn')) {
   $('shareProjectBtn').addEventListener('click', async () => {
     const chatId = $('shareProjectGroupSelect').value;
     if (!chatId) { showToast('Pick a group to share to.'); return; }
     if (!currentProjectReport) { showToast('Still loading project data — try again in a second.'); return; }
+
+    const { project } = currentProjectReport;
+
+    try {
+      const minsAgo = await minutesSinceLastShare(project.jobId, chatId);
+      if (minsAgo !== null && minsAgo * 60000 < SHARE_COOLDOWN_MS) {
+        const label = minsAgo < 1 ? 'less than a minute ago' : `${minsAgo} minute${minsAgo === 1 ? '' : 's'} ago`;
+        if (!confirm(`This project was already shared to this group ${label}. Share it again anyway?`)) return;
+      }
+    } catch { /* if the check itself fails, fall through and allow sharing rather than block the feature */ }
 
     const btn = $('shareProjectBtn');
     const originalLabel = btn.textContent;
@@ -4803,7 +5187,6 @@ if ($('shareProjectBtn')) {
       const blob = await buildProjectShareImage(currentProjectReport);
       if (!blob) throw new Error('Could not generate the image.');
 
-      const { project } = currentProjectReport;
       const safeJobId = String(project.jobId).replace(/[^a-z0-9_.-]/gi, '_');
       const fileName = `project-${safeJobId}-${Date.now()}.png`;
       const path = `${chatId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${fileName}`;
@@ -4817,6 +5200,10 @@ if ($('shareProjectBtn')) {
         attachment_path: path, attachment_name: fileName, attachment_mime: 'image/png',
       }).select().single();
       if (error) throw error;
+
+      // Best-effort log — a failure here shouldn't undo an already-posted
+      // share, it just means the next tap won't know to throttle itself.
+      sb.from('project_share_log').insert({ job_id: project.jobId, chat_id: chatId, shared_by: currentUser.id }).then(() => {}, () => {});
 
       if (newMsg) {
         const { data: { session } } = await getSessionSafe();
