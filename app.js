@@ -1,12 +1,45 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.89';
+const APP_VERSION = 'v3.91';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Admin → Employee Role & Invitation Management is now one screen: add several people at once (email, role, Map Access set before they even accept), invite each one or all together, and manage the whole Team from the same place.';
+const APP_UPDATE_NOTES = 'Fixed a gap where opening the app in a normal (non-incognito) tab right after a deploy could still silently run yesterday\'s cached code for one load — it now checks itself against the live file on open and auto-refreshes once if they don\'t match, instead of relying on someone noticing the update icon.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
+
+// ---------- Self-heal a stale cached app shell ----------
+// WHY THIS EXISTS: the service worker below uses stale-while-revalidate for
+// instant, consistent open speed — it deliberately shows whatever's already
+// cached FIRST, then quietly fetches a fresh copy in the background for next
+// time. That's great for speed, but it means the very first normal (not
+// incognito) load right after a new deploy can still run yesterday's app.js
+// for that one session — the new service worker only finishes taking over
+// AFTER that load already started. Incognito never has this problem because
+// it has nothing cached yet, so it always goes straight to the network —
+// which is exactly why "it works in incognito but not my normal tab" was
+// happening even though the deploy itself was correct.
+// This checks the genuinely live file on every load (bypassing any cache)
+// and, if it's a different build than what's currently running, reloads
+// ONCE automatically — silently self-correcting instead of leaving someone
+// stuck on old, possibly-broken code until they notice the update icon.
+(function healStaleAppShell() {
+  const RELOAD_GUARD_KEY = 'ctorq-auto-heal-reload-for-version';
+  fetch('./app.js?_=' + Date.now(), { cache: 'no-store' })
+    .then((res) => res.text())
+    .then((text) => {
+      const liveVersion = (text.match(/const APP_VERSION\s*=\s*'([^']+)'/) || [])[1];
+      if (!liveVersion || liveVersion === APP_VERSION) return;
+      // Only ever auto-reload once per mismatched version per tab — if it
+      // somehow mismatches again right after reloading (e.g. genuinely
+      // offline/flaky network serving a half-cached response), don't loop
+      // forever; just let the person keep using whatever did load.
+      if (sessionStorage.getItem(RELOAD_GUARD_KEY) === liveVersion) return;
+      sessionStorage.setItem(RELOAD_GUARD_KEY, liveVersion);
+      location.reload();
+    })
+    .catch(() => { /* offline or blocked — nothing to self-heal against, just continue */ });
+})();
 
 // ---------- Supabase client ----------
 const sb = window.supabase.createClient(
@@ -95,6 +128,16 @@ function clearStoredSession() {
 
 let currentUser = null;
 let currentProfile = null;
+// Declared up here (not down near the rest of the presence/chat code where
+// it's used) because startPresence() is called from enterApp() during
+// sign-in, and on some slower/flakier connections that first sign-in event
+// can fire before the script has finished running all the way down to
+// where this used to be declared — a `let` can't be touched before its own
+// declaration line runs, so that raced into "Cannot access 'presenceChannel'
+// before initialization" and enterApp's catch-all treated it as a broken
+// session, sending people back to the login screen even though nothing was
+// actually wrong with their sign-in.
+let presenceChannel = null;
 let selectedMode = null; // mode-of-work chip currently selected
 
 const LEAVE_MODES = ['sick_leave', 'holiday', 'emergency_leave'];
@@ -5435,7 +5478,7 @@ let chatListTimer = null;
 let openChatTimer = null;       // backup poll for the open thread, in case realtime drops (flaky mobile networks)
 let pendingChatAttachment = null; // { file } selected but not yet sent
 let onlineUserIds = new Set();  // who's currently online, via Supabase Realtime Presence
-let presenceChannel = null;
+// presenceChannel itself is declared up near currentUser/currentProfile now — see the comment there.
 
 // ---------- Chat overlay (floating icon, bottom-left) ----------
 function openChatOverlay() {
