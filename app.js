@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.93';
+const APP_VERSION = 'v3.94';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Dropdown lists (Roles, Departments, and similar) now flip upward when there isn\'t enough room below — so near the bottom of a screen the last few options no longer run off the edge where they couldn\'t be reached or scrolled to.';
+const APP_UPDATE_NOTES = 'Fixed the real cause of Roles/Departments dropdowns looking cut off or faded partway down — they were being clipped by the popup window they opened inside. They now open on top of everything, fully visible, from any screen.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6024,6 +6024,14 @@ function initGlassSelect(select) {
   btn.className = 'glass-select-btn';
   wrap.appendChild(btn);
 
+  // The list is built here inside `wrap` like before, but the moment it
+  // opens it gets moved out to <body> (see openList below) — every one of
+  // these dropdowns lives inside a modal whose rounded-corner panel uses
+  // `overflow: hidden`, which was clipping/garbling the bottom of longer
+  // lists (Roles, Departments, etc.) instead of cleanly showing or
+  // scrolling to them. Moving the actual open list to <body> and
+  // positioning it with fixed, on-screen coordinates escapes that clipping
+  // entirely, from any modal, at any scroll position.
   const list = document.createElement('div');
   list.className = 'glass-select-list job-search-results';
   list.style.display = 'none';
@@ -6038,9 +6046,31 @@ function initGlassSelect(select) {
   function closeList() {
     list.style.display = 'none';
     document.removeEventListener('mousedown', onOutside, true);
+    window.removeEventListener('scroll', positionList, true);
+    window.removeEventListener('resize', positionList);
   }
   function onOutside(e) {
-    if (!wrap.contains(e.target)) closeList();
+    if (!wrap.contains(e.target) && !list.contains(e.target)) closeList();
+  }
+  // Positions the (now body-level) list against the button's current, real
+  // on-screen location — flipping upward instead of down whenever there
+  // isn't enough room below, measured against the true viewport instead of
+  // a possibly-clipping modal ancestor.
+  function positionList() {
+    const btnRect = btn.getBoundingClientRect();
+    const listHeight = list.offsetHeight;
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    const openUp = listHeight > spaceBelow - 12 && spaceAbove > spaceBelow;
+    list.style.left = btnRect.left + 'px';
+    list.style.width = btnRect.width + 'px';
+    if (openUp) {
+      list.style.top = 'auto';
+      list.style.bottom = (window.innerHeight - btnRect.top + 4) + 'px';
+    } else {
+      list.style.bottom = 'auto';
+      list.style.top = (btnRect.bottom + 4) + 'px';
+    }
   }
   function openList() {
     if (select.disabled) return;
@@ -6061,21 +6091,16 @@ function initGlassSelect(select) {
         syncBtn();
       });
     });
+    document.body.appendChild(list);
+    list.classList.add('glass-portal');
     list.style.display = 'block';
-    list.classList.remove('drop-up');
-    // Longer lists (Roles, Departments, etc.) were opening downward
-    // unconditionally, so near the bottom of the screen the list ran off
-    // the edge with no way to reach or scroll to the last few options —
-    // flip it to open upward instead whenever there isn't enough room
-    // below the button but there is above.
-    const btnRect = btn.getBoundingClientRect();
-    const listHeight = list.offsetHeight;
-    const spaceBelow = window.innerHeight - btnRect.bottom;
-    const spaceAbove = btnRect.top;
-    if (listHeight > spaceBelow - 12 && spaceAbove > spaceBelow) {
-      list.classList.add('drop-up');
-    }
+    positionList();
     document.addEventListener('mousedown', onOutside, true);
+    // Keep it glued to the button if the modal/page scrolls or the window
+    // resizes while it's open, instead of drifting away from what it's
+    // anchored to.
+    window.addEventListener('scroll', positionList, true);
+    window.addEventListener('resize', positionList);
   }
   btn.addEventListener('click', () => { list.style.display === 'block' ? closeList() : openList(); });
 

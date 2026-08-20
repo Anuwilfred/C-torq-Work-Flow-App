@@ -803,6 +803,19 @@ button.ghost:hover { color: var(--text); }
   bottom: calc(100% + 4px);
 }
 
+/* Roles/Departments/etc. dropdowns (initGlassSelect in app.js) get moved to
+   <body> the moment they open, instead of staying nested inside whatever
+   modal they were opened from — every one of those modals uses
+   `overflow: hidden` on its rounded-corner panel, which was clipping and
+   visually garbling the bottom of longer lists. Moved to <body>, the list
+   is positioned with fixed, JS-computed on-screen coordinates (see
+   positionList() in app.js) instead of the relative-to-parent absolute
+   positioning normally used by this shared component. */
+.job-search-results.glass-portal {
+  position: fixed;
+  z-index: 500;
+}
+
 /* Job Allocation's "Add a job" list is a tap-to-browse-all list, not a
    type-only search — give it more room and slightly bigger touch targets. */
 #allocationJobResults { max-height: 420px; }
