@@ -387,6 +387,25 @@
       </div>
     </div>
 
+    <!-- MANAGE GROUP (admin only — rename, add/remove members, delete) -->
+    <div id="manageGroupOverlay" class="overlay">
+      <div class="card glass review-card">
+        <h3>Manage group</h3>
+        <label for="manageGroupNameInput">Group name</label>
+        <input id="manageGroupNameInput" type="text" placeholder="e.g. Site Team" />
+        <label>Members</label>
+        <div id="manageGroupMemberList" style="margin:6px 0 4px;"></div>
+        <div class="review-actions">
+          <button type="button" id="manageGroupCancelBtn" class="secondary">Cancel</button>
+          <button type="button" id="manageGroupSaveBtn" class="primary" style="margin-top:0;">Save changes</button>
+        </div>
+        <div class="section-divider"></div>
+        <strong style="font-size:13px; color: var(--err);">Danger zone</strong>
+        <p class="hint" style="margin-top:4px;">Deleting a group removes it and every message in it for everyone, permanently. This cannot be undone.</p>
+        <button type="button" id="manageGroupDeleteBtn" class="secondary" style="margin-top:8px; color: var(--err);">🗑️ Delete this group</button>
+      </div>
+    </div>
+
     <!-- REPORTS -->
     <section id="reports" class="panel">
       <div class="card glass" id="reportPersonCard" style="display:none">
@@ -622,10 +641,11 @@
         <div class="chat-thread-header">
           <button type="button" id="chatBackBtn" class="ghost chat-back-btn">‹</button>
           <span id="chatThreadPresence" class="presence-dot" style="display:none"></span>
-          <div style="display:flex; flex-direction:column; line-height:1.2;">
+          <div style="display:flex; flex-direction:column; line-height:1.2; flex:1; min-width:0;">
             <strong id="chatThreadTitle">—</strong>
             <span id="chatThreadStatus" class="chat-thread-status"></span>
           </div>
+          <button type="button" id="manageGroupBtn" class="ghost" style="display:none;" title="Manage group">⚙️</button>
           <button type="button" id="chatHomeBtn" class="ghost chat-home-btn" title="Back to home">🏠 Home</button>
         </div>
         <div id="chatMessages" class="chat-messages"></div>

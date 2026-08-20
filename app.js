@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.94';
+const APP_VERSION = 'v3.96';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed the real cause of Roles/Departments dropdowns looking cut off or faded partway down — they were being clipped by the popup window they opened inside. They now open on top of everything, fully visible, from any screen.';
+const APP_UPDATE_NOTES = 'You can now edit your own chat messages after sending them (look for the pencil icon). Admins can also rename, add/remove members from, or permanently delete a group chat via the new ⚙️ button in a group\'s header.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -124,6 +124,25 @@ function clearStoredSession() {
       .filter((k) => k.startsWith('sb-') && k.includes('-auth-token'))
       .forEach((k) => localStorage.removeItem(k));
   } catch (e) { /* ignore */ }
+}
+
+// TRUE OFFLINE OPEN: getSession()/getUser() above already read from local
+// storage first, but they still go through Supabase's own internal lock and
+// — for a token that looks expired — try to refresh it over the network
+// before returning anything. On a device with genuinely zero connectivity
+// (not just slow), that refresh attempt can hang for the entire timeout
+// with nothing to fall back on, even though a perfectly usable session is
+// sitting right there in storage. This reads that same stored session
+// directly — no lock, no refresh attempt, no network at all — so a cold
+// open with zero signal still has a way in, using whatever was saved from
+// the last time this device successfully signed in.
+function getStoredSessionUser() {
+  try {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sb-') && k.includes('-auth-token'));
+    if (!key) return null;
+    const raw = JSON.parse(localStorage.getItem(key));
+    return raw?.user || raw?.currentSession?.user || null;
+  } catch (e) { return null; }
 }
 
 let currentUser = null;
@@ -1553,6 +1572,17 @@ async function enterApp(knownUser) {
     result = await raceTimeout(sb.auth.getUser(), 7000);
     user = result.__timedOut ? null : result.data.user;
   }
+  if (!user && result.__timedOut) {
+    // Both tries timed out without the server ever confirming or denying
+    // anything — most likely genuinely offline (or a signal too weak to
+    // complete the round-trip at all) rather than actually signed out.
+    // Fall back to reading the stored session directly, bypassing the
+    // SDK's own network-dependent check entirely, so a cold open with zero
+    // connectivity still gets in using whatever this device last signed in
+    // as — loadProfile() below has its own cached-profile fallback too, so
+    // the whole app shell can come up fully offline this way.
+    user = getStoredSessionUser();
+  }
   if (!user) {
     currentUser = null;
     currentProfile = null;
@@ -1566,7 +1596,9 @@ async function enterApp(knownUser) {
     $('appShell').style.display = 'none';
     $('authScreen').style.display = 'flex';
     showAuthView('loginView');
-    $('authMsg').textContent = 'Your session expired — please log in again.';
+    $('authMsg').textContent = result.__timedOut
+      ? "Couldn't reach the server and no saved sign-in was found on this device — check your connection and try again."
+      : 'Your session expired — please log in again.';
     return;
   }
   }
@@ -2067,11 +2099,30 @@ $('authScreen').style.display = 'flex';
     result = await raceTimeout(sb.auth.getSession(), 7000);
   }
   if (result.__timedOut) {
-    // Still nothing after the retry. Show the login screen, but do NOT
-    // clear the stored session here — we don't actually know it's invalid,
-    // just that checking it is taking unusually long. Wiping it now would
-    // force a real login even though the session might be perfectly fine a
-    // few seconds later.
+    // Still nothing after the retry — most likely genuinely offline rather
+    // than actually signed out. Read the stored session directly instead
+    // of giving up: no lock, no network attempt, just whatever this device
+    // last signed in as, so a cold open with zero connectivity still gets
+    // in (loadProfile() below falls back to its own cached copy too).
+    const offlineUser = getStoredSessionUser();
+    if (offlineUser) {
+      const profile = await loadProfile(offlineUser);
+      currentUser = offlineUser;
+      currentProfile = profile;
+      if (profile && profile.status === 'invited') {
+        $('setPasswordIntro').textContent = 'Welcome! Set a password to finish joining.';
+        showAuthView('setPasswordView');
+        $('authScreen').style.display = 'flex';
+      } else {
+        await enterApp(offlineUser);
+      }
+      return;
+    }
+    // No stored session to fall back to either — nothing left to do but
+    // show the login screen. Do NOT clear the stored session here — we
+    // don't actually know it's invalid, just that checking it is taking
+    // unusually long. Wiping it now would force a real login even though
+    // the session might be perfectly fine a few seconds later.
     $('authScreen').style.display = 'flex';
     return;
   }
@@ -5477,6 +5528,8 @@ let messagesChannel = null;     // realtime subscription for the open thread
 let chatListTimer = null;
 let openChatTimer = null;       // backup poll for the open thread, in case realtime drops (flaky mobile networks)
 let pendingChatAttachment = null; // { file } selected but not yet sent
+let chatMessagesCache = []; // last loaded rows for the open thread, kept so edit/cancel can re-render without a fresh fetch
+let editingMessageId = null; // message currently showing its inline edit box, if any
 let onlineUserIds = new Set();  // who's currently online, via Supabase Realtime Presence
 // presenceChannel itself is declared up near currentUser/currentProfile now — see the comment there.
 
@@ -5638,10 +5691,30 @@ async function attachmentUrl(path) {
 }
 
 async function renderMessages(rows) {
+  chatMessagesCache = rows;
   const wrap = $('chatMessages');
   const isGroup = activeChatMeta?.type === 'group';
+  const scrolledToBottomAlready = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 40;
   const parts = await Promise.all(rows.map(async (m) => {
     const mine = m.sender_id === currentUser.id;
+
+    // Own message currently being edited — an inline textarea + Save/Cancel
+    // instead of the normal bubble, so editing happens right in place
+    // rather than a separate popup.
+    if (mine && m.id === editingMessageId) {
+      return `
+        <div class="chat-bubble-row mine" data-msg-id="${m.id}">
+          <div class="chat-bubble chat-bubble-editing">
+            <textarea class="chat-edit-textarea" data-edit-input="${m.id}">${escapeHtml(m.content || '')}</textarea>
+            <div class="chat-edit-actions">
+              <button type="button" class="ghost" data-cancel-edit="${m.id}">Cancel</button>
+              <button type="button" class="primary" data-save-edit="${m.id}" style="margin-top:0;">Save</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     let mediaHtml = '';
     if (m.attachment_path) {
       const url = await attachmentUrl(m.attachment_path);
@@ -5653,19 +5726,56 @@ async function renderMessages(rows) {
     }
     const senderName = isGroup && !mine ? `<div class="chat-bubble-sender">${escapeHtml(m.senderLabel || '')}</div>` : '';
     const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Only text content is editable (nothing to "edit" on an attachment by
+    // itself), and only by whoever sent it.
+    const editBtn = (mine && m.content)
+      ? `<button type="button" class="chat-edit-btn" data-edit-msg="${m.id}" title="Edit message">✏️</button>`
+      : '';
+    const editedTag = m.edited_at ? '<span class="chat-edited-tag">edited</span> ' : '';
     return `
-      <div class="chat-bubble-row ${mine ? 'mine' : ''}">
+      <div class="chat-bubble-row ${mine ? 'mine' : ''}" data-msg-id="${m.id}">
         <div class="chat-bubble">
           ${senderName}
           ${m.content ? escapeHtml(m.content) : ''}
           ${mediaHtml}
-          <div class="chat-bubble-time">${time}</div>
+          <div class="chat-bubble-time">${editedTag}${time}${editBtn}</div>
         </div>
       </div>
     `;
   }));
   wrap.innerHTML = parts.join('');
-  wrap.scrollTop = wrap.scrollHeight;
+  wrap.querySelectorAll('[data-edit-msg]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editingMessageId = btn.dataset.editMsg;
+      renderMessages(chatMessagesCache);
+    });
+  });
+  wrap.querySelectorAll('[data-cancel-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editingMessageId = null;
+      renderMessages(chatMessagesCache);
+    });
+  });
+  wrap.querySelectorAll('[data-save-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => saveMessageEdit(btn.dataset.saveEdit));
+  });
+  const textarea = editingMessageId && wrap.querySelector(`[data-edit-input="${editingMessageId}"]`);
+  if (textarea) { textarea.focus(); textarea.setSelectionRange(textarea.value.length, textarea.value.length); }
+  // Keep the view pinned to the bottom for new messages arriving while
+  // already caught up, but don't yank someone back down if they've
+  // scrolled up to read older messages (e.g. right as they open an edit box).
+  if (scrolledToBottomAlready || editingMessageId) wrap.scrollTop = wrap.scrollHeight;
+}
+
+async function saveMessageEdit(msgId) {
+  const textarea = document.querySelector(`[data-edit-input="${msgId}"]`);
+  const newText = (textarea?.value || '').trim();
+  if (!newText) { showToast("Message can't be empty."); return; }
+  const { error } = await sb.from('messages').update({ content: newText, edited_at: new Date().toISOString() }).eq('id', msgId);
+  if (error) { showToast(`Couldn't save edit: ${error.message}`); return; }
+  editingMessageId = null;
+  await loadMessages(activeChatId);
+  refreshChatList();
 }
 
 async function loadMessages(chatId) {
@@ -5692,6 +5802,9 @@ async function openChat(chatId) {
   $('chatThreadWrap').style.display = 'flex';
   $('chatShell').classList.add('show-thread');
   $('chatThreadTitle').textContent = activeChatMeta ? chatDisplayName(activeChatMeta) : 'Chat';
+  const canManageGroup = activeChatMeta?.type === 'group' && currentProfile?.role === 'admin';
+  if ($('manageGroupBtn')) $('manageGroupBtn').style.display = canManageGroup ? 'flex' : 'none';
+  editingMessageId = null; // don't carry an open edit box over from a different chat
   updateThreadPresence();
   renderChatList();
 
@@ -5982,6 +6095,76 @@ $('newGroupCreateBtn').addEventListener('click', async () => {
   $('newGroupOverlay').classList.remove('show');
   await refreshChatList();
   await openChat(chatRow.id);
+});
+
+// ---------- Manage group (admin only — rename, add/remove members, delete) ----------
+$('manageGroupBtn')?.addEventListener('click', async () => {
+  if (!activeChatId || activeChatMeta?.type !== 'group') return;
+  if (!teamProfiles.length) await loadTeamProfiles();
+  $('manageGroupNameInput').value = activeChatMeta.name || '';
+  const currentMemberIds = new Set((activeChatMeta.memberProfiles || []).map((p) => p.id));
+  // Everyone on the team, not just current members, so the admin can also
+  // add someone new — current members start ticked, everyone else doesn't.
+  const allPeople = [currentUser, ...teamProfiles].filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
+  $('manageGroupMemberList').innerHTML = allPeople.length
+    ? allPeople.map((p) => `
+        <label class="person-pick-row">
+          <input type="checkbox" value="${p.id}" ${currentMemberIds.has(p.id) ? 'checked' : ''} />
+          <span>${escapeHtml(p.full_name || p.email)}${p.id === currentUser.id ? ' (you)' : ''}</span>
+        </label>
+      `).join('')
+    : '<div class="empty">No teammates yet.</div>';
+  $('manageGroupOverlay').classList.add('show');
+});
+$('manageGroupCancelBtn')?.addEventListener('click', () => $('manageGroupOverlay').classList.remove('show'));
+
+$('manageGroupSaveBtn')?.addEventListener('click', async () => {
+  if (!activeChatId) return;
+  const name = $('manageGroupNameInput').value.trim();
+  if (!name) { showToast('Give the group a name.'); return; }
+  const selectedIds = Array.from($('manageGroupMemberList').querySelectorAll('input[type="checkbox"]:checked')).map((c) => c.value);
+  if (!selectedIds.length) { showToast('A group needs at least one member.'); return; }
+
+  const { error: renameErr } = await sb.from('chats').update({ name }).eq('id', activeChatId);
+  if (renameErr) { showToast(`Couldn't rename group: ${renameErr.message}`); return; }
+
+  const currentMemberIds = new Set((activeChatMeta.memberProfiles || []).map((p) => p.id));
+  const selectedSet = new Set(selectedIds);
+  const toAdd = selectedIds.filter((id) => !currentMemberIds.has(id));
+  const toRemove = [...currentMemberIds].filter((id) => !selectedSet.has(id));
+
+  if (toAdd.length) {
+    const { error: addErr } = await sb.from('chat_members').insert(toAdd.map((id) => ({ chat_id: activeChatId, user_id: id })));
+    if (addErr) { showToast(`Couldn't add members: ${addErr.message}`); return; }
+  }
+  if (toRemove.length) {
+    const { error: removeErr } = await sb.from('chat_members').delete().eq('chat_id', activeChatId).in('user_id', toRemove);
+    if (removeErr) { showToast(`Couldn't remove members: ${removeErr.message}`); return; }
+  }
+
+  showToast('Group updated.');
+  $('manageGroupOverlay').classList.remove('show');
+  await refreshChatList();
+  await openChat(activeChatId);
+});
+
+$('manageGroupDeleteBtn')?.addEventListener('click', async () => {
+  if (!activeChatId) return;
+  const name = activeChatMeta?.name || 'this group';
+  if (!confirm(`Delete "${name}" for everyone? Every message in it is deleted too, permanently. This cannot be undone.`)) return;
+  const deletingChatId = activeChatId;
+  const { error } = await sb.from('chats').delete().eq('id', deletingChatId);
+  if (error) { showToast(`Couldn't delete group: ${error.message}`); return; }
+  showToast('Group deleted.');
+  $('manageGroupOverlay').classList.remove('show');
+  activeChatId = null;
+  activeChatMeta = null;
+  $('chatShell').classList.remove('show-thread');
+  $('chatThreadWrap').style.display = 'none';
+  $('chatEmpty').style.display = 'flex';
+  if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
+  clearInterval(openChatTimer);
+  await refreshChatList();
 });
 
 // =====================================================================
