@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.96';
+const APP_VERSION = 'v3.97';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'You can now edit your own chat messages after sending them (look for the pencil icon). Admins can also rename, add/remove members from, or permanently delete a group chat via the new ⚙️ button in a group\'s header.';
+const APP_UPDATE_NOTES = 'Fixed a silent dead-end on Submit: declining the "you already have a similar entry — submit anyway?" prompt used to do nothing at all with no message — it now clearly tells you the entry wasn\'t submitted instead of looking like the app froze.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1382,7 +1382,14 @@ $('reviewConfirmBtn').addEventListener('click', async () => {
       `You already have an entry logged for ${pendingEntryDraft.jobId} on ${pendingEntryDraft.date} with the same clock-in and clock-out time ` +
       `(${timeLabel12h(pendingEntryDraft.startTime)}–${timeLabel12h(pendingEntryDraft.endTime)}). Submit this one anyway?`
     );
-    if (!proceed) return;
+    if (!proceed) {
+      // This used to return here with zero feedback — nothing on screen
+      // changed, no toast, nothing — which looked exactly like the app had
+      // silently frozen instead of having correctly done what was asked
+      // (not submit a likely-duplicate entry).
+      showToast('Not submitted — this looked like a duplicate of an entry you already have.');
+      return;
+    }
   }
   await addEntry(pendingEntryDraft);
   // A submitted work-day entry means today's clock cycle is done — reset it
