@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.98';
+const APP_VERSION = 'v3.99';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'The work note is optional again (no longer blocks Submit). Also fixed Job ID being demanded a second time on Submit even after it was already picked at Clock In or came from today\'s allocation — those no longer need re-confirming.';
+const APP_UPDATE_NOTES = 'Pending invite rows (Admin → Employee & Invitation Manager) are now saved automatically as you type — closing the app, losing signal, or reloading no longer wipes out emails you\'d already started adding but hadn\'t sent yet.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2561,22 +2561,71 @@ $('addRoleBtn')?.addEventListener('click', async () => {
 let pendingInviteRows = []; // { id, allowedFeatures: [], customized: bool }
 let inviteRowSeq = 0;
 
+// Rows you've started typing (email, role, access) but not sent yet used to
+// live only in page memory — closing the app, losing signal, or the tab
+// just reloading wiped them out with no warning. They're now mirrored to
+// localStorage on every change and restored the next time this device
+// opens the Employee & Invitation Manager, same as everything else in this
+// app that's meant to survive being offline.
+const PENDING_INVITES_KEY = 'ctorq-pending-invites';
+let pendingInvitesRestored = false;
+
+function savePendingInvitesToStorage() {
+  try {
+    const rows = pendingInviteRows.map((r) => {
+      const div = document.querySelector(`[data-invite-row="${r.id}"]`);
+      return {
+        id: r.id,
+        email: div ? div.querySelector('.invite-row-email').value : (r.email || ''),
+        roleId: div ? div.querySelector('.invite-row-role').value : (r.roleId || ''),
+        allowedFeatures: r.allowedFeatures || [],
+        customized: !!r.customized,
+      };
+    });
+    localStorage.setItem(PENDING_INVITES_KEY, JSON.stringify(rows));
+  } catch (e) { /* worst case, pending rows just don't survive a reload */ }
+}
+
+function loadPendingInvitesFromStorage() {
+  try {
+    const raw = localStorage.getItem(PENDING_INVITES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+
+async function restorePendingInvitesIfNeeded() {
+  if (pendingInvitesRestored) return;
+  pendingInvitesRestored = true;
+  const saved = loadPendingInvitesFromStorage();
+  for (const row of saved) await addInviteRow(row);
+}
+
 function updateInviteRowsEmptyState() {
   const empty = $('pendingInviteRowsEmpty');
   if (empty) empty.style.display = pendingInviteRows.length ? 'none' : '';
 }
 
-async function addInviteRow() {
-  const rowId = `row_${++inviteRowSeq}`;
-  pendingInviteRows.push({ id: rowId, allowedFeatures: [], customized: false });
-  const roleHtml = await buildRoleSelectHtml();
+async function addInviteRow(saved = null) {
+  let rowId = saved?.id;
+  if (!rowId) {
+    rowId = `row_${++inviteRowSeq}`;
+  } else {
+    // Restoring a saved row that already has a numbered id — make sure the
+    // next brand-new row picks a number after this one, so two rows can
+    // never end up sharing an id.
+    const num = parseInt(String(rowId).replace('row_', ''), 10);
+    if (!isNaN(num) && num > inviteRowSeq) inviteRowSeq = num;
+  }
+  pendingInviteRows.push({ id: rowId, allowedFeatures: saved?.allowedFeatures || [], customized: !!saved?.customized });
+  const roleHtml = await buildRoleSelectHtml(saved?.roleId || '');
   const div = document.createElement('div');
   div.className = 'entry team-entry';
   div.dataset.inviteRow = rowId;
+  const accessCount = saved?.allowedFeatures?.length || 0;
   div.innerHTML = `
-    <input type="email" class="invite-row-email" placeholder="name@example.com" style="flex:1; min-width:150px;" />
+    <input type="email" class="invite-row-email" placeholder="name@example.com" style="flex:1; min-width:150px;" value="${saved?.email ? escapeHtml(saved.email) : ''}" />
     <select class="position-select invite-row-role">${roleHtml}</select>
-    <button type="button" class="secondary invite-row-access" data-row="${rowId}">🔐 Access</button>
+    <button type="button" class="secondary invite-row-access" data-row="${rowId}">🔐 Access${accessCount ? ` (${accessCount})` : ''}</button>
     <button type="button" class="primary invite-row-send" data-row="${rowId}">✉️ Invite</button>
     <button type="button" class="ghost invite-row-delete" data-row="${rowId}">✕</button>
   `;
@@ -2584,16 +2633,20 @@ async function addInviteRow() {
   initAllGlassSelects(div);
   updateInviteRowsEmptyState();
 
+  div.querySelector('.invite-row-email').addEventListener('input', savePendingInvitesToStorage);
+  div.querySelector('.invite-row-role').addEventListener('change', savePendingInvitesToStorage);
   div.querySelector('.invite-row-access').addEventListener('click', () => openInviteAccessModal(rowId));
   div.querySelector('.invite-row-delete').addEventListener('click', () => {
     pendingInviteRows = pendingInviteRows.filter((r) => r.id !== rowId);
     div.remove();
     updateInviteRowsEmptyState();
+    savePendingInvitesToStorage();
   });
   div.querySelector('.invite-row-send').addEventListener('click', () => sendInviteRow(rowId));
+  savePendingInvitesToStorage();
 }
 
-$('addInviteRowBtn')?.addEventListener('click', addInviteRow);
+$('addInviteRowBtn')?.addEventListener('click', () => addInviteRow());
 
 async function sendInviteRow(rowId) {
   const div = document.querySelector(`[data-invite-row="${rowId}"]`);
@@ -2626,6 +2679,7 @@ async function sendInviteRow(rowId) {
   pendingInviteRows = pendingInviteRows.filter((r) => r.id !== rowId);
   div.remove();
   updateInviteRowsEmptyState();
+  savePendingInvitesToStorage();
   renderTeamList();
   return { ok: true, email };
 }
@@ -2685,6 +2739,7 @@ $('inviteAccessSaveBtn')?.addEventListener('click', () => {
   if (row) { row.allowedFeatures = checked; row.customized = true; }
   const btn = document.querySelector(`.invite-row-access[data-row="${inviteAccessRowId}"]`);
   if (btn) btn.textContent = checked.length ? `🔐 Access (${checked.length})` : '🔐 Access';
+  savePendingInvitesToStorage();
   showToast('Access set for this invite.');
   closePanel('inviteAccess');
 });
@@ -3916,6 +3971,7 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'people') {
     renderTeamList();
+    restorePendingInvitesIfNeeded();
   }
 }
 function closePanel(name) {
