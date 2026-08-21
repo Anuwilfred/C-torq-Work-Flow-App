@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.97';
+const APP_VERSION = 'v3.98';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a silent dead-end on Submit: declining the "you already have a similar entry — submit anyway?" prompt used to do nothing at all with no message — it now clearly tells you the entry wasn\'t submitted instead of looking like the app froze.';
+const APP_UPDATE_NOTES = 'The work note is optional again (no longer blocks Submit). Also fixed Job ID being demanded a second time on Submit even after it was already picked at Clock In or came from today\'s allocation — those no longer need re-confirming.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -398,6 +398,13 @@ function rehydrateEntryFormFromClockState() {
 
   if (state.currentJobId && $('jobId') && !$('jobId').value.trim()) {
     $('jobId').value = state.currentJobId;
+    // This came from the clock-in itself, not a fresh free-typed guess — it
+    // was already a real, picked Job ID back when clock-in happened, so
+    // there's nothing to re-confirm here. Without this, reopening the app
+    // (or just Submit re-checking the form) demanded picking the exact same
+    // Job ID from the dropdown all over again before it would let the entry
+    // through.
+    jobIdConfirmed = true;
     autoFillProjectFromJobId(state.currentJobId);
   }
   if (state.clockInAt && $('date') && !$('date').value) $('date').value = state.clockInAt.slice(0, 10);
@@ -1155,13 +1162,8 @@ async function buildDraftFromForm() {
       isOvernightShift = true;
     }
 
-    // DATA QUALITY FIX: notes were the only place real work detail ever got
-    // recorded, and a lot of entries had none at all — required now, same
-    // as Daily Progress/Report already requires a description.
-    if (!$('workNotes').value.trim()) {
-      showToast('Add a quick note about what you worked on before submitting.');
-      return null;
-    }
+    // Quick note is optional again — it was made mandatory in an earlier
+    // round, but that turned out to be more friction than it was worth.
 
     // Break In / Break Out — the actual clock times (local "HH:MM", same
     // format as Start/End Time) of the first break started and the last
@@ -1697,6 +1699,10 @@ async function renderMyTodayAssignment() {
   // very next tap.
   if (data.project && $('jobId') && !$('jobId').value.trim()) {
     $('jobId').value = data.project;
+    // A published allocation is a real Job ID an admin already assigned —
+    // not a free-typed guess — so it doesn't need re-confirming from the
+    // dropdown before Submit will accept it.
+    jobIdConfirmed = true;
     autoFillProjectFromJobId(data.project);
   }
   const isTransport = data.assignment_type === 'transportation';

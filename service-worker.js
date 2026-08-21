@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.97';
+const CACHE_NAME = 'ctorq-workflow-v3.98';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 // Resumable/chunked uploads for larger chat attachments (photos/videos) —
 // see the TUS_UPLOAD block in app.js for how this is used.
