@@ -1790,10 +1790,12 @@ button.ghost:hover { color: var(--text); }
 .ring-center-value.dim { color: var(--text-dim); }
 .ring-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
-/* Departments with no hours logged/allotted on this project yet — dulled
-   down so they're clearly present but inactive, rather than hidden. */
-.ring-card-dim { opacity: 0.5; }
-.ring-card-dim .ring-role { color: var(--text-dim); }
+/* Departments with no hours logged/allotted on this project yet — only the
+   ring itself (drawn muted in ringSvg) and the card background dim; the
+   department NAME stays fully legible. Dimming the whole card's opacity
+   made names unreadable against the dark backdrop — fixed here. */
+.ring-card-dim { background: rgba(255,255,255,0.02); border-style: dashed; }
+.ring-card-dim .ring-role { color: var(--text-muted); opacity: 0.85; }
 
 .contrib-row {
   margin-bottom: 14px;
