@@ -1764,17 +1764,18 @@ button.ghost:hover { color: var(--text); }
    Projects (and the WhatsApp import box) from the Admin tab, so hiding it
    on desktop just made that unreachable there. Removed. */
 
-/* Project hour rings (Apple-Watch-style dual ring per role) — 5 small rings
-   per row so the whole department spread is visible without scrolling. */
+/* Project hour rings (Apple-Watch-style dual ring per role) — 4 small rings
+   per row, always horizontal, so the whole department spread is visible
+   without scrolling. */
 .project-rings {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
 }
-@media (max-width: 380px) {
-  /* Below this width 5 columns makes the ring smaller than a tap target —
-     drop to 3 per row so it stays usable on the smallest phones. */
-  .project-rings { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+@media (max-width: 340px) {
+  /* Only the very smallest phones drop below 4 — still horizontal, just 2
+     per row instead of shrinking the ring past a usable tap target. */
+  .project-rings { grid-template-columns: repeat(2, 1fr); gap: 8px; }
 }
 .ring-card {
   display: flex;
@@ -1795,12 +1796,12 @@ button.ghost:hover { color: var(--text); }
   text-align: center;
   overflow-wrap: break-word;
 }
-.ring-svg { width: 60px; height: 60px; }
-.ring-center-value { font-size: 10.5px; font-weight: 800; margin-top: 4px; }
+.ring-svg { width: 52px; height: 52px; }
+.ring-center-value { font-size: 9.5px; font-weight: 800; margin-top: 3px; }
 .ring-center-value.over { color: var(--warn); }
 .ring-center-value.under { color: var(--ok); }
 .ring-center-value.dim { color: var(--text-dim); }
-.ring-sub { font-size: 7.5px; color: var(--text-dim); margin-top: 1px; line-height: 1.2; text-align: center; }
+.ring-sub { font-size: 7px; color: var(--text-dim); margin-top: 1px; line-height: 1.15; text-align: center; }
 
 /* Departments with no hours logged/allotted on this project yet — only the
    ring itself (drawn muted in ringSvg) and the card background dim; the
