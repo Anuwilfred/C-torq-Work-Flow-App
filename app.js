@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.104';
+const APP_VERSION = 'v3.105';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed unreadable department names on the Project Detail rings — the dulled/no-data rings now keep the name fully legible instead of fading the whole card.';
+const APP_UPDATE_NOTES = 'Project Department Hours rings are now smaller and show 5 per row (3 on the smallest phones) instead of 2, so the full department spread fits without scrolling.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------

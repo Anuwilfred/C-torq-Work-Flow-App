@@ -1764,31 +1764,43 @@ button.ghost:hover { color: var(--text); }
    Projects (and the WhatsApp import box) from the Admin tab, so hiding it
    on desktop just made that unreachable there. Removed. */
 
-/* Project hour rings (Apple-Watch-style dual ring per role) */
+/* Project hour rings (Apple-Watch-style dual ring per role) — 5 small rings
+   per row so the whole department spread is visible without scrolling. */
 .project-rings {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
 }
-@media (max-width: 480px) {
-  .project-rings { grid-template-columns: 1fr; }
+@media (max-width: 380px) {
+  /* Below this width 5 columns makes the ring smaller than a tap target —
+     drop to 3 per row so it stays usable on the smallest phones. */
+  .project-rings { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }
 .ring-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 18px 12px;
+  padding: 8px 3px;
   background: var(--glass-2);
   border: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
+  min-width: 0;
 }
-.ring-card .ring-role { font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; }
-.ring-svg { width: 140px; height: 140px; }
-.ring-center-value { font-size: 16px; font-weight: 800; margin-top: 6px; }
+.ring-card .ring-role {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+.ring-svg { width: 60px; height: 60px; }
+.ring-center-value { font-size: 10.5px; font-weight: 800; margin-top: 4px; }
 .ring-center-value.over { color: var(--warn); }
 .ring-center-value.under { color: var(--ok); }
 .ring-center-value.dim { color: var(--text-dim); }
-.ring-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.ring-sub { font-size: 7.5px; color: var(--text-dim); margin-top: 1px; line-height: 1.2; text-align: center; }
 
 /* Departments with no hours logged/allotted on this project yet — only the
    ring itself (drawn muted in ringSvg) and the card background dim; the
