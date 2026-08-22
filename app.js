@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.99';
+const APP_VERSION = 'v3.102';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Pending invite rows (Admin → Employee & Invitation Manager) are now saved automatically as you type — closing the app, losing signal, or reloading no longer wipes out emails you\'d already started adding but hadn\'t sent yet.';
+const APP_UPDATE_NOTES = 'App icon recoloured to match our AEON Ai teal (#00A19C) instead of green/orange.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1941,9 +1941,33 @@ function openMyJobDetail(id) {
 // types — with 50+ jobs a plain dropdown is painful to scroll through, this
 // is common for everyone (not just admins).
 let jobSearchOptions = [];
+
+// RELIABILITY: this used to just come back empty on any network failure —
+// which, combined with Job ID now being locked to picking a real project
+// (see jobIdConfirmed below), meant opening the app offline left the Job ID
+// search with nothing in it and no way to log a job-tied entry at all until
+// back online. Same fix as the profile cache: keep the last successful list
+// in localStorage and fall back to it whenever the live fetch fails.
+const JOB_OPTIONS_CACHE_KEY = 'ctorq-job-options';
+function cacheJobOptions(rows) {
+  try { localStorage.setItem(JOB_OPTIONS_CACHE_KEY, JSON.stringify(rows)); } catch (e) { /* ignore */ }
+}
+function getCachedJobOptions() {
+  try {
+    const raw = localStorage.getItem(JOB_OPTIONS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+
 async function populateJobIdDropdown() {
   const { data, error } = await sb.from('projects').select('job_id, name, client').eq('status', 'active').order('job_id');
-  jobSearchOptions = error ? [] : (data || []);
+  if (error) {
+    jobSearchOptions = getCachedJobOptions();
+    console.warn('[Jobs] using cached job list (network unavailable):', error);
+  } else {
+    jobSearchOptions = data || [];
+    cacheJobOptions(jobSearchOptions);
+  }
 }
 
 // DATA QUALITY FIX: free-typed Job IDs used to be accepted as-is, which is
