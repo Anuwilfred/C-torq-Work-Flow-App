@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.102';
+const APP_VERSION = 'v3.103';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'App icon recoloured to match our AEON Ai teal (#00A19C) instead of green/orange.';
+const APP_UPDATE_NOTES = 'Project Department Hours now shows every department, not just the ones with hours — departments with no data yet appear as a dulled ring instead of disappearing.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4715,18 +4715,30 @@ if ($('scanImportJobsBtn')) {
 // Apple-Watch-style dual ring: green fills 0→100% of allocated hours used;
 // once used exceeds allocated, the green ring stays full and a second,
 // smaller orange ring fills to show the overage.
-function ringSvg(used, allocated) {
+function ringSvg(used, allocated, hasData = true) {
   const size = 140, stroke = 14;
   const rOuter = (size - stroke) / 2;
   const rInner = rOuter - stroke - 6;
   const cOuter = 2 * Math.PI * rOuter;
   const cInner = 2 * Math.PI * rInner;
+  const cx = size / 2, cy = size / 2;
+  if (!hasData) {
+    // No hours logged or allotted for this department on this project yet —
+    // draw a flat, fully-muted ring instead of the usual green/orange
+    // progress rings so it reads as "present but inactive" rather than
+    // vanishing from the screen entirely.
+    return `
+      <svg viewBox="0 0 ${size} ${size}" class="ring-svg">
+        <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
+        <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="${stroke}" />
+      </svg>
+    `;
+  }
   const usedPct = allocated > 0 ? Math.min(used / allocated, 1) : (used > 0 ? 1 : 0);
   const overHours = Math.max(0, used - allocated);
   const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
   const outerOffset = cOuter * (1 - usedPct);
   const innerOffset = cInner * (1 - overPct);
-  const cx = size / 2, cy = size / 2;
   return `
     <svg viewBox="0 0 ${size} ${size}" class="ring-svg">
       <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
@@ -4742,17 +4754,18 @@ function ringSvg(used, allocated) {
   `;
 }
 
-function ringCard(roleLabel, used, allocated) {
+function ringCard(roleLabel, used, allocated, hasData = true) {
   const over = Math.max(0, Math.round((used - allocated) * 100) / 100);
   const remaining = Math.max(0, Math.round((allocated - used) * 100) / 100);
-  const centerText = over > 0 ? `−${over}h` : `${remaining}h left`;
-  const centerClass = over > 0 ? 'over' : 'under';
+  const centerText = !hasData ? '—' : (over > 0 ? `−${over}h` : `${remaining}h left`);
+  const centerClass = !hasData ? 'dim' : (over > 0 ? 'over' : 'under');
+  const subText = !hasData ? 'No hours logged or allotted yet' : `${used}h used of ${allocated}h`;
   return `
-    <div class="ring-card">
+    <div class="ring-card${hasData ? '' : ' ring-card-dim'}">
       <div class="ring-role">${escapeHtml(roleLabel)}</div>
-      ${ringSvg(used, allocated)}
+      ${ringSvg(used, allocated, hasData)}
       <div class="ring-center-value ${centerClass}">${centerText}</div>
-      <div class="ring-sub">${used}h used of ${allocated}h</div>
+      <div class="ring-sub">${subText}</div>
     </div>
   `;
 }
@@ -4971,9 +4984,33 @@ async function openProjectDetail(jobId, name) {
   }
   currentProjectReport = data;
   const departments = data.project.departments || [];
-  $('projectRingsArea').innerHTML = departments.length
-    ? `<div class="project-rings">${departments.map((d) => ringCard(d.name, d.usedHours, d.allocatedHours)).join('')}</div>`
-    : '<div class="empty">No department hours logged or allocated yet.</div>';
+
+  // Show EVERY department in the organization here, not just the ones this
+  // project happens to have hours logged/allotted for — departments with no
+  // data render as a dulled-out ring so it's obvious at a glance which
+  // departments haven't touched this job yet, instead of them just being
+  // silently missing from the screen.
+  const { rows: allDepartments } = await fetchDepartments();
+  const byId = {};
+  departments.forEach((d) => { byId[d.id] = d; });
+  const merged = allDepartments.map((dept) => {
+    const existing = byId[dept.id];
+    const usedHours = existing ? Number(existing.usedHours) || 0 : 0;
+    const allocatedHours = existing ? Number(existing.allocatedHours) || 0 : 0;
+    return { id: dept.id, name: dept.name, usedHours, allocatedHours, hasData: usedHours > 0 || allocatedHours > 0 };
+  });
+  // Cover the edge case of a department that has report data but was since
+  // deleted/renamed out of the departments table — still show it rather than
+  // silently dropping real hours off the screen.
+  departments.forEach((d) => {
+    if (!allDepartments.some((ad) => ad.id === d.id)) merged.push({ ...d, hasData: true });
+  });
+  // Departments with real data float to the top; dulled/empty ones sink down.
+  merged.sort((a, b) => (b.hasData === a.hasData ? 0 : b.hasData ? 1 : -1));
+
+  $('projectRingsArea').innerHTML = merged.length
+    ? `<div class="project-rings">${merged.map((d) => ringCard(d.name, d.usedHours, d.allocatedHours, d.hasData)).join('')}</div>`
+    : '<div class="empty">No departments set up yet — add one from Admin → Team → Departments.</div>';
   renderProjectContributors(data);
   renderDeptHoursManager(jobId, departments);
 }

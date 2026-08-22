@@ -1787,7 +1787,13 @@ button.ghost:hover { color: var(--text); }
 .ring-center-value { font-size: 16px; font-weight: 800; margin-top: 6px; }
 .ring-center-value.over { color: var(--warn); }
 .ring-center-value.under { color: var(--ok); }
+.ring-center-value.dim { color: var(--text-dim); }
 .ring-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+/* Departments with no hours logged/allotted on this project yet — dulled
+   down so they're clearly present but inactive, rather than hidden. */
+.ring-card-dim { opacity: 0.5; }
+.ring-card-dim .ring-role { color: var(--text-dim); }
 
 .contrib-row {
   margin-bottom: 14px;
