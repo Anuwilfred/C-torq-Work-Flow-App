@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.106';
+const APP_VERSION = 'v3.108';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Department Hours rings are smaller and show 4 per row (2 on the smallest phones), always laid out horizontally.';
+const APP_UPDATE_NOTES = 'Daily Progress now has an optional progress percentage, and Project Report now asks if the project is closed (with an optional reason if not) — feeds the new 3-file Timesheet/Daily Progress/Project Report sheet structure.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -259,12 +259,29 @@ updateOnlineBadge();
 // =====================================================================
 
 function refreshTypeVisibility() {
-  const isTimesheet = $('type').value === 'timesheet';
+  const type = $('type').value;
+  const isTimesheet = type === 'timesheet';
   $('timesheetBlock').style.display = isTimesheet ? 'block' : 'none';
   $('simpleBlock').style.display = isTimesheet ? 'none' : 'block';
+  // Approximate progress only makes sense for Daily Progress; Project
+  // Closed only makes sense for Project Report — each type gets its own
+  // extra field(s) inside the shared simpleBlock.
+  if ($('progressOnlyFields')) $('progressOnlyFields').style.display = type === 'progress' ? 'block' : 'none';
+  if ($('reportOnlyFields')) $('reportOnlyFields').style.display = type === 'data' ? 'block' : 'none';
   if (isTimesheet) refreshModeVisibility();
 }
 $('type').addEventListener('change', refreshTypeVisibility);
+
+// Reason box only shows up when the project is flagged as NOT closed — it's
+// optional either way, this just avoids showing an empty "why not" box when
+// the answer was Yes.
+if ($('projectClosedSelect')) {
+  $('projectClosedSelect').addEventListener('change', () => {
+    if ($('projectClosedReasonWrap')) {
+      $('projectClosedReasonWrap').style.display = $('projectClosedSelect').value === 'no' ? 'block' : 'none';
+    }
+  });
+}
 
 function refreshModeVisibility() {
   const isLeave = LEAVE_MODES.includes(selectedMode);
@@ -1212,6 +1229,29 @@ async function buildDraftFromForm() {
     showToast('Fill in project, date and description.');
     return null;
   }
+  // Approximate percentage (Daily Progress only) — optional, left blank/null
+  // if not entered. Clamp to 0-100 so a typo like "650" can't sneak through.
+  let percentage = null;
+  if (type === 'progress' && $('progressPercent') && $('progressPercent').value !== '') {
+    const raw = Number($('progressPercent').value);
+    if (!isNaN(raw)) percentage = Math.max(0, Math.min(100, raw));
+  }
+
+  // Project Closed Yes/No (Project Report only) — projectClosed is a real
+  // boolean once answered, or null if left unanswered (older/legacy-style
+  // submissions). The reason box is optional and only meaningful when the
+  // answer is "No".
+  let projectClosed = null;
+  let projectClosedReason = '';
+  if (type === 'data' && $('projectClosedSelect')) {
+    const v = $('projectClosedSelect').value;
+    if (v === 'yes') projectClosed = true;
+    else if (v === 'no') projectClosed = false;
+    if (projectClosed === false && $('projectClosedReason')) {
+      projectClosedReason = $('projectClosedReason').value.trim();
+    }
+  }
+
   return {
     ...base,
     category: type === 'progress' ? 'daily-progress' : 'project-report',
@@ -1220,6 +1260,9 @@ async function buildDraftFromForm() {
     date: $('dateSimple').value,
     time: $('timeSimple') && $('timeSimple').value ? $('timeSimple').value : null,
     description: $('descriptionSimple').value.trim(),
+    percentage,
+    projectClosed,
+    projectClosedReason,
     attachments: await filesToAttachments($('filesSimple').files)
   };
 }
@@ -1268,6 +1311,15 @@ function entryDetailRows(draft, opts = {}) {
     rows.push(rowHtml('Project', draft.project));
     rows.push(rowHtml('Date', draft.date));
     rows.push(rowHtml('Description', draft.description));
+    if (draft.type === 'progress' && draft.percentage !== null && draft.percentage !== undefined) {
+      rows.push(rowHtml('Progress', `${draft.percentage}%`));
+    }
+    if (draft.type === 'data' && draft.projectClosed !== null && draft.projectClosed !== undefined) {
+      rows.push(rowHtml('Project closed?', draft.projectClosed ? 'Yes' : 'No'));
+      if (draft.projectClosed === false && draft.projectClosedReason) {
+        rows.push(rowHtml('Reason', draft.projectClosedReason));
+      }
+    }
   }
   if (draft.attachments?.length) {
     rows.push(rowHtml('Attachments', draft.attachments.map(a => a.name).join(', ')));
@@ -3086,7 +3138,7 @@ $('mapAccessSaveBtn').addEventListener('click', async () => {
 // =====================================================================
 
 async function fetchLocationAllowances() {
-  const { data, error } = await sb.from('location_allowances').select('id, name, extra_hours').order('name');
+  const { data, error } = await sb.from('location_allowances').select('id, name, extra_hours, money_rate').order('name');
   return error ? [] : (data || []);
 }
 
@@ -3112,7 +3164,7 @@ async function renderLocationList() {
       <span class="type-icon">📍</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.name)}</div>
-        <div class="entry-meta">+${r.extra_hours} hour${Number(r.extra_hours) === 1 ? '' : 's'} allowance</div>
+        <div class="entry-meta">+${r.extra_hours} hour${Number(r.extra_hours) === 1 ? '' : 's'} allowance · $${Number(r.money_rate || 0).toFixed(2)}/hour</div>
       </div>
       <button type="button" class="ghost" data-location-id="${r.id}">✕</button>
     </div>
@@ -3130,12 +3182,15 @@ if ($('addLocationBtn')) {
   $('addLocationBtn').addEventListener('click', async () => {
     const name = $('newLocationName').value.trim();
     const hours = parseFloat($('newLocationHours').value);
+    const rate = $('newLocationRate') && $('newLocationRate').value !== '' ? parseFloat($('newLocationRate').value) : 0;
     if (!name) { showToast('Enter a location name.'); return; }
     if (isNaN(hours) || hours < 0) { showToast('Enter a valid number of extra hours.'); return; }
-    const { error } = await sb.from('location_allowances').insert({ name, extra_hours: hours, created_by: currentUser.id });
+    if (isNaN(rate) || rate < 0) { showToast('Enter a valid money rate (or leave it as 0).'); return; }
+    const { error } = await sb.from('location_allowances').insert({ name, extra_hours: hours, money_rate: rate, created_by: currentUser.id });
     if (error) { showToast(`Couldn't add location: ${error.message}`); return; }
     $('newLocationName').value = '';
     $('newLocationHours').value = '';
+    if ($('newLocationRate')) $('newLocationRate').value = '';
     renderLocationList();
     populateAllowanceDropdown();
   });

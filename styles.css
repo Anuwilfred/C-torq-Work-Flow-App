@@ -1790,7 +1790,7 @@ button.ghost:hover { color: var(--text); }
 .ring-card .ring-role {
   font-size: 9px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--text);
   margin-bottom: 4px;
   line-height: 1.15;
   text-align: center;
@@ -1808,7 +1808,7 @@ button.ghost:hover { color: var(--text); }
    department NAME stays fully legible. Dimming the whole card's opacity
    made names unreadable against the dark backdrop — fixed here. */
 .ring-card-dim { background: rgba(255,255,255,0.02); border-style: dashed; }
-.ring-card-dim .ring-role { color: var(--text-muted); opacity: 0.85; }
+.ring-card-dim .ring-role { color: var(--text); }
 
 .contrib-row {
   margin-bottom: 14px;

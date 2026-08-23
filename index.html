@@ -335,6 +335,27 @@
             <label for="descriptionSimple">Description / Notes</label>
             <textarea id="descriptionSimple" placeholder="What did you work on?"></textarea>
 
+            <!-- Daily Progress only -->
+            <div id="progressOnlyFields" style="display:none;">
+              <label for="progressPercent">Approximate progress (%)</label>
+              <input id="progressPercent" type="number" min="0" max="100" step="1" placeholder="e.g. 65" />
+              <p class="hint" style="margin-top:2px;">Optional — your best estimate of how complete this work is.</p>
+            </div>
+
+            <!-- Project Report only -->
+            <div id="reportOnlyFields" style="display:none;">
+              <label for="projectClosedSelect">Is this project closed?</label>
+              <select id="projectClosedSelect">
+                <option value="">Select...</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <div id="projectClosedReasonWrap" style="display:none; margin-top:10px;">
+                <label for="projectClosedReason">Why isn't it closed yet? (optional)</label>
+                <textarea id="projectClosedReason" placeholder="Optional note..."></textarea>
+              </div>
+            </div>
+
             <label for="filesSimple">Attachments (photo, video, PDF, or zip — up to 50MB each)</label>
             <input id="filesSimple" type="file" accept="application/pdf,image/*,video/*,.zip,application/zip,application/x-zip-compressed" multiple />
             <p class="hint">Larger files (over ~6MB) upload in the background with a progress notice — just keep the app open until the queue finishes syncing.</p>
@@ -462,11 +483,12 @@
       </div>
       <div class="card glass">
         <strong style="font-size:14px;">Locations &amp; allowances</strong>
-        <p class="hint" style="margin-top:4px;">Add a place (country/city/site) and how many extra hours get added automatically when someone works there — e.g. "Abu Dhabi" +2 hours.</p>
+        <p class="hint" style="margin-top:4px;">Add a place (country/city/site), how many extra hours get added automatically when someone works there, and the money rate per allowance hour — e.g. "Abu Dhabi" +2 hours at $10/hour.</p>
         <div class="row-2" style="margin-top:10px;">
           <input id="newLocationName" type="text" placeholder="e.g. Abu Dhabi" />
           <input id="newLocationHours" type="number" min="0" step="0.5" placeholder="Extra hours" />
         </div>
+        <input id="newLocationRate" type="number" min="0" step="0.01" placeholder="Money per allowance hour (e.g. 10)" style="margin-top:8px;" />
         <button id="addLocationBtn" class="primary" style="margin-top:12px;">Add location</button>
         <div id="locationList" style="margin-top:14px;"></div>
       </div>
