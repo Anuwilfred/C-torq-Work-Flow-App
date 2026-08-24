@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.110';
+const APP_VERSION = 'v3.112';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -25,6 +25,28 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
 // stuck on old, possibly-broken code until they notice the update icon.
 (function healStaleAppShell() {
   const RELOAD_GUARD_KEY = 'ctorq-auto-heal-reload-for-version';
+  // WHY THE WAIT BELOW: reloading the instant a version mismatch is found
+  // (which can happen within the first fraction of a second of a cold load,
+  // well before the auth code further down even starts) could interrupt
+  // Supabase's own session/token-refresh request mid-flight. Supabase
+  // rotates the refresh token on every use — if the server already issued a
+  // new one but the reload cut the page off before the browser could save
+  // it, the next load is left with an old, now-invalid refresh token and
+  // gets silently signed out. This is what was causing "an update makes me
+  // have to log in again." Waiting for the auth check to fully settle first
+  // (flag set in the startup IIFE further down) means the reload only ever
+  // happens once nothing is mid-flight to interrupt.
+  function reloadWhenAuthSettled(liveVersion) {
+    const deadline = Date.now() + 20000; // don't wait forever if something's stuck
+    (function poll() {
+      if (window.__ctorqAuthSettled || Date.now() > deadline) {
+        sessionStorage.setItem(RELOAD_GUARD_KEY, liveVersion);
+        location.reload();
+        return;
+      }
+      setTimeout(poll, 250);
+    })();
+  }
   fetch('./app.js?_=' + Date.now(), { cache: 'no-store' })
     .then((res) => res.text())
     .then((text) => {
@@ -35,8 +57,7 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
       // offline/flaky network serving a half-cached response), don't loop
       // forever; just let the person keep using whatever did load.
       if (sessionStorage.getItem(RELOAD_GUARD_KEY) === liveVersion) return;
-      sessionStorage.setItem(RELOAD_GUARD_KEY, liveVersion);
-      location.reload();
+      reloadWhenAuthSettled(liveVersion);
     })
     .catch(() => { /* offline or blocked — nothing to self-heal against, just continue */ });
 })();
@@ -1557,6 +1578,7 @@ $('logoutBtn').addEventListener('click', async () => {
   closePanel('learning');
   closePanel('health');
   stopPresence();
+  stopGlobalMessageWatch();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
   clearInterval(chatListTimer);
   clearInterval(openChatTimer);
@@ -1691,6 +1713,7 @@ async function enterApp(knownUser) {
   checkForUnreadNews();
   applyFeatureAccess();
   startPresence();
+  startGlobalMessageWatch();
   populateAllowanceDropdown();
   // Rehydrate BEFORE checking today's allocation, so an already-in-progress
   // clock-in (possibly on a different job than today's fresh allocation)
@@ -2271,6 +2294,11 @@ if (location.hash && location.hash.includes('error=')) {
   $('appShell').style.display = 'none';
   $('authScreen').style.display = 'flex';
   showAuthView('loginView');
+ } finally {
+  // Tells healStaleAppShell (top of this file) it's now safe to reload —
+  // see the comment there for why reloading before this point was quietly
+  // logging people out.
+  window.__ctorqAuthSettled = true;
  }
 })();
 
@@ -5766,6 +5794,7 @@ let chatMessagesCache = []; // last loaded rows for the open thread, kept so edi
 let editingMessageId = null; // message currently showing its inline edit box, if any
 let onlineUserIds = new Set();  // who's currently online, via Supabase Realtime Presence
 // presenceChannel itself is declared up near currentUser/currentProfile now — see the comment there.
+let globalMessagesChannel = null; // app-wide watch for the new-message banner (separate from the per-thread one below)
 
 // ---------- Chat overlay (floating icon, bottom-left) ----------
 function openChatOverlay() {
@@ -5781,6 +5810,72 @@ $('chatOrb').addEventListener('click', openChatOverlay);
 $('chatOverlayBackdrop').addEventListener('click', closeChatOverlay);
 $('chatCloseBtn').addEventListener('click', closeChatOverlay);
 $('chatHomeBtn').addEventListener('click', closeChatOverlay);
+
+// ---------- App-wide new-message banner (WhatsApp-style) ----------
+// Fires for a new message in ANY chat this person belongs to, not just the
+// one currently open — a small banner slides down from the top so a new
+// message is noticed even while looking at a completely different part of
+// the app. This works alongside (not instead of) the real OS-level push
+// notifications set up in Settings — this one only needs the app open in a
+// tab/window right now (no permission prompt, nothing while backgrounded);
+// the OS push already covers the closed/locked-phone case.
+function startGlobalMessageWatch() {
+  if (globalMessagesChannel || !currentUser) return;
+  globalMessagesChannel = sb
+    .channel('global-messages')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+      handleIncomingMessageForBanner(payload.new);
+    })
+    .subscribe();
+}
+function stopGlobalMessageWatch() {
+  if (globalMessagesChannel) { sb.removeChannel(globalMessagesChannel); globalMessagesChannel = null; }
+}
+async function handleIncomingMessageForBanner(msg) {
+  if (!msg || !currentUser || msg.sender_id === currentUser.id) return;
+  // If the tab/window isn't actually in front of someone, skip the in-app
+  // banner — the real push notification (Settings → Enable notifications)
+  // is what's meant to reach them while backgrounded or locked.
+  if (document.visibilityState !== 'visible') return;
+  const chatOverlayOpen = $('chatOverlayBackdrop')?.classList.contains('show');
+  if (chatOverlayOpen && activeChatId === msg.chat_id) return; // already visible live in the open thread
+
+  if (!teamProfiles.length) await loadTeamProfiles();
+  let chat = chatListCache.find((c) => c.id === msg.chat_id);
+  if (!chat) { await refreshChatList(); chat = chatListCache.find((c) => c.id === msg.chat_id); }
+
+  const sender = teamProfiles.find((p) => p.id === msg.sender_id);
+  const senderName = sender ? (sender.full_name || sender.email) : 'Someone';
+  const isGroup = chat?.type === 'group';
+  const preview = msg.content ? msg.content : (msg.attachment_name ? `📎 ${msg.attachment_name}` : 'Sent an attachment');
+
+  showNewMessageBanner({
+    title: isGroup ? (chat?.name || 'Group') : senderName,
+    subtitle: isGroup ? `${senderName}: ${preview}` : preview,
+    chatId: msg.chat_id,
+  });
+  playLaunchSound();
+  if (chatOverlayOpen) refreshChatList();
+}
+function showNewMessageBanner({ title, subtitle, chatId }) {
+  const el = $('newMsgBanner');
+  if (!el) return;
+  el.querySelector('.new-msg-banner-title').textContent = title;
+  el.querySelector('.new-msg-banner-subtitle').textContent = subtitle;
+  el.dataset.chatId = chatId;
+  el.classList.add('show');
+  clearTimeout(showNewMessageBanner._t);
+  showNewMessageBanner._t = setTimeout(() => el.classList.remove('show'), 5000);
+}
+if ($('newMsgBanner')) {
+  $('newMsgBanner').addEventListener('click', () => {
+    const chatId = $('newMsgBanner').dataset.chatId;
+    $('newMsgBanner').classList.remove('show');
+    if (!chatId) return;
+    openChatOverlay();
+    openChat(chatId);
+  });
+}
 
 // ---------- Online presence — who's currently in the app ----------
 function startPresence() {

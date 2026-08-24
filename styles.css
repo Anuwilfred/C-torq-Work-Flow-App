@@ -923,6 +923,50 @@ button.ghost:hover { color: var(--text); }
 }
 #toast.show { opacity: 1; }
 
+/* ---------- New message banner (WhatsApp-style top slide-down) ---------- */
+.new-msg-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-140%);
+  width: min(420px, 92vw);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(30, 27, 24, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: 18px;
+  padding: 12px 14px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  z-index: 9999;
+  opacity: 0;
+  cursor: pointer;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease;
+}
+.new-msg-banner.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+.new-msg-banner-icon { font-size: 20px; line-height: 1; margin-top: 1px; }
+.new-msg-banner-body { min-width: 0; flex: 1; }
+.new-msg-banner-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.new-msg-banner-subtitle {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 999px; }
 ::-webkit-scrollbar-track { background: transparent; }
