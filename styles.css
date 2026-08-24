@@ -1215,7 +1215,7 @@ button.ghost:hover { color: var(--text); }
   left: 0;
   top: 0;
   bottom: 0;
-  width: min(340px, 86vw);
+  width: min(520px, 92vw);
   z-index: 71;
   background: var(--glass-strong);
   backdrop-filter: blur(28px) saturate(180%);

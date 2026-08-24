@@ -1686,8 +1686,8 @@ async function enterApp(knownUser) {
   $('accountEmail').textContent = user.email;
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   $('adminHomeBtn').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
-  $('newGroupBtn').style.display = currentProfile?.role === 'admin' ? 'inline-block' : 'none';
-  if ($('newsComposeCard')) $('newsComposeCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+  $('newGroupBtn').style.display = 'inline-block';
+  if ($('newsComposeCard')) $('newsComposeCard').style.display = 'block';
   checkForUnreadNews();
   applyFeatureAccess();
   startPresence();
@@ -2171,6 +2171,27 @@ sb.auth.onAuthStateChange(async (event, session) => {
 // being signed straight in, instead of any future hiccup in the checks
 // below leaving absolutely nothing on screen.
 $('authScreen').style.display = 'flex';
+
+// If we just landed here from a failed invite/reset link (expired,
+// already used, or superseded by a later resend), Supabase redirects back
+// with an #error=... hash instead of a real session. Left unhandled, this
+// silently falls back to a plain login form with no explanation — surface
+// it clearly instead.
+if (location.hash && location.hash.includes('error=')) {
+  const hashParams = new URLSearchParams(location.hash.slice(1));
+  const errorCode = hashParams.get('error_code');
+  const errorDescription = hashParams.get('error_description');
+  let authHashMsg = 'That link is no longer valid — ask your admin to send you a new invite.';
+  if (errorCode === 'otp_expired') {
+    authHashMsg = 'This invite link has expired. Ask your admin to send you a new one.';
+  } else if (errorDescription) {
+    authHashMsg = decodeURIComponent(errorDescription.replace(/\+/g, ' '));
+  }
+  showAuthView('loginView');
+  $('authMsg').textContent = authHashMsg;
+  // Strip the hash so refreshing the page doesn't show this message again.
+  history.replaceState(null, '', location.pathname + location.search);
+}
 
 (async () => {
  try {
@@ -2859,6 +2880,13 @@ async function renderTeamList() {
         : (p.status === 'deactivated'
             ? `<button type="button" class="secondary" data-reactivate="${p.id}">✅ Reactivate</button>`
             : `<button type="button" class="secondary" data-deactivate="${p.id}" ${p.id === currentUser?.id ? 'disabled' : ''}>⛔ Deactivate</button>`)}
+      ${(() => {
+          const isOwner = p.email === PROTECTED_OWNER_EMAIL;
+          const isSelf = p.id === currentUser?.id;
+          const guard = isOwner ? 'disabled title="Account owner — can\'t be deleted"'
+            : isSelf ? 'disabled title="Can\'t delete your own account"' : '';
+          return `<button type="button" class="secondary danger" data-delete-member="${p.id}" data-delete-member-name="${escapeHtml(p.full_name || p.email)}" ${guard}>🗑️ Delete</button>`;
+        })()}
       <span class="chip ${p.status === 'active' ? 'synced' : 'pending'}">${p.status}</span>
     </div>
   `).join('');
@@ -2932,6 +2960,27 @@ async function renderTeamList() {
       });
       if (fnErr || resData?.error) { showToast(`Couldn't reactivate: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
       showToast('Reactivated — they can sign in again.');
+      renderTeamList();
+    });
+  });
+  list.querySelectorAll('[data-delete-member]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      // Re-checked here too, same reasoning as Remove Admin above — never
+      // let a delete fire on the protected owner or the current user even
+      // if the disabled attribute were somehow bypassed.
+      const target = data.find((p) => p.id === btn.dataset.deleteMember);
+      if (target?.email === PROTECTED_OWNER_EMAIL) { showToast("The account owner can't be deleted."); return; }
+      if (target?.id === currentUser?.id) { showToast("You can't delete your own account."); return; }
+      const name = btn.dataset.deleteMemberName || 'this person';
+      if (!confirm(`Permanently delete ${name}? This removes their login and profile entirely — this cannot be undone. (Their past timesheet/report entries are kept.) If you just want to stop them signing in, use Deactivate instead.`)) return;
+      const { data: { session } } = await getSessionSafe();
+      const { data: resData, error: fnErr } = await sb.functions.invoke('manage-team-member', {
+        body: { userId: btn.dataset.deleteMember, action: 'delete' },
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+      if (fnErr || resData?.error) { showToast(`Couldn't delete: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
+      showToast('Deleted.');
       renderTeamList();
     });
   });
