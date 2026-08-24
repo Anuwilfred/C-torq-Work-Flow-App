@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.11.2';
+const APP_VERSION = 'v3.11.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -2067,7 +2067,7 @@ function renderJobSearchResults(matches) {
   if (!matches.length) {
     box.innerHTML = '<div class="job-search-empty">No matching job found — pick one from the list, or clear this field to leave it blank.</div>';
   } else {
-    box.innerHTML = matches.slice(0, 8).map((r) => `
+    box.innerHTML = matches.slice(0, 50).map((r) => `
       <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
         <div class="jid">${escapeHtml(r.job_id)}</div>
         <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
@@ -2120,7 +2120,7 @@ function renderJobSearchResultsSimple(matches) {
   if (!matches.length) {
     box.innerHTML = '<div class="job-search-empty">No matching job found — pick one from the list, or clear this field to leave it blank.</div>';
   } else {
-    box.innerHTML = matches.slice(0, 8).map((r) => `
+    box.innerHTML = matches.slice(0, 50).map((r) => `
       <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
         <div class="jid">${escapeHtml(r.job_id)}</div>
         <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
@@ -4631,7 +4631,7 @@ async function fetchProjects() {
   try {
     const { data, error } = await sb
       .from('projects')
-      .select('job_id, name, status, received_date')
+      .select('job_id, name, status, received_date, client')
       .order('created_at', { ascending: false });
     if (error) { console.error('fetchProjects failed:', error); return { rows: [], error }; }
     return { rows: data || [], error: null };
@@ -4689,6 +4689,7 @@ async function renderProjectsList(isRetry = false) {
       <span class="type-icon">📁</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}${isClosed ? ' <span style="opacity:0.6; font-weight:400;">(Closed)</span>' : ''}</div>
+        ${r.client ? `<div class="entry-meta">${escapeHtml(r.client)}</div>` : ''}
         ${r.received_date ? `<div class="entry-meta">${escapeHtml(r.received_date)}</div>` : ''}
       </div>
       ${isAdmin ? `<button type="button" class="ghost" data-toggle-status="${escapeHtml(r.job_id)}" data-status="${escapeHtml(r.status || 'active')}" style="font-size:11px;">${isClosed ? 'Reopen' : 'Close'}</button>` : ''}
@@ -5072,15 +5073,24 @@ let currentProjectJobId = null;
 async function renderProjectStatusArea(jobId) {
   const area = $('projectStatusArea');
   if (!area) return;
-  const { data: row } = await sb.from('projects').select('status').eq('job_id', jobId).maybeSingle();
+  const { data: row } = await sb.from('projects').select('status, responsibility, delivery_status').eq('job_id', jobId).maybeSingle();
   const status = row?.status || 'active';
   const isClosed = status !== 'active';
   const isAdmin = currentProfile?.role === 'admin';
+  // Responsibility/Delivery (synced from the JOB DATA google sheet) only
+  // matter while a job is still active — once closed, who's responsible or
+  // when it's due is no longer relevant, so it's hidden then.
+  const showDelivery = !isClosed && (row?.responsibility || row?.delivery_status);
   area.innerHTML = `
     <div class="card glass" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
       <span style="font-size:13px;">Status: <strong>${isClosed ? 'Closed' : 'Active'}</strong></span>
       ${isAdmin ? `<button type="button" class="secondary" id="projectStatusToggleBtn" style="width:auto; padding:8px 16px;">${isClosed ? 'Reopen' : 'Mark as Closed'}</button>` : ''}
     </div>
+    ${showDelivery ? `
+    <div class="card glass" style="margin-top:8px; display:flex; flex-direction:column; gap:4px;">
+      ${row.responsibility ? `<span style="font-size:13px;">Responsibility: <strong>${escapeHtml(row.responsibility)}</strong></span>` : ''}
+      ${row.delivery_status ? `<span style="font-size:13px;">Delivery: <strong>${escapeHtml(row.delivery_status)}</strong></span>` : ''}
+    </div>` : ''}
   `;
   $('projectStatusToggleBtn')?.addEventListener('click', async () => {
     await toggleProjectStatus(jobId, status);
