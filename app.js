@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.109';
+const APP_VERSION = 'v3.110';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -6036,7 +6036,12 @@ async function openChat(chatId) {
   $('chatThreadWrap').style.display = 'flex';
   $('chatShell').classList.add('show-thread');
   $('chatThreadTitle').textContent = activeChatMeta ? chatDisplayName(activeChatMeta) : 'Chat';
-  const canManageGroup = activeChatMeta?.type === 'group' && currentProfile?.role === 'admin';
+  // Any member of a group can manage it (rename/add/remove/delete) — being
+  // able to open the chat at all already proves membership, since chat
+  // membership is what RLS uses to decide who can even read it. Admins can
+  // also manage any group, including ones they haven't joined, because the
+  // "admins see every chat" RLS/read-path below surfaces those groups too.
+  const canManageGroup = activeChatMeta?.type === 'group';
   if ($('manageGroupBtn')) $('manageGroupBtn').style.display = canManageGroup ? 'flex' : 'none';
   editingMessageId = null; // don't carry an open edit box over from a different chat
   updateThreadPresence();
