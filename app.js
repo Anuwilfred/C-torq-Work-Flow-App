@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.11.4';
+const APP_VERSION = 'v3.11.6';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -657,7 +657,7 @@ function showQsrJobMatches(q) {
   const box = $('qsrJobResults');
   const query = (q || '').trim().toLowerCase();
   const matches = (query
-    ? jobSearchOptions.filter((r) => String(r.job_id).toLowerCase().includes(query) || String(r.name || '').toLowerCase().includes(query))
+    ? jobSearchOptions.filter((r) => jobMatchesQuery(r, query))
     : jobSearchOptions
   ).slice(0, 30);
   box.innerHTML = matches.length
@@ -2017,6 +2017,17 @@ function openMyJobDetail(id) {
 // is common for everyone (not just admins).
 let jobSearchOptions = [];
 
+// Matches on ANY word related to the job — not just the Job ID/name — so
+// typing a customer name, vessel name, who's responsible, or a delivery
+// note also finds the right job. All fields are optional/best-effort.
+function jobMatchesQuery(r, query) {
+  return String(r.job_id || '').toLowerCase().includes(query)
+    || String(r.name || '').toLowerCase().includes(query)
+    || String(r.client || '').toLowerCase().includes(query)
+    || String(r.responsibility || '').toLowerCase().includes(query)
+    || String(r.delivery_status || '').toLowerCase().includes(query);
+}
+
 // RELIABILITY: this used to just come back empty on any network failure —
 // which, combined with Job ID now being locked to picking a real project
 // (see jobIdConfirmed below), meant opening the app offline left the Job ID
@@ -2035,7 +2046,7 @@ function getCachedJobOptions() {
 }
 
 async function populateJobIdDropdown() {
-  const { data, error } = await sb.from('projects').select('job_id, name, client').eq('status', 'active').order('job_id');
+  const { data, error } = await sb.from('projects').select('job_id, name, client, responsibility, delivery_status').eq('status', 'active').order('job_id');
   if (error) {
     jobSearchOptions = getCachedJobOptions();
     console.warn('[Jobs] using cached job list (network unavailable):', error);
@@ -2092,9 +2103,7 @@ if ($('jobId')) {
     jobIdConfirmed = false; // any manual edit un-confirms it until it resolves to a real job again
     const q = $('jobId').value.trim().toLowerCase();
     if (!q) { $('jobIdResults').style.display = 'none'; return; }
-    const matches = jobSearchOptions.filter((r) =>
-      String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
-    );
+    const matches = jobSearchOptions.filter((r) => jobMatchesQuery(r, q));
     renderJobSearchResults(matches);
   });
   $('jobId').addEventListener('focus', () => {
@@ -2144,9 +2153,7 @@ if ($('jobIdSimple')) {
     jobIdSimpleConfirmed = false;
     const q = $('jobIdSimple').value.trim().toLowerCase();
     if (!q) { $('jobIdSimpleResults').style.display = 'none'; return; }
-    const matches = jobSearchOptions.filter((r) =>
-      String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q)
-    );
+    const matches = jobSearchOptions.filter((r) => jobMatchesQuery(r, q));
     renderJobSearchResultsSimple(matches);
   });
   $('jobIdSimple').addEventListener('focus', () => {
@@ -2610,6 +2617,7 @@ const FEATURE_LIST = [
   { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
   { key: 'datafeed', label: 'Data Feed (add jobs from pasted WhatsApp messages)' },
   { key: 'liveDrivers', label: 'Live Drivers (see driver locations)' },
+  { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -2701,6 +2709,7 @@ function savePendingInvitesToStorage() {
       const div = document.querySelector(`[data-invite-row="${r.id}"]`);
       return {
         id: r.id,
+        fullName: div ? div.querySelector('.invite-row-name').value : (r.fullName || ''),
         email: div ? div.querySelector('.invite-row-email').value : (r.email || ''),
         roleId: div ? div.querySelector('.invite-row-role').value : (r.roleId || ''),
         allowedFeatures: r.allowedFeatures || [],
@@ -2748,6 +2757,7 @@ async function addInviteRow(saved = null) {
   div.dataset.inviteRow = rowId;
   const accessCount = saved?.allowedFeatures?.length || 0;
   div.innerHTML = `
+    <input type="text" class="invite-row-name" placeholder="Full name" style="flex:1; min-width:120px;" value="${saved?.fullName ? escapeHtml(saved.fullName) : ''}" />
     <input type="email" class="invite-row-email" placeholder="name@example.com" style="flex:1; min-width:150px;" value="${saved?.email ? escapeHtml(saved.email) : ''}" />
     <select class="position-select invite-row-role">${roleHtml}</select>
     <button type="button" class="secondary invite-row-access" data-row="${rowId}">🔐 Access${accessCount ? ` (${accessCount})` : ''}</button>
@@ -2758,6 +2768,7 @@ async function addInviteRow(saved = null) {
   initAllGlassSelects(div);
   updateInviteRowsEmptyState();
 
+  div.querySelector('.invite-row-name').addEventListener('input', savePendingInvitesToStorage);
   div.querySelector('.invite-row-email').addEventListener('input', savePendingInvitesToStorage);
   div.querySelector('.invite-row-role').addEventListener('change', savePendingInvitesToStorage);
   div.querySelector('.invite-row-access').addEventListener('click', () => openInviteAccessModal(rowId));
@@ -2777,6 +2788,7 @@ async function sendInviteRow(rowId) {
   const div = document.querySelector(`[data-invite-row="${rowId}"]`);
   if (!div) return;
   const row = pendingInviteRows.find((r) => r.id === rowId);
+  const fullName = div.querySelector('.invite-row-name').value.trim();
   const email = div.querySelector('.invite-row-email').value.trim();
   const roleId = div.querySelector('.invite-row-role').value || null;
   if (!email) { showToast('Enter an email for this row first.'); return; }
@@ -2786,7 +2798,7 @@ async function sendInviteRow(rowId) {
   sendBtn.textContent = 'Sending…';
 
   const { data: { session } } = await getSessionSafe();
-  const body = { email, roleId };
+  const body = { email, roleId, fullName: fullName || undefined };
   if (row?.customized) body.allowedFeatures = row.allowedFeatures;
   const { data, error } = await sb.functions.invoke('invite-user', {
     body,
@@ -2884,7 +2896,7 @@ async function renderTeamList() {
     <div class="entry team-entry">
       <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
       <div class="entry-body">
-        <div class="entry-meta">${escapeHtml(p.full_name || p.email)}</div>
+        <input type="text" class="team-name-input" data-name-user="${p.id}" value="${escapeHtml(p.full_name || '')}" placeholder="Add a name…" style="font-weight:600; border:none; background:transparent; padding:2px 0; width:100%; font-size:14px;" />
         <div class="entry-desc">${escapeHtml(p.email)}</div>
       </div>
       <select class="position-select" data-role-user="${p.id}">
@@ -2932,6 +2944,21 @@ async function renderTeamList() {
       const { error: updErr } = await sb.from('profiles').update({ department_id: sel.value || null }).eq('id', sel.dataset.departmentUser);
       if (updErr) { showToast(`Couldn't update department: ${updErr.message}`); return; }
       showToast('Department updated.');
+    });
+  });
+  // Lets an admin fix "shows as email" for anyone invited before the Name
+  // field existed, or just correct a typo — saves on blur (tap away) so it
+  // doesn't fire on every keystroke. This reflects everywhere full_name is
+  // shown: chat, timesheets, the synced Google Sheet, everywhere.
+  list.querySelectorAll('[data-name-user]').forEach((input) => {
+    input.addEventListener('blur', async () => {
+      const newName = input.value.trim();
+      const person = data.find((p) => p.id === input.dataset.nameUser);
+      if (person && newName === (person.full_name || '')) return; // unchanged
+      const { error: updErr } = await sb.from('profiles').update({ full_name: newName || null }).eq('id', input.dataset.nameUser);
+      if (updErr) { showToast(`Couldn't update name: ${updErr.message}`); return; }
+      showToast('Name updated.');
+      if (person) person.full_name = newName;
     });
   });
   initAllGlassSelects(list);
@@ -3326,7 +3353,7 @@ function wireAllocationJobSearch() {
     // draft — picking one again just shows a reminder toast instead of
     // vanishing from the list, so nothing ever looks "lost".
     const matches = q
-      ? jobSearchOptions.filter((r) => String(r.job_id).toLowerCase().includes(q) || String(r.name || '').toLowerCase().includes(q))
+      ? jobSearchOptions.filter((r) => jobMatchesQuery(r, q))
       : jobSearchOptions;
     if (!matches.length) {
       box.innerHTML = `<div class="job-search-empty">${q ? 'No matching job found.' : 'No active jobs yet — add one under Admin → Projects.'}</div>`;
