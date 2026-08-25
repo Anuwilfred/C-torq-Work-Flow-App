@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.11.7';
+const APP_VERSION = 'v3.11.9';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Daily Progress now has an optional progress percentage, and Project Report now asks if the project is closed (with an optional reason if not) — feeds the new 3-file Timesheet/Daily Progress/Project Report sheet structure.';
+const APP_UPDATE_NOTES = 'Live Drivers map is bigger, with an always-visible driver name on each pin — tap a pin for full address + last-updated details.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1019,9 +1019,14 @@ async function renderLiveDrivers() {
     mapWrap.style.display = 'block';
     if (!liveDriversMapInstance) {
       liveDriversMapInstance = L.map(mapWrap);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      // Esri's World Street Map (no API key/signup needed) instead of the
+      // plain OSM tiles — OSM's default style renders place labels in each
+      // area's local language (Arabic here, since these are UAE
+      // locations), while Esri's basemap renders labels in Latin/English
+      // script worldwide, which is what's actually wanted here.
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
         maxZoom: 19,
-        attribution: '© OpenStreetMap contributors',
+        attribution: 'Tiles © Esri',
       }).addTo(liveDriversMapInstance);
       liveDriversMapInstance._markerLayer = L.layerGroup().addTo(liveDriversMapInstance);
     }
@@ -1029,9 +1034,17 @@ async function renderLiveDrivers() {
     const points = data.filter((d) => d.lat && d.lng);
     points.forEach((d) => {
       const name = d.profiles?.full_name || d.profiles?.email || 'Driver';
-      L.marker([d.lat, d.lng])
-        .bindPopup(`<b>${escapeHtml(name)}</b><br>${escapeHtml(d.address || '')}<br>${escapeHtml(minutesAgoLabel(d.updated_at))}`)
-        .addTo(liveDriversMapInstance._markerLayer);
+      const marker = L.marker([d.lat, d.lng]).addTo(liveDriversMapInstance._markerLayer);
+      // Always-visible name label above the pin, so you can tell whose pin
+      // is whose at a glance. Tap the pin itself to open a popup with the
+      // full details (address + last updated).
+      marker.bindTooltip(
+        `<div class="live-driver-tag"><b>${escapeHtml(name)}</b></div>`,
+        { permanent: true, direction: 'top', offset: [0, -30], className: 'live-driver-tooltip' }
+      );
+      marker.bindPopup(
+        `<div class="live-driver-tag"><b>${escapeHtml(name)}</b><br>${escapeHtml(d.address || '')}<br><span style="opacity:.7">${escapeHtml(minutesAgoLabel(d.updated_at))}</span></div>`
+      );
     });
     if (points.length) {
       const bounds = L.latLngBounds(points.map((d) => [d.lat, d.lng]));

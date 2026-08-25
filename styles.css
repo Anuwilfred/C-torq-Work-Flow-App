@@ -2253,3 +2253,21 @@ img.chat-img { max-width: 100%; height: auto; border-radius: 10px; display: bloc
 }
 .report-table tr:last-child td { border-bottom: none; }
 .report-table td.ot { color: var(--warn); font-weight: 700; }
+
+/* Live Drivers map label — an always-visible message-box-style tag above
+   each pin (Leaflet's permanent tooltip), so you can see who's who at a
+   glance instead of having to tap every pin. */
+.live-driver-tooltip {
+  background: rgba(20, 20, 24, 0.92) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 10px !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35) !important;
+}
+.live-driver-tooltip::before {
+  border-top-color: rgba(20, 20, 24, 0.92) !important;
+}
+.live-driver-tag { white-space: normal; max-width: 200px; }
