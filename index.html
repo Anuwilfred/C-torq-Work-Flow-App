@@ -19,6 +19,11 @@
 <link rel="apple-touch-icon" sizes="512x512" href="./icon-512.png" />
 
 <link rel="stylesheet" href="./styles.css" />
+<!-- Leaflet: real interactive map (pan/zoom/markers) for Live Drivers,
+     replacing the old single-image static-map approach which depended on
+     one small free image-rendering service and had no way to show if it
+     failed beyond just hiding silently. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
 
@@ -1001,7 +1006,7 @@
     <div class="panel-body">
       <p class="hint">Last known location while each driver's app was open — not a continuous live feed.</p>
       <button type="button" class="secondary" id="refreshLiveDriversBtn" style="margin-top:8px;">🔄 Refresh</button>
-      <div id="liveDriversMapArea" style="margin-top:12px;"></div>
+      <div id="liveDriversMapArea" style="margin-top:12px; height:280px; border-radius:14px; overflow:hidden; display:none;"></div>
       <div id="liveDriversList" style="margin-top:12px;"></div>
     </div>
   </div>
@@ -1338,6 +1343,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <!-- Resumable/chunked uploads for larger chat attachments (photos/videos) -->
 <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="./config.js"></script>
 <script src="./app.js"></script>
 </body>

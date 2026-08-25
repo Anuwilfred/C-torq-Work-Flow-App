@@ -1,7 +1,7 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.11.6';
+const APP_VERSION = 'v3.11.7';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -986,40 +986,64 @@ function minutesAgoLabel(iso) {
   return hrs === 1 ? '1 hour ago' : `${hrs} hours ago`;
 }
 
-// One combined map with every driver pinned on it at once — refreshed each
-// time this panel opens or Refresh is tapped. Not a moving live feed (it's
-// a static image), but it shows everyone's last-known spot together on one
-// map instead of only separate per-driver thumbnails.
-function combinedDriverMapUrl(points, size = '640x280') {
-  if (!points.length) return '';
-  // Center on the average position so every pin fits reasonably on screen.
-  const avgLat = points.reduce((s, p) => s + p.lat, 0) / points.length;
-  const avgLng = points.reduce((s, p) => s + p.lng, 0) / points.length;
-  const markers = points.map((p) => `${p.lat},${p.lng},red-dot`).join('|');
-  const zoom = points.length > 1 ? 11 : 15;
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${avgLat},${avgLng}&zoom=${zoom}&size=${size}&maptype=mapnik&markers=${markers}`;
-}
+// One real interactive Leaflet map with every driver pinned on it at
+// once — refreshed each time this panel opens or Refresh is tapped. Not a
+// moving live feed (see the honesty note above: a closed app can't be
+// tracked), but it's a real pan/zoomable map instead of a single static
+// image from one small free image-rendering service, which could fail to
+// load with no visible reason. Kept as one map instance, re-used across
+// refreshes (removed and recreated only if it doesn't exist yet) so
+// re-opening the panel doesn't leak map instances.
+let liveDriversMapInstance = null;
 
 async function renderLiveDrivers() {
   const wrap = $('liveDriversList');
   const mapWrap = $('liveDriversMapArea');
   if (!wrap) return;
   wrap.innerHTML = '<div class="empty">Loading…</div>';
-  if (mapWrap) mapWrap.innerHTML = '';
   const { data, error } = await sb
     .from('driver_locations')
     .select('person_id, lat, lng, address, updated_at, profiles(full_name, email)')
     .order('updated_at', { ascending: false });
   if (error) {
     wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`;
+    if (mapWrap) mapWrap.style.display = 'none';
     return;
   }
   if (!data || !data.length) {
     wrap.innerHTML = '<div class="empty">No driver locations yet — a driver needs to open the app at least once with location access allowed. (Make sure at least one person has the "Driver" role set in Admin → Team.)</div>';
+    if (mapWrap) mapWrap.style.display = 'none';
     return;
   }
-  if (mapWrap) {
-    mapWrap.innerHTML = `<img src="${combinedDriverMapUrl(data)}" onerror="this.style.display='none'" alt="All drivers map" style="width:100%; border-radius:14px; display:block;" />`;
+  if (mapWrap && typeof L !== 'undefined') {
+    mapWrap.style.display = 'block';
+    if (!liveDriversMapInstance) {
+      liveDriversMapInstance = L.map(mapWrap);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors',
+      }).addTo(liveDriversMapInstance);
+      liveDriversMapInstance._markerLayer = L.layerGroup().addTo(liveDriversMapInstance);
+    }
+    liveDriversMapInstance._markerLayer.clearLayers();
+    const points = data.filter((d) => d.lat && d.lng);
+    points.forEach((d) => {
+      const name = d.profiles?.full_name || d.profiles?.email || 'Driver';
+      L.marker([d.lat, d.lng])
+        .bindPopup(`<b>${escapeHtml(name)}</b><br>${escapeHtml(d.address || '')}<br>${escapeHtml(minutesAgoLabel(d.updated_at))}`)
+        .addTo(liveDriversMapInstance._markerLayer);
+    });
+    if (points.length) {
+      const bounds = L.latLngBounds(points.map((d) => [d.lat, d.lng]));
+      // A moment for the now-visible container to get its real size before
+      // Leaflet measures it — invalidateSize() first, then fit.
+      setTimeout(() => {
+        liveDriversMapInstance.invalidateSize();
+        liveDriversMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
+      }, 50);
+    }
+  } else if (mapWrap) {
+    mapWrap.style.display = 'none';
   }
   wrap.innerHTML = data.map((d) => `
     <div class="entry">
