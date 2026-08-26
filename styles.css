@@ -378,7 +378,11 @@ input, select, textarea {
   border: 1px solid var(--glass-border);
   background: var(--glass-2);
   color: var(--text);
-  font-size: 14px;
+  /* 16px minimum — iPhone Safari auto-zooms the whole page in on focus for
+     any text input/select/textarea under 16px, and doesn't always zoom back
+     out cleanly. That's the "screen looks zoomed" complaint: it was
+     triggered every time someone tapped almost any field in the app. */
+  font-size: 16px;
   font-family: inherit;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
@@ -567,7 +571,7 @@ button.secondary.active { border-color: var(--accent); color: var(--accent); bac
 .alloc-manage-card { border: 1px solid var(--glass-border-strong); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--glass); }
 .alloc-manage-card .entry { padding: 6px 0; }
 .alloc-manage-remove { background: none; border: none; color: var(--danger, #e05d5d); font-size: 14px; cursor: pointer; padding: 2px 6px; }
-.alloc-manage-time { width: auto !important; flex: none; padding: 6px 8px !important; font-size: 12px !important; }
+.alloc-manage-time { width: auto !important; flex: none; padding: 6px 8px !important; font-size: 16px !important; }
 
 button.ghost {
   padding: 9px 16px;
@@ -1337,7 +1341,7 @@ button.ghost:hover { color: var(--text); }
 .news-comment-time { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 .news-comment-del { background: none; border: none; color: var(--text-dim); font-size: 11px; cursor: pointer; flex: none; padding: 2px 4px; }
 .news-comment-input-row { display: flex; gap: 6px; margin-top: 8px; }
-.news-comment-input-row input { flex: 1; padding: 8px 10px; font-size: 12px; }
+.news-comment-input-row input { flex: 1; padding: 8px 10px; font-size: 16px; }
 .news-comment-input-row button { flex: none; padding: 8px 12px; font-size: 12px; }
 
 /* ---------- Today's Job Board — message-box style broadcast on Home ---------- */
