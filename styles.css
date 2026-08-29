@@ -595,6 +595,55 @@ button.ghost:hover { color: var(--text); }
   padding: 2px;
   margin-top: 2px;
 }
+/* Job Description picker — tappable pills sourced from the admin-managed
+   job_descriptions list (Admin -> Employee Role & Invitation Management ->
+   Job Descriptions), used everywhere a description used to be pure free
+   text (New Entry, Daily Progress/Report, Quick Job Switch, driver trips).
+   Selecting one or more just fills the existing text field underneath, so
+   nothing about how that data is stored/synced changes at all — this is
+   purely a faster way to fill it in than typing every time. */
+.chip-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.desc-chip {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-2);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.desc-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
+.desc-chip.selected {
+  background: linear-gradient(160deg, rgba(224,138,95,0.22), rgba(204,120,92,0.14));
+  border-color: var(--accent);
+  color: var(--text);
+}
+.chip-picker-empty { font-size: 11.5px; color: var(--text-dim); }
+
+/* Job Descriptions admin list — add + enable/disable rows */
+.jobdesc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+.jobdesc-row .jobdesc-label { flex: 1; font-size: 13px; }
+.jobdesc-row.inactive .jobdesc-label { color: var(--text-dim); text-decoration: line-through; }
+
+/* Driver trip status badges + Start/Complete actions */
+.trip-status-badge { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin-left: 6px; }
+.trip-status-badge.planned { background: rgba(242, 183, 85, 0.18); color: var(--warn); }
+.trip-status-badge.in_progress { background: rgba(0, 161, 156, 0.18); color: #00a19c; }
+.trip-status-badge.done { background: rgba(99, 209, 151, 0.18); color: var(--ok); }
+
 .mode-chip, .qsr-mode-chip {
   display: flex;
   flex-direction: column;

@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.11.10';
+const APP_VERSION = 'v3.12.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed iPhone screens looking "zoomed in" — every text field now uses a 16px minimum size, which stops Safari from auto-zooming the page on tap.';
+const APP_UPDATE_NOTES = 'Tap-to-select Job Descriptions everywhere (admin-managed), Job Allocation now takes a description, and driver trips got Who-assigned + task + Start/Complete + instant push.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -786,7 +786,7 @@ async function qsrSubmit() {
     startTime: toTimeInputValue(state.qsrSegmentStart),
     endTime: toTimeInputValue(endPoint),
     lunchMinutes: 0,
-    description: ($('qsrNotes')?.value.trim() || ''),
+    description: combineDescription(qsrNotesSelected, $('qsrNotes')?.value || ''),
     clockInLocation: state.qsrStartLocation || null,
     clockInLat: state.qsrStartLat ?? null,
     clockInLng: state.qsrStartLng ?? null,
@@ -1267,7 +1267,7 @@ async function buildDraftFromForm() {
       qsrDeductedMinutes,
       breakStart,
       breakEnd,
-      description: $('workNotes').value.trim(),
+      description: combineDescription(workNotesSelected, $('workNotes').value),
       clockInLocation: clk.clockInLocation || null,
       clockInLat: clk.clockInLat ?? null,
       clockInLng: clk.clockInLng ?? null,
@@ -1283,7 +1283,8 @@ async function buildDraftFromForm() {
     showToast('Pick the Job ID from the list below the field — free-typed Job IDs cause duplicate/mismatched projects.');
     return null;
   }
-  if (!$('projectSimple').value.trim() || !$('dateSimple').value || !$('descriptionSimple').value.trim()) {
+  const descriptionSimpleCombined = combineDescription(descriptionSimpleSelected, $('descriptionSimple').value);
+  if (!$('projectSimple').value.trim() || !$('dateSimple').value || !descriptionSimpleCombined) {
     showToast('Fill in project, date and description.');
     return null;
   }
@@ -1317,7 +1318,7 @@ async function buildDraftFromForm() {
     project: $('projectSimple').value.trim(),
     date: $('dateSimple').value,
     time: $('timeSimple') && $('timeSimple').value ? $('timeSimple').value : null,
-    description: $('descriptionSimple').value.trim(),
+    description: descriptionSimpleCombined,
     percentage,
     projectClosed,
     projectClosedReason,
@@ -1760,6 +1761,8 @@ async function enterApp(knownUser) {
     .then(renderJobBoard)
     .then(renderAdminScheduleBoard);
   renderMyTripsToday();
+  initOwnTripLogging();
+  refreshGeneralDescriptionChips();
   // Projects / Departments / Learning / Health / Clients / Quotations /
   // Project Tank / Job Allocation tiles are all just part of the single
   // Home grid now (see index.html) — visible to everyone, gated per-tile
@@ -1893,7 +1896,7 @@ async function renderJobBoard() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('daily_assignments')
-    .select('project, location, attendance_time, assignment_type, is_driver, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
+    .select('project, location, attendance_time, assignment_type, is_driver, notes, person_id, profiles!daily_assignments_person_id_fkey(full_name, email)')
     .eq('work_date', todayKey);
   if (error || !data || !data.length) { card.style.display = 'none'; return; }
 
@@ -1904,10 +1907,11 @@ async function renderJobBoard() {
   // the two as mutually exclusive.
   const byJob = new Map();
   data.forEach((r) => {
-    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', drivers: [], workers: [] });
+    if (!byJob.has(r.project)) byJob.set(r.project, { location: '', attendanceTime: '', notes: '', drivers: [], workers: [] });
     const g = byJob.get(r.project);
     if (r.location && !g.location) g.location = r.location;
     if (r.attendance_time && !g.attendanceTime) g.attendanceTime = r.attendance_time;
+    if (r.notes && !g.notes) g.notes = r.notes;
     const name = r.profiles?.full_name || r.profiles?.email || 'Someone';
     if (r.assignment_type === 'transportation') g.drivers.push(name);
     else { g.workers.push(name); if (r.is_driver) g.drivers.push(name); }
@@ -1921,6 +1925,7 @@ async function renderJobBoard() {
         ${g.attendanceTime ? `<span class="job-board-time">⏰ ${escapeHtml(timeLabel12h(g.attendanceTime))}</span>` : ''}
       </div>
       ${g.location ? `<div class="job-board-line">📍 ${escapeHtml(g.location)}</div>` : ''}
+      ${g.notes ? `<div class="job-board-line">📝 ${escapeHtml(g.notes)}</div>` : ''}
       ${g.drivers.length ? `<div class="job-board-line">🚗 Driver: ${escapeHtml(g.drivers.join(', '))}</div>` : ''}
       ${g.workers.length ? `<div class="job-board-line">🧑‍🤝‍🧑 ${escapeHtml(g.workers.join(', '))}</div>` : ''}
     </div>
@@ -2821,12 +2826,27 @@ async function addInviteRow(saved = null) {
 
 $('addInviteRowBtn')?.addEventListener('click', () => addInviteRow());
 
+// Mobile keyboard autofill/autocomplete (tapping a suggested address, or
+// browser-saved contact autofill) can silently drop invisible characters
+// into a field — zero-width spaces, a non-breaking space, a leading BOM —
+// that plain .trim() does NOT remove (it only strips normal whitespace).
+// Supabase's own email validator does no trimming at all, so one of these
+// invisible characters makes it reject an address that looks completely
+// normal on screen. This is what was causing "invalid email format" on the
+// first attempt but not the second (retyping by hand skips autofill).
+function sanitizeInviteText(value) {
+  return String(value || '')
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ') // zero-width chars/BOM/nbsp -> space
+    .replace(/[\x00-\x1F\x7F]/g, '') // stray control characters
+    .trim();
+}
+
 async function sendInviteRow(rowId) {
   const div = document.querySelector(`[data-invite-row="${rowId}"]`);
   if (!div) return;
   const row = pendingInviteRows.find((r) => r.id === rowId);
-  const fullName = div.querySelector('.invite-row-name').value.trim();
-  const email = div.querySelector('.invite-row-email').value.trim();
+  const fullName = sanitizeInviteText(div.querySelector('.invite-row-name').value);
+  const email = sanitizeInviteText(div.querySelector('.invite-row-email').value);
   const roleId = div.querySelector('.invite-row-role').value || null;
   if (!email) { showToast('Enter an email for this row first.'); return; }
 
@@ -3450,7 +3470,7 @@ function draftUsageFor(personId, excludeIdx) {
 
 function addJobToDraft(jobId, jobName) {
   if (allocationDraftJobs.some((j) => j.jobId === jobId)) { showToast('That job is already in your draft — scroll down to it below.'); return; }
-  allocationDraftJobs.push({ idx: allocDraftIdxCounter++, jobId, jobName: jobName || '', location: '', attendanceTime: '', driverId: '', workers: new Set() });
+  allocationDraftJobs.push({ idx: allocDraftIdxCounter++, jobId, jobName: jobName || '', location: '', attendanceTime: '', driverId: '', workers: new Set(), descSelected: new Set() });
   renderAllocationDraft();
 }
 
@@ -3563,6 +3583,9 @@ function renderAllocationDraft() {
           <label for="allocDraftTime_${job.idx}" style="margin-top:10px;">Attendance / report time (optional)</label>
           <input id="allocDraftTime_${job.idx}" type="time" data-attendance-time="${job.idx}" value="${escapeHtml(job.attendanceTime || '')}" />
 
+          <label style="margin-top:10px;">Job description for this allocation (tap any that apply, optional)</label>
+          <div id="allocDraftDesc_${job.idx}" class="chip-picker"></div>
+
           <div style="margin-top:14px;">
             <strong style="font-size:13px;">Workers on this job</strong>
             <p class="hint" style="margin-top:2px;">Tick anyone working this job, from the list below — no limit. Greyed-out people are already used elsewhere for this date.</p>
@@ -3584,6 +3607,8 @@ function renderAllocationDraft() {
       }
       const timeInput = $(`allocDraftTime_${job.idx}`);
       if (timeInput) timeInput.addEventListener('input', () => { job.attendanceTime = timeInput.value; });
+      if (!job.descSelected) job.descSelected = new Set(); // defensive — older in-memory drafts from before this existed
+      renderChipPicker(`allocDraftDesc_${job.idx}`, 'general', job.descSelected);
     });
     box.querySelectorAll('[data-driver-select]').forEach((sel) => {
       sel.addEventListener('change', () => {
@@ -3646,15 +3671,16 @@ async function publishAllocationDraft() {
   if (!allocationDraftJobs.length) { showToast('Add at least one job first.'); return; }
   const rows = [];
   allocationDraftJobs.forEach((job) => {
+    const notes = job.descSelected && job.descSelected.size ? Array.from(job.descSelected).join(', ') : null;
     job.workers.forEach((personId) => {
       // If this same person is also the job's driver, fold that into their
       // one 'job' row via is_driver — a second row for the same person on
       // the same date/slot would violate the unique constraint.
       const alsoDriver = !!job.driverId && job.driverId === personId;
-      rows.push({ person_id: personId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', is_driver: alsoDriver, created_by: currentUser.id });
+      rows.push({ person_id: personId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'job', is_driver: alsoDriver, notes, created_by: currentUser.id });
     });
     if (job.driverId && !job.workers.has(job.driverId)) {
-      rows.push({ person_id: job.driverId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', is_driver: true, created_by: currentUser.id });
+      rows.push({ person_id: job.driverId, work_date: date, slot: 'day', project: job.jobId, location: job.location.trim() || null, attendance_time: job.attendanceTime || null, assignment_type: 'transportation', is_driver: true, notes, created_by: currentUser.id });
     }
   });
   if (!rows.length) { showToast('Tick at least one worker or assign a driver first.'); return; }
@@ -3841,7 +3867,7 @@ async function loadManageAllocations() {
   const date = $('allocManageDate').value;
   if (!list || !date) return;
   list.innerHTML = '<div class="empty">Loading…</div>';
-  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type, location, attendance_time, is_driver').eq('work_date', date).eq('slot', 'day');
+  const { data, error } = await sb.from('daily_assignments').select('person_id, project, assignment_type, location, attendance_time, is_driver, notes').eq('work_date', date).eq('slot', 'day');
   if (error) { list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
   const rows = data || [];
   if (!rows.length) { list.innerHTML = '<div class="empty">Nothing published for this date yet.</div>'; return; }
@@ -3951,10 +3977,17 @@ function editPublishedJob(jobId, date) {
   const location = people.find((r) => r.location)?.location || '';
   const attendanceTime = people.find((r) => r.attendance_time)?.attendance_time || '';
   const jobInfo = jobSearchOptions.find((j) => String(j.job_id) === String(jobId));
+  // Notes/description was shared across everyone on the job, same as
+  // location/time above — split it back into individual chips (anything
+  // that no longer matches a current option just won't show as selected,
+  // but existing published text isn't lost since it re-saves as-is if
+  // untouched).
+  const existingNotes = people.find((r) => r.notes)?.notes || '';
+  const descSelected = new Set(existingNotes.split(',').map((s) => s.trim()).filter(Boolean));
 
   allocationDraftJobs.push({
     idx: allocDraftIdxCounter++, jobId, jobName: jobInfo?.name || '',
-    location, attendanceTime, driverId, workers,
+    location, attendanceTime, driverId, workers, descSelected,
   });
   $('allocationDate').value = date;
   loadAllocationPublishedForDate().then(() => {
@@ -3984,7 +4017,116 @@ async function openAllocationPanel() {
   renderEveningDraft();
   wireAddressSearch('tripFrom', 'tripFromResults');
   wireAddressSearch('tripTo', 'tripToResults');
+  renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
+  renderJobDescList();
 }
+
+// =====================================================================
+// JOB DESCRIPTIONS — admin-managed tap-to-select options that replace
+// free typing in New Entry / Daily Progress / Report / Quick Job Switch
+// (scope 'general') and driver trips (scope 'driver'). Selecting one or
+// more just fills the same plain-text description field everything
+// downstream already expects — nothing about storage/sync changes, this
+// is purely a faster way to fill it in than typing every time. Soft-
+// disable (not delete) keeps history intact, same pattern as Deactivate
+// for people.
+// =====================================================================
+
+async function fetchJobDescriptions(scope, activeOnly = true) {
+  let q = sb.from('job_descriptions').select('id, label, active').eq('scope', scope).order('label', { ascending: true });
+  if (activeOnly) q = q.eq('active', true);
+  const { data, error } = await q;
+  return error ? [] : (data || []);
+}
+
+async function renderChipPicker(containerId, scope, selectedSet) {
+  const box = $(containerId);
+  if (!box) return;
+  const options = await fetchJobDescriptions(scope, true);
+  if (!options.length) {
+    box.innerHTML = '<span class="chip-picker-empty">No options yet — an admin can add some in Admin → Employee Role &amp; Invitation Management → Manage Job Descriptions.</span>';
+    return;
+  }
+  box.innerHTML = options.map((o) => `
+    <button type="button" class="desc-chip ${selectedSet.has(o.label) ? 'selected' : ''}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>
+  `).join('');
+  box.querySelectorAll('.desc-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const label = chip.dataset.label;
+      if (selectedSet.has(label)) selectedSet.delete(label); else selectedSet.add(label);
+      chip.classList.toggle('selected');
+    });
+  });
+}
+
+// Combines whatever chips are ticked with any extra free-typed text into
+// the one plain-text value everything downstream (submit-entry, sync-to-
+// drive, entryDetailRows) already expects — no schema/pipeline changes.
+function combineDescription(selectedSet, extraText) {
+  const parts = [...Array.from(selectedSet), (extraText || '').trim()].filter(Boolean);
+  return parts.join(', ');
+}
+
+const workNotesSelected = new Set();
+const descriptionSimpleSelected = new Set();
+const qsrNotesSelected = new Set();
+const tripTaskSelected = new Set();
+const ownTripTaskSelected = new Set();
+
+async function refreshGeneralDescriptionChips() {
+  await Promise.all([
+    renderChipPicker('workNotesChips', 'general', workNotesSelected),
+    renderChipPicker('descriptionSimpleChips', 'general', descriptionSimpleSelected),
+    renderChipPicker('qsrNotesChips', 'general', qsrNotesSelected),
+  ]);
+}
+
+// ---------------------------------------------------------------------
+// ADMIN: manage the Job Descriptions list itself (add + enable/disable).
+// Lives in Admin -> Employee Role & Invitation Management.
+// ---------------------------------------------------------------------
+async function renderJobDescList() {
+  const box = $('jobDescList');
+  if (!box) return;
+  const scope = $('newJobDescScope')?.value || 'general';
+  const items = await fetchJobDescriptions(scope, false); // admin sees inactive too
+  if (!items.length) { box.innerHTML = '<div class="empty">No job descriptions added yet for this list.</div>'; return; }
+  box.innerHTML = items.map((it) => `
+    <div class="jobdesc-row ${it.active ? '' : 'inactive'}">
+      <span class="jobdesc-label">${escapeHtml(it.label)}</span>
+      <button type="button" class="secondary" data-toggle-jobdesc="${it.id}" data-active="${it.active}">${it.active ? '⛔ Disable' : '✅ Enable'}</button>
+    </div>
+  `).join('');
+  box.querySelectorAll('[data-toggle-jobdesc]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.toggleJobdesc;
+      const nowActive = btn.dataset.active !== 'true';
+      const { error } = await sb.from('job_descriptions').update({ active: nowActive }).eq('id', id);
+      if (error) { showToast(`Couldn't update: ${error.message}`); return; }
+      showToast(nowActive ? 'Enabled.' : 'Disabled.');
+      renderJobDescList();
+      refreshGeneralDescriptionChips();
+      renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
+      renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
+    });
+  });
+}
+
+$('newJobDescScope')?.addEventListener('change', renderJobDescList);
+
+$('addJobDescBtn')?.addEventListener('click', async () => {
+  const label = $('newJobDescLabel').value.trim();
+  const scope = $('newJobDescScope')?.value || 'general';
+  if (!label) return;
+  const { error } = await sb.from('job_descriptions').insert({ label, scope });
+  if (error) { showToast(`Couldn't add: ${error.message}`); return; }
+  $('newJobDescLabel').value = '';
+  showToast('Added.');
+  renderJobDescList();
+  refreshGeneralDescriptionChips();
+  renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
+  renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
+});
 
 async function populateDriverSelects() {
   const { data, error } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
@@ -3993,6 +4135,8 @@ async function populateDriverSelects() {
   if ($('tripDriverSelect')) $('tripDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
   if ($('activityDriverSelect')) $('activityDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
   if ($('eveningDriverSelect')) $('eveningDriverSelect').innerHTML = '<option value="">Choose a driver</option>' + options;
+  if ($('tripAssignedBySelect')) $('tripAssignedBySelect').innerHTML = '<option value="">Choose who\'s sending the driver</option>' + options;
+  if ($('ownTripAssignedBySelect')) $('ownTripAssignedBySelect').innerHTML = '<option value="">Choose who asked you</option>' + options;
 }
 
 // Free, no-API-key forward address search (Nominatim) — debounced so typing
@@ -4047,7 +4191,7 @@ $('addTripBtn')?.addEventListener('click', async () => {
   const fromLabel = $('tripFrom').value.trim();
   const toLabel = $('tripTo').value.trim();
   if (!driverId || !workDate || !fromLabel || !toLabel) { showToast('Pick a driver, date, from and to.'); return; }
-  const { error } = await sb.from('driver_trips').insert({
+  const { data, error } = await sb.from('driver_trips').insert({
     driver_id: driverId,
     work_date: workDate,
     trip_time: $('tripTime').value || null,
@@ -4059,15 +4203,27 @@ $('addTripBtn')?.addEventListener('click', async () => {
     to_lat: $('tripTo').dataset.lat ? parseFloat($('tripTo').dataset.lat) : null,
     to_lon: $('tripTo').dataset.lon ? parseFloat($('tripTo').dataset.lon) : null,
     km: $('tripKm').value ? parseFloat($('tripKm').value) : null,
+    assigned_by: $('tripAssignedBySelect').value || currentUser.id,
+    description: Array.from(tripTaskSelected).join(', ') || null,
+    status: 'planned',
     created_by: currentUser.id,
-  });
+  }).select('id').single();
   if (error) { showToast(`Couldn't add trip: ${error.message}`); return; }
   $('tripFrom').value = '';
   $('tripTo').value = '';
   $('tripTime').value = '';
   $('tripKm').value = '';
   $('tripJobId').value = '';
-  showToast('Trip added.');
+  tripTaskSelected.clear();
+  renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
+  showToast('Trip added — notifying the driver…');
+  if (data?.id) {
+    const { data: { session } } = await getSessionSafe();
+    sb.functions.invoke('send-push', {
+      body: { kind: 'trip', tripId: data.id },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    }).catch(() => {}); // best-effort — a missed push shouldn't block the trip already being saved
+  }
 });
 
 $('viewActivityBtn')?.addEventListener('click', async () => {
@@ -4101,7 +4257,20 @@ $('viewActivityBtn')?.addEventListener('click', async () => {
 
 // Shows the signed-in driver's own trips for today — separate from the
 // single "today's job" card, since a driver can have several trips in one
-// day, each with its own from/to and time.
+// day, each with its own from/to and time. A trip an allocator just
+// assigned shows as "planned" (a clear NEW badge) until the driver taps
+// Start; the driver can also log their own trip below (see
+// initOwnTripLogging) for anything nobody pre-assigned.
+let tripPeopleNameCache = null;
+async function getPersonName(id) {
+  if (!id) return '';
+  if (!tripPeopleNameCache) {
+    const { data } = await sb.from('profiles').select('id, full_name, email');
+    tripPeopleNameCache = new Map((data || []).map((p) => [p.id, p.full_name || p.email]));
+  }
+  return tripPeopleNameCache.get(id) || '';
+}
+
 async function renderMyTripsToday() {
   const card = $('myTripsCard');
   const area = $('myTripsArea');
@@ -4109,21 +4278,101 @@ async function renderMyTripsToday() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const { data, error } = await sb
     .from('driver_trips')
-    .select('trip_time, job_id, from_label, to_label')
+    .select('id, trip_time, job_id, from_label, to_label, description, status, assigned_by')
     .eq('driver_id', currentUser.id)
     .eq('work_date', todayKey)
     .order('trip_time', { ascending: true });
   if (error || !data || !data.length) { card.style.display = 'none'; return; }
   card.style.display = 'block';
-  area.innerHTML = data.map((r) => `
-    <div class="entry">
-      <span class="type-icon">🚗</span>
-      <div class="entry-body">
-        <div class="entry-desc">${r.trip_time ? escapeHtml(String(r.trip_time).slice(0, 5)) + ' — ' : ''}${escapeHtml(r.from_label || '?')} → ${escapeHtml(r.to_label || '?')}</div>
-        <div class="entry-meta">${r.job_id ? 'Job ' + escapeHtml(r.job_id) : ''}</div>
+  const rows = await Promise.all(data.map(async (r) => {
+    const status = r.status || 'planned';
+    const assignedName = await getPersonName(r.assigned_by);
+    const actionBtn = status === 'planned'
+      ? `<button type="button" class="secondary" data-start-trip="${r.id}" style="margin-top:6px;">▶ Start trip</button>`
+      : status === 'in_progress'
+        ? `<button type="button" class="secondary" data-complete-trip="${r.id}" style="margin-top:6px;">✅ Complete</button>`
+        : '';
+    return `
+      <div class="entry">
+        <span class="type-icon">🚗</span>
+        <div class="entry-body">
+          <div class="entry-desc">${r.trip_time ? escapeHtml(String(r.trip_time).slice(0, 5)) + ' — ' : ''}${escapeHtml(r.from_label || '?')} → ${escapeHtml(r.to_label || '?')}<span class="trip-status-badge ${status}">${status === 'planned' ? 'NEW' : status === 'in_progress' ? 'In progress' : 'Done'}</span></div>
+          <div class="entry-meta">${r.description ? escapeHtml(r.description) + ' · ' : ''}${assignedName ? 'Assigned by ' + escapeHtml(assignedName) : ''}${r.job_id ? ' · Job ' + escapeHtml(r.job_id) : ''}</div>
+          ${actionBtn}
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }));
+  area.innerHTML = rows.join('');
+  area.querySelectorAll('[data-start-trip]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { error: updErr } = await sb.from('driver_trips').update({ status: 'in_progress', started_at: new Date().toISOString() }).eq('id', btn.dataset.startTrip);
+      if (updErr) { showToast(`Couldn't start trip: ${updErr.message}`); return; }
+      showToast('Trip started.');
+      renderMyTripsToday();
+    });
+  });
+  area.querySelectorAll('[data-complete-trip]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { error: updErr } = await sb.from('driver_trips').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', btn.dataset.completeTrip);
+      if (updErr) { showToast(`Couldn't complete trip: ${updErr.message}`); return; }
+      showToast('Trip completed.');
+      renderMyTripsToday();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+// Driver self-entry — "+ Log a trip": for when nobody pre-assigned
+// anything and the driver just got told (in person/by phone) to go
+// somewhere. Picks who asked + a task + from/to, then Start Trip saves it
+// already in-progress — no separate "planned" step needed since the
+// driver is the one starting it right now.
+// ---------------------------------------------------------------------
+function initOwnTripLogging() {
+  const toggleBtn = $('logOwnTripBtn');
+  const form = $('ownTripForm');
+  if (!toggleBtn || !form || toggleBtn.dataset.wired) return;
+  toggleBtn.dataset.wired = 'true';
+  toggleBtn.addEventListener('click', () => {
+    const showing = form.style.display !== 'none';
+    form.style.display = showing ? 'none' : 'block';
+    if (!showing) renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
+  });
+  wireAddressSearch('ownTripFrom', 'ownTripFromResults');
+  wireAddressSearch('ownTripTo', 'ownTripToResults');
+
+  $('ownTripStartBtn')?.addEventListener('click', async () => {
+    const fromLabel = $('ownTripFrom').value.trim();
+    const toLabel = $('ownTripTo').value.trim();
+    if (!fromLabel || !toLabel) { showToast('Fill in From and To first.'); return; }
+    const { error } = await sb.from('driver_trips').insert({
+      driver_id: currentUser.id,
+      work_date: new Date().toISOString().slice(0, 10),
+      trip_time: toTimeInputValue(new Date()),
+      from_label: fromLabel,
+      from_lat: $('ownTripFrom').dataset.lat ? parseFloat($('ownTripFrom').dataset.lat) : null,
+      from_lon: $('ownTripFrom').dataset.lon ? parseFloat($('ownTripFrom').dataset.lon) : null,
+      to_label: toLabel,
+      to_lat: $('ownTripTo').dataset.lat ? parseFloat($('ownTripTo').dataset.lat) : null,
+      to_lon: $('ownTripTo').dataset.lon ? parseFloat($('ownTripTo').dataset.lon) : null,
+      km: $('ownTripKm').value ? parseFloat($('ownTripKm').value) : null,
+      assigned_by: $('ownTripAssignedBySelect').value || null,
+      description: Array.from(ownTripTaskSelected).join(', ') || null,
+      status: 'in_progress',
+      started_at: new Date().toISOString(),
+      created_by: currentUser.id,
+    });
+    if (error) { showToast(`Couldn't start trip: ${error.message}`); return; }
+    $('ownTripFrom').value = '';
+    $('ownTripTo').value = '';
+    $('ownTripKm').value = '';
+    $('ownTripAssignedBySelect').value = '';
+    ownTripTaskSelected.clear();
+    form.style.display = 'none';
+    showToast('Trip started.');
+    renderMyTripsToday();
+  });
 }
 
 // =====================================================================

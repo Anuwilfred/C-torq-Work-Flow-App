@@ -199,6 +199,28 @@
       <div class="card glass" id="myTripsCard" style="display:none;">
         <strong style="font-size:14px;">🚗 Today's trips</strong>
         <div id="myTripsArea" style="margin-top:8px;"></div>
+        <button type="button" class="secondary" id="logOwnTripBtn" style="margin-top:10px; width:100%;">+ Log a trip</button>
+        <div id="ownTripForm" style="display:none; margin-top:10px;">
+          <label for="ownTripAssignedBySelect">Who assigned this</label>
+          <select id="ownTripAssignedBySelect">
+            <option value="">Choose who asked you</option>
+          </select>
+          <label>Task (tap any that apply)</label>
+          <div id="ownTripTaskChips" class="chip-picker"></div>
+          <label for="ownTripFrom">From</label>
+          <div class="job-search-wrap" style="position:relative;">
+            <input id="ownTripFrom" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+            <div id="ownTripFromResults" class="job-search-results" style="display:none;"></div>
+          </div>
+          <label for="ownTripTo">To</label>
+          <div class="job-search-wrap" style="position:relative;">
+            <input id="ownTripTo" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+            <div id="ownTripToResults" class="job-search-results" style="display:none;"></div>
+          </div>
+          <label for="ownTripKm">Distance in KM (optional)</label>
+          <input id="ownTripKm" type="number" min="0" step="0.1" placeholder="e.g. 18.5" />
+          <button type="button" class="primary" id="ownTripStartBtn" style="width:100%; margin-top:8px;">▶ Start trip</button>
+        </div>
       </div>
       <div class="card glass">
         <form id="entryForm">
@@ -291,8 +313,10 @@
               <input id="lunchMinutes" type="number" min="0" step="5" value="0" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
               <p class="hint">Filled automatically by Start Break / Stop Break above — it's subtracted from your total hours for the day.</p>
 
-              <label for="workNotes">Notes (optional) — what did you work on?</label>
-              <textarea id="workNotes" placeholder="What did you work on?"></textarea>
+              <label>What did you work on? (tap any that apply)</label>
+              <div id="workNotesChips" class="chip-picker"></div>
+              <label for="workNotes">Other / additional notes (optional)</label>
+              <textarea id="workNotes" placeholder="Anything else worth noting?"></textarea>
             </div>
 
             <!-- leave-type fields -->
@@ -337,8 +361,10 @@
             <label for="timeSimple">Time</label>
             <input id="timeSimple" type="time" />
 
-            <label for="descriptionSimple">Description / Notes</label>
-            <textarea id="descriptionSimple" placeholder="What did you work on?"></textarea>
+            <label>Description (tap any that apply)</label>
+            <div id="descriptionSimpleChips" class="chip-picker"></div>
+            <label for="descriptionSimple">Other / additional notes (optional)</label>
+            <textarea id="descriptionSimple" placeholder="Anything else worth noting?"></textarea>
 
             <!-- Daily Progress only -->
             <div id="progressOnlyFields" style="display:none;">
@@ -622,8 +648,10 @@
       </div>
     </div>
 
-    <label for="qsrNotes" style="margin-top:14px;">Notes about this job (optional)</label>
-    <textarea id="qsrNotes" placeholder="What are you doing on this job?" rows="3"></textarea>
+    <label style="margin-top:14px;">What are you doing on this job? (tap any that apply)</label>
+    <div id="qsrNotesChips" class="chip-picker"></div>
+    <label for="qsrNotes">Other / additional notes (optional)</label>
+    <textarea id="qsrNotes" placeholder="Anything else worth noting?" rows="3"></textarea>
   </div>
 </div>
 
@@ -1006,7 +1034,7 @@
     <div class="panel-body">
       <p class="hint">Last known location while each driver's app was open — not a continuous live feed.</p>
       <button type="button" class="secondary" id="refreshLiveDriversBtn" style="margin-top:8px;">🔄 Refresh</button>
-      <div id="liveDriversMapArea" style="margin-top:12px; height:min(85vh, 720px); border-radius:14px; overflow:hidden; display:none;"></div>
+      <div id="liveDriversMapArea" style="margin-top:12px; height:min(45vh, 380px); border-radius:14px; overflow:hidden; display:none;"></div>
       <div id="liveDriversList" style="margin-top:12px;"></div>
     </div>
   </div>
@@ -1178,7 +1206,33 @@
         <label for="tripJobId">Link to a job (optional)</label>
         <input id="tripJobId" type="text" placeholder="Leave blank for office runs / non-job trips" />
 
-        <button type="button" id="addTripBtn" class="primary">Add trip</button>
+        <label for="tripAssignedBySelect">Who assigned this</label>
+        <select id="tripAssignedBySelect">
+          <option value="">Choose who's sending the driver</option>
+        </select>
+
+        <label>Task (tap any that apply)</label>
+        <div id="tripTaskChips" class="chip-picker"></div>
+
+        <button type="button" id="addTripBtn" class="primary">Add trip — notifies the driver right away</button>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">🚗 Manage Job Descriptions</strong>
+        <p class="hint" style="margin-top:2px;">These are the tap-to-select options everyone sees instead of typing — General ones show up in New Entry / Daily Progress / Report / Quick Job Switch; Driver ones show up only in driver trips.</p>
+
+        <label for="newJobDescScope">List</label>
+        <select id="newJobDescScope">
+          <option value="general">General (Entry / Daily Progress / Report / Quick Job)</option>
+          <option value="driver">Driver tasks (trips)</option>
+        </select>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newJobDescLabel" type="text" placeholder="e.g. Site visit, Office work, Loading" />
+          <button type="button" id="addJobDescBtn" class="secondary">+ Add</button>
+        </div>
+        <div id="jobDescList" style="margin-top:10px;"></div>
       </div>
 
       <div class="section-divider"></div>
