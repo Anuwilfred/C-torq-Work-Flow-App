@@ -1925,6 +1925,13 @@ button.ghost:hover { color: var(--text); }
 .big-total-ring-stat { flex: 1; text-align: center; padding: 8px 6px; background: var(--glass-1); border: 1px solid var(--glass-border); border-radius: var(--r-md); }
 .big-total-ring-stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-dim); }
 .big-total-ring-stat-value { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 3px; }
+
+.dept-ring-single-wrap { display: flex; flex-direction: column; align-items: center; }
+.dept-people-list { margin-top: 10px; width: 100%; display: flex; flex-direction: column; gap: 4px; }
+.dept-people-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); }
+.dept-people-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; }
+.dept-people-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dept-people-hours { font-weight: 700; color: var(--text); flex: none; }
 .ring-card .ring-role {
   font-size: 9px;
   font-weight: 700;

@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.13.4';
+const APP_VERSION = 'v3.14.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Big total ring now shows Total allocated and Total consumed as two clear separate numbers underneath, so both are visible at a glance.';
+const APP_UPDATE_NOTES = 'Big ring now compares against the job\'s own Total Hours from the Google Sheet (no Department column needed anymore). Each department card now also lists exactly who from that department logged hours, and how much.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5447,10 +5447,33 @@ function segmentedRingSvg(roles, totalAllocated, totalUsed) {
   `;
 }
 
+// The people who actually logged hours against this job FROM this
+// department — shown right inside the department's own card, so "who used
+// how much" doesn't require scrolling down to the separate contributors
+// list and cross-referencing department names by eye.
+function deptPeopleListHtml(people) {
+  if (!people || !people.length) return '';
+  const sorted = [...people].sort((a, b) => b.hours - a.hours);
+  return `
+    <div class="dept-people-list">
+      ${sorted.map((p) => `
+        <div class="dept-people-row">
+          <span class="dept-people-dot" style="background:${ringRoleColor(p.position)}"></span>
+          <span class="dept-people-name">${escapeHtml(p.name)}</span>
+          <span class="dept-people-hours">${p.hours}h</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function deptRingBlock(dept) {
   const roleRows = (dept.roles || []).filter((r) => r.position !== 'general' && (r.allocatedHours > 0 || r.usedHours > 0));
+  const peopleHtml = deptPeopleListHtml(dept.people);
   if (!roleRows.length) {
-    return ringCard(dept.name, dept.usedHours, dept.allocatedHours, dept.hasData);
+    return peopleHtml
+      ? `<div class="dept-ring-single-wrap">${ringCard(dept.name, dept.usedHours, dept.allocatedHours, dept.hasData)}${peopleHtml}</div>`
+      : ringCard(dept.name, dept.usedHours, dept.allocatedHours, dept.hasData);
   }
   const totalAllocated = dept.allocatedHours;
   const totalUsed = dept.usedHours;
@@ -5474,6 +5497,7 @@ function deptRingBlock(dept) {
           </div>
         `).join('')}
       </div>
+      ${peopleHtml}
     </div>
   `;
 }
@@ -5712,6 +5736,15 @@ async function openProjectDetail(jobId, name) {
   }
   currentProjectReport = data;
   const departments = data.project.departments || [];
+  const contributors = data.contributors || [];
+
+  // Group contributors by department so each department's own card can show
+  // exactly who (from that department) logged time against this job, not
+  // just a total number.
+  const peopleByDept = {};
+  contributors.forEach((c) => {
+    (peopleByDept[c.departmentId] || (peopleByDept[c.departmentId] = [])).push({ name: c.name, hours: c.hours, position: c.position });
+  });
 
   // Show EVERY department in the organization here, not just the ones this
   // project happens to have hours logged/allotted for — departments with no
@@ -5726,24 +5759,29 @@ async function openProjectDetail(jobId, name) {
     const usedHours = existing ? Number(existing.usedHours) || 0 : 0;
     const allocatedHours = existing ? Number(existing.allocatedHours) || 0 : 0;
     const roles = existing?.roles || [];
-    return { id: dept.id, name: dept.name, usedHours, allocatedHours, roles, hasData: usedHours > 0 || allocatedHours > 0 };
+    return { id: dept.id, name: dept.name, usedHours, allocatedHours, roles, people: peopleByDept[dept.id] || [], hasData: usedHours > 0 || allocatedHours > 0 };
   });
   // Cover the edge case of a department that has report data but was since
   // deleted/renamed out of the departments table — still show it rather than
   // silently dropping real hours off the screen.
   departments.forEach((d) => {
-    if (!allDepartments.some((ad) => ad.id === d.id)) merged.push({ ...d, hasData: true });
+    if (!allDepartments.some((ad) => ad.id === d.id)) merged.push({ ...d, people: peopleByDept[d.id] || [], hasData: true });
   });
   // Departments with real data float to the top; dulled/empty ones sink down.
   merged.sort((a, b) => (b.hasData === a.hasData ? 0 : b.hasData ? 1 : -1));
 
-  // One big ring for the whole job: sum every department's hours, and flag
-  // by name any department where EITHER its own total, or any single role
-  // inside it, has gone over its budget — a department's total can look
-  // fine even while one role inside it is over, if another role in the
-  // same department has spare budget offsetting it.
-  const totalAllocated = merged.reduce((s, d) => s + (Number(d.allocatedHours) || 0), 0);
-  const totalUsed = merged.reduce((s, d) => s + (Number(d.usedHours) || 0), 0);
+  // The big ring compares against the JOB's own total (from the Google
+  // Sheet's Total Hours column), not a sum of per-department budgets — a
+  // department can still be flagged red below even while the job total
+  // looks fine, if that department (or a role inside it) has its own
+  // manually-set budget exceeded, or if any ROLE exceeds its job-wide
+  // allocated hours from the sheet.
+  const totalAllocated = Number(data.project.totalAllocatedHours) || 0;
+  const totalUsed = Number(data.project.totalUsedHours) || 0;
+  const jobRoles = data.project.jobRoles || [];
+  const overRoleNames = jobRoles
+    .filter((r) => r.allocatedHours > 0 && r.usedHours > r.allocatedHours)
+    .map((r) => POSITION_LABEL[r.position] || r.position);
   const overDeptNames = merged
     .filter((d) => {
       const deptOver = d.allocatedHours > 0 && d.usedHours > d.allocatedHours;
@@ -5751,9 +5789,10 @@ async function openProjectDetail(jobId, name) {
       return deptOver || roleOver;
     })
     .map((d) => d.name);
+  const overNames = [...overRoleNames, ...overDeptNames];
 
   $('projectRingsArea').innerHTML = merged.length
-    ? bigTotalRingBlock(totalAllocated, totalUsed, overDeptNames) + `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
+    ? bigTotalRingBlock(totalAllocated, totalUsed, overNames) + `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
     : '<div class="empty">No departments set up yet — add one from Admin → Team → Departments.</div>';
   renderProjectContributors(data);
   renderDeptHoursManager(jobId, departments);
