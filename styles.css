@@ -1902,6 +1902,25 @@ button.ghost:hover { color: var(--text); }
 .dept-role-legend { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; align-self: stretch; }
 .dept-role-legend-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-dim); }
 .dept-role-dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
+
+/* The one big "whole job" ring above the department grid. */
+.big-total-ring-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 16px;
+  margin-bottom: 14px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+}
+.big-total-ring-card.over { border-color: rgba(242, 125, 112, 0.45); background: rgba(242, 125, 112, 0.06); }
+.big-total-ring-label { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 10px; text-align: center; }
+.big-total-ring-value { font-size: 17px; font-weight: 800; margin-top: 8px; }
+.big-total-ring-value.over { color: var(--err); }
+.big-total-ring-value.under { color: var(--ok); }
+.big-total-ring-value.dim { color: var(--text-dim); }
+.big-total-ring-warning { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--err); text-align: center; }
 .ring-card .ring-role {
   font-size: 9px;
   font-weight: 700;

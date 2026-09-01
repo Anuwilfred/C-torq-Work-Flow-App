@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.13.2';
+const APP_VERSION = 'v3.13.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Department rings now show ONE combined ring per department, color-coded by role (Engineer/Supervisor/Foreman/Technician/Helper) with a legend, and fixed a misleading full contributor bar when no budget is set.';
+const APP_UPDATE_NOTES = 'Added one big ring at the top of Project Detail showing total allocated vs used hours across the whole job — turns red if any department/role goes over its own budget.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5267,8 +5267,9 @@ if ($('scanImportJobsBtn')) {
 // Apple-Watch-style dual ring: green fills 0→100% of allocated hours used;
 // once used exceeds allocated, the green ring stays full and a second,
 // smaller orange ring fills to show the overage.
-function ringSvg(used, allocated, hasData = true) {
-  const size = 140, stroke = 14;
+function ringSvg(used, allocated, hasData = true, opts = {}) {
+  const size = opts.size || 140;
+  const stroke = opts.stroke || Math.round(size * 0.1);
   const rOuter = (size - stroke) / 2;
   const rInner = rOuter - stroke - 6;
   const cOuter = 2 * Math.PI * rOuter;
@@ -5296,12 +5297,17 @@ function ringSvg(used, allocated, hasData = true) {
   const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
   const outerOffset = cOuter * (1 - usedPct);
   const innerOffset = cInner * (1 - overPct);
+  // forceOver: used by the big "all departments" ring to turn red even when
+  // this particular total isn't itself over budget, because at least one
+  // individual department underneath it is — the whole point of that ring
+  // is "is anything wrong anywhere on this job", not just the grand total.
+  const isOver = overHours > 0 || !!opts.forceOver;
   // Over-allocation is a red ring (not the old orange/warn) so it reads as
   // "needs attention" at a glance rather than just "getting close".
   return `
-    <svg viewBox="0 0 ${size} ${size}" class="ring-svg${overHours > 0 ? ' ring-svg-over' : ''}">
+    <svg viewBox="0 0 ${size} ${size}" class="ring-svg${isOver ? ' ring-svg-over' : ''}">
       <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
-      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="${overHours > 0 ? 'var(--err)' : 'var(--ok)'}" stroke-width="${stroke}"
+      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="${isOver ? 'var(--err)' : 'var(--ok)'}" stroke-width="${stroke}"
         stroke-dasharray="${cOuter}" stroke-dashoffset="${outerOffset}" stroke-linecap="round"
         transform="rotate(-90 ${cx} ${cy})" />
       ${overHours > 0 ? `
@@ -5329,6 +5335,34 @@ function ringCard(roleLabel, used, allocated, hasData = true) {
       ${ringSvg(used, allocated, hasData)}
       <div class="ring-center-value ${centerClass}">${centerText}</div>
       <div class="ring-sub">${subText}</div>
+    </div>
+  `;
+}
+
+// One BIG ring above the whole department grid — the total allocated vs
+// total used hours across EVERY department on this job. Turns red the
+// instant ANY single department is over its own budget (not just when the
+// grand total is over — a department can be over even while the overall
+// total still looks fine, because another department has spare budget
+// offsetting it, and that should still be flagged here).
+function bigTotalRingBlock(totalAllocated, totalUsed, overDeptNames) {
+  const anyOver = overDeptNames.length > 0;
+  const totalOverHours = totalAllocated > 0 ? Math.max(0, Math.round((totalUsed - totalAllocated) * 100) / 100) : 0;
+  const remaining = totalAllocated > 0 ? Math.max(0, Math.round((totalAllocated - totalUsed) * 100) / 100) : 0;
+  const centerText = totalOverHours > 0
+    ? `−${totalOverHours}h`
+    : (totalAllocated > 0 ? `${remaining}h left` : `${Math.round(totalUsed * 100) / 100}h logged`);
+  const centerClass = anyOver || totalOverHours > 0 ? 'over' : (totalAllocated > 0 ? 'under' : 'dim');
+  const subText = totalAllocated > 0
+    ? `${Math.round(totalUsed * 100) / 100}h used of ${Math.round(totalAllocated * 100) / 100}h total`
+    : `${Math.round(totalUsed * 100) / 100}h logged — no budgets set yet`;
+  return `
+    <div class="big-total-ring-card${anyOver || totalOverHours > 0 ? ' over' : ''}">
+      <div class="big-total-ring-label">Total — every department on this job</div>
+      ${ringSvg(totalUsed, totalAllocated, true, { size: 190, forceOver: anyOver })}
+      <div class="big-total-ring-value ${centerClass}">${centerText}</div>
+      <div class="ring-sub">${subText}</div>
+      ${overDeptNames.length ? `<div class="big-total-ring-warning">⚠️ Over budget: ${overDeptNames.map((n) => escapeHtml(n)).join(', ')}</div>` : ''}
     </div>
   `;
 }
@@ -5693,8 +5727,23 @@ async function openProjectDetail(jobId, name) {
   // Departments with real data float to the top; dulled/empty ones sink down.
   merged.sort((a, b) => (b.hasData === a.hasData ? 0 : b.hasData ? 1 : -1));
 
+  // One big ring for the whole job: sum every department's hours, and flag
+  // by name any department where EITHER its own total, or any single role
+  // inside it, has gone over its budget — a department's total can look
+  // fine even while one role inside it is over, if another role in the
+  // same department has spare budget offsetting it.
+  const totalAllocated = merged.reduce((s, d) => s + (Number(d.allocatedHours) || 0), 0);
+  const totalUsed = merged.reduce((s, d) => s + (Number(d.usedHours) || 0), 0);
+  const overDeptNames = merged
+    .filter((d) => {
+      const deptOver = d.allocatedHours > 0 && d.usedHours > d.allocatedHours;
+      const roleOver = (d.roles || []).some((r) => r.allocatedHours > 0 && r.usedHours > r.allocatedHours);
+      return deptOver || roleOver;
+    })
+    .map((d) => d.name);
+
   $('projectRingsArea').innerHTML = merged.length
-    ? `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
+    ? bigTotalRingBlock(totalAllocated, totalUsed, overDeptNames) + `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
     : '<div class="empty">No departments set up yet — add one from Admin → Team → Departments.</div>';
   renderProjectContributors(data);
   renderDeptHoursManager(jobId, departments);
