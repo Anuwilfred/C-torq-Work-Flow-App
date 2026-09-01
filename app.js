@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.13.1';
+const APP_VERSION = 'v3.13.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a ring bug: a department/role with no budget set yet no longer falsely shows as red/over-budget the moment someone logs hours against it.';
+const APP_UPDATE_NOTES = 'Department rings now show ONE combined ring per department, color-coded by role (Engineer/Supervisor/Foreman/Technician/Helper) with a legend, and fixed a misleading full contributor bar when no budget is set.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5339,16 +5339,96 @@ function ringCard(roleLabel, used, allocated, hasData = true) {
 // rings, one per role that actually has allocated or used hours, so an
 // org manager can see at a glance exactly which role on which department
 // is running over, not just the department as a whole.
+const ROLE_RING_COLORS = {
+  engineer: '#e08a5f',
+  supervisor: '#63d197',
+  foreman: '#7aa2e3',
+  technician: '#c792ea',
+  helper: '#f2b755',
+};
+function ringRoleColor(position) { return ROLE_RING_COLORS[position] || '#e08a5f'; }
+
+// ONE combined ring per department (not a separate ring per role) — the
+// outer ring's fill is split into colored arc segments, one per role, so
+// "which role used how much of the department's total budget" is visible
+// at a glance in a single ring, directly comparable department-to-department,
+// with the exact breakdown spelled out in the legend underneath.
+function segmentedRingSvg(roles, totalAllocated, totalUsed) {
+  const size = 140, stroke = 14;
+  const rOuter = (size - stroke) / 2;
+  const rInner = rOuter - stroke - 6;
+  const cOuter = 2 * Math.PI * rOuter;
+  const cInner = 2 * Math.PI * rInner;
+  const cx = size / 2, cy = size / 2;
+  // Same "no false over-budget" rule as the single ring: only real once a
+  // budget is actually set.
+  const overHours = totalAllocated > 0 ? Math.max(0, totalUsed - totalAllocated) : 0;
+  const overPct = totalAllocated > 0 && overHours > 0 ? Math.min(overHours / totalAllocated, 1) : 0;
+  const innerOffset = cInner * (1 - overPct);
+
+  // Walk each role's share of the outer ring, capped so the segments drawn
+  // never exceed one full turn — anything past the budget is represented by
+  // the separate inner overage ring instead, same as the single-ring case.
+  let cursor = 0;
+  let remaining = 1;
+  const segments = [];
+  roles.filter((r) => r.usedHours > 0).forEach((r) => {
+    if (remaining <= 0) return;
+    const frac = totalAllocated > 0
+      ? Math.min(r.usedHours / totalAllocated, remaining)
+      : (totalUsed > 0 ? Math.min(r.usedHours / totalUsed, remaining) : 0);
+    if (frac <= 0) return;
+    segments.push({ position: r.position, start: cursor, end: cursor + frac });
+    cursor += frac;
+    remaining -= frac;
+  });
+
+  const segmentCircles = segments.map((s) => {
+    const segLen = (s.end - s.start) * cOuter;
+    return `<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="${ringRoleColor(s.position)}" stroke-width="${stroke}"
+      stroke-dasharray="${segLen} ${cOuter - segLen}" stroke-dashoffset="${cOuter * (1 - s.start)}" stroke-linecap="butt"
+      transform="rotate(-90 ${cx} ${cy})" />`;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${size} ${size}" class="ring-svg${overHours > 0 ? ' ring-svg-over' : ''}">
+      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
+      ${segmentCircles}
+      ${overHours > 0 ? `
+      <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke - 4}" />
+      <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--err)" stroke-width="${stroke - 4}"
+        stroke-dasharray="${cInner}" stroke-dashoffset="${innerOffset}" stroke-linecap="round"
+        transform="rotate(-90 ${cx} ${cy})" />` : ''}
+    </svg>
+  `;
+}
+
 function deptRingBlock(dept) {
   const roleRows = (dept.roles || []).filter((r) => r.position !== 'general' && (r.allocatedHours > 0 || r.usedHours > 0));
   if (!roleRows.length) {
     return ringCard(dept.name, dept.usedHours, dept.allocatedHours, dept.hasData);
   }
+  const totalAllocated = dept.allocatedHours;
+  const totalUsed = dept.usedHours;
+  const noBudgetSet = totalAllocated <= 0 && totalUsed > 0;
+  const over = totalAllocated > 0 ? Math.max(0, Math.round((totalUsed - totalAllocated) * 100) / 100) : 0;
+  const remaining = totalAllocated > 0 ? Math.max(0, Math.round((totalAllocated - totalUsed) * 100) / 100) : 0;
+  const centerText = noBudgetSet ? `${totalUsed}h` : (over > 0 ? `−${over}h` : (totalAllocated > 0 ? `${remaining}h left` : '—'));
+  const centerClass = noBudgetSet ? 'nobudget' : (over > 0 ? 'over' : (totalAllocated > 0 ? 'under' : 'dim'));
+  const subText = noBudgetSet ? `${totalUsed}h logged — no budget set yet` : `${totalUsed}h used of ${totalAllocated}h`;
   return `
     <div class="dept-ring-group">
       <div class="dept-ring-group-title">${escapeHtml(dept.name)}</div>
-      <div class="dept-ring-group-rings">
-        ${roleRows.map((r) => ringCard(POSITION_LABEL[r.position] || r.position, r.usedHours, r.allocatedHours, true)).join('')}
+      ${segmentedRingSvg(roleRows, totalAllocated, totalUsed)}
+      <div class="ring-center-value ${centerClass}">${centerText}</div>
+      <div class="ring-sub">${subText}</div>
+      <div class="dept-role-legend">
+        ${roleRows.map((r) => `
+          <div class="dept-role-legend-row">
+            <span class="dept-role-dot" style="background:${ringRoleColor(r.position)}"></span>
+            ${escapeHtml(POSITION_LABEL[r.position] || r.position)}: ${r.usedHours}h${r.allocatedHours > 0 ? ` of ${r.allocatedHours}h` : ' (no budget set)'}
+          </div>
+        `).join('')}
       </div>
     </div>
   `;
@@ -5368,22 +5448,25 @@ function renderProjectContributors(data) {
     (d.roles && d.roles.length ? d.roles : [{ position: 'general', allocatedHours: d.allocatedHours }])
       .forEach((r) => { allocatedByKey[`${d.id}::${r.position}`] = Number(r.allocatedHours) || 0; });
   });
-  const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
   wrap.innerHTML = contributors.map((c) => {
     const bucketPosition = c.position || 'general';
     const allocated = allocatedByKey[`${c.departmentId}::${bucketPosition}`] || 0;
     const roleLabel = bucketPosition !== 'general' ? (POSITION_LABEL[bucketPosition] || bucketPosition) : '';
     const over = allocated > 0 ? Math.max(0, Math.round((c.hours - allocated) * 100) / 100) : 0;
-    const pct = allocated > 0
-      ? Math.min(Math.round((c.hours / allocated) * 100), 100)
-      : Math.round((c.hours / maxHours) * 100);
+    // With no budget set, there's nothing real to show a % bar against —
+    // showing one anyway (sized relative to other contributors) was
+    // misleading, making whoever logged the most hours look "100% full"
+    // even though no budget exists at all. Show a plain note instead.
+    const pct = allocated > 0 ? Math.min(Math.round((c.hours / allocated) * 100), 100) : 0;
     return `
     <div class="contrib-row${over > 0 ? ' contrib-over' : ''}">
       <div class="contrib-top">
         <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(c.departmentName)}${roleLabel ? ' · ' + escapeHtml(roleLabel) : ''}</span></span>
         <span class="contrib-hours">${c.hours}h${allocated > 0 ? ` <span class="contrib-allocated">of ${allocated}h</span>` : ''}</span>
       </div>
-      <div class="contrib-bar-track"><div class="contrib-bar-fill${over > 0 ? ' over' : ''}" style="width:${pct}%"></div></div>
+      ${allocated > 0
+        ? `<div class="contrib-bar-track"><div class="contrib-bar-fill${over > 0 ? ' over' : ''}" style="width:${pct}%"></div></div>`
+        : `<div class="contrib-nobudget-note">${c.hours}h logged — no budget set for this role yet</div>`}
       ${over > 0 ? `<div class="contrib-over-note">⚠️ Over allocated hours by ${over}h</div>` : ''}
     </div>
   `;
