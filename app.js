@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.13.3';
+const APP_VERSION = 'v3.13.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Added one big ring at the top of Project Detail showing total allocated vs used hours across the whole job — turns red if any department/role goes over its own budget.';
+const APP_UPDATE_NOTES = 'Big total ring now shows Total allocated and Total consumed as two clear separate numbers underneath, so both are visible at a glance.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5362,6 +5362,16 @@ function bigTotalRingBlock(totalAllocated, totalUsed, overDeptNames) {
       ${ringSvg(totalUsed, totalAllocated, true, { size: 190, forceOver: anyOver })}
       <div class="big-total-ring-value ${centerClass}">${centerText}</div>
       <div class="ring-sub">${subText}</div>
+      <div class="big-total-ring-stats">
+        <div class="big-total-ring-stat">
+          <div class="big-total-ring-stat-label">Total allocated</div>
+          <div class="big-total-ring-stat-value">${totalAllocated > 0 ? `${Math.round(totalAllocated * 100) / 100}h` : 'Not set'}</div>
+        </div>
+        <div class="big-total-ring-stat">
+          <div class="big-total-ring-stat-label">Total consumed</div>
+          <div class="big-total-ring-stat-value">${Math.round(totalUsed * 100) / 100}h</div>
+        </div>
+      </div>
       ${overDeptNames.length ? `<div class="big-total-ring-warning">⚠️ Over budget: ${overDeptNames.map((n) => escapeHtml(n)).join(', ')}</div>` : ''}
     </div>
   `;

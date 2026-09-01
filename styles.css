@@ -1921,6 +1921,10 @@ button.ghost:hover { color: var(--text); }
 .big-total-ring-value.under { color: var(--ok); }
 .big-total-ring-value.dim { color: var(--text-dim); }
 .big-total-ring-warning { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--err); text-align: center; }
+.big-total-ring-stats { display: flex; gap: 10px; margin-top: 14px; width: 100%; max-width: 320px; }
+.big-total-ring-stat { flex: 1; text-align: center; padding: 8px 6px; background: var(--glass-1); border: 1px solid var(--glass-border); border-radius: var(--r-md); }
+.big-total-ring-stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-dim); }
+.big-total-ring-stat-value { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 3px; }
 .ring-card .ring-role {
   font-size: 9px;
   font-weight: 700;
