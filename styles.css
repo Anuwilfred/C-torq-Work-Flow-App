@@ -637,6 +637,7 @@ button.ghost:hover { color: var(--text); }
 }
 .jobdesc-row .jobdesc-label { flex: 1; font-size: 13px; }
 .jobdesc-row.inactive .jobdesc-label { color: var(--text-dim); text-decoration: line-through; }
+.jobdesc-row .jobdesc-edit-input { flex: 1; font-size: 16px; padding: 6px 8px; }
 
 /* Driver trip status badges + Start/Complete actions */
 .trip-status-badge { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin-left: 6px; }
@@ -1894,8 +1895,9 @@ button.ghost:hover { color: var(--text); }
   overflow-wrap: break-word;
 }
 .ring-svg { width: 52px; height: 52px; }
+.ring-svg-over { filter: drop-shadow(0 0 5px rgba(242, 125, 112, 0.55)); }
 .ring-center-value { font-size: 9.5px; font-weight: 800; margin-top: 3px; }
-.ring-center-value.over { color: var(--warn); }
+.ring-center-value.over { color: var(--err); }
 .ring-center-value.under { color: var(--ok); }
 .ring-center-value.dim { color: var(--text-dim); }
 .ring-sub { font-size: 7px; color: var(--text-dim); margin-top: 1px; line-height: 1.15; text-align: center; }
@@ -1917,6 +1919,7 @@ button.ghost:hover { color: var(--text); }
 .contrib-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; margin-bottom: 8px; }
 .contrib-name { font-weight: 700; color: var(--text); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .contrib-hours { color: var(--text); font-weight: 800; font-size: 13.5px; flex: none; }
+.contrib-allocated { color: var(--text-dim); font-weight: 600; font-size: 11.5px; }
 .contrib-bar-track {
   height: 9px;
   border-radius: 999px;
@@ -1930,6 +1933,13 @@ button.ghost:hover { color: var(--text); }
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
   min-width: 6px;
 }
+/* A person who has logged more hours than their department's allocated
+   budget for this job — bar turns red and a note spells out the overage,
+   instead of the bar just silently capping out at 100% like anyone else
+   who's simply on track. */
+.contrib-row.contrib-over { border-color: rgba(242, 125, 112, 0.45); background: rgba(242, 125, 112, 0.07); }
+.contrib-bar-fill.over { background: linear-gradient(90deg, var(--err), #c94e42); }
+.contrib-over-note { margin-top: 6px; font-size: 11.5px; font-weight: 700; color: var(--err); }
 @media (max-width: 420px) {
   .chat-orb { left: 16px; bottom: 20px; }
   .chat-orb-label { left: 78px; bottom: 34px; font-size: 11.5px; padding: 6px 12px; }

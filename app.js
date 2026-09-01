@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.12.0';
+const APP_VERSION = 'v3.12.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Tap-to-select Job Descriptions everywhere (admin-managed), Job Allocation now takes a description, and driver trips got Who-assigned + task + Start/Complete + instant push.';
+const APP_UPDATE_NOTES = 'Active Projects: over-allocated hours now show as a clear red ring, and anyone over their department budget is flagged red with exactly how many hours over.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4082,21 +4082,36 @@ async function refreshGeneralDescriptionChips() {
 }
 
 // ---------------------------------------------------------------------
-// ADMIN: manage the Job Descriptions list itself (add + enable/disable).
+// ADMIN: manage the Job Descriptions list itself (add + edit + enable/disable).
 // Lives in Admin -> Employee Role & Invitation Management.
 // ---------------------------------------------------------------------
+let editingJobDescId = null; // which row (if any) is currently showing its edit box
+
 async function renderJobDescList() {
   const box = $('jobDescList');
   if (!box) return;
   const scope = $('newJobDescScope')?.value || 'general';
   const items = await fetchJobDescriptions(scope, false); // admin sees inactive too
   if (!items.length) { box.innerHTML = '<div class="empty">No job descriptions added yet for this list.</div>'; return; }
-  box.innerHTML = items.map((it) => `
-    <div class="jobdesc-row ${it.active ? '' : 'inactive'}">
-      <span class="jobdesc-label">${escapeHtml(it.label)}</span>
-      <button type="button" class="secondary" data-toggle-jobdesc="${it.id}" data-active="${it.active}">${it.active ? '⛔ Disable' : '✅ Enable'}</button>
-    </div>
-  `).join('');
+  box.innerHTML = items.map((it) => {
+    if (editingJobDescId === it.id) {
+      return `
+        <div class="jobdesc-row ${it.active ? '' : 'inactive'}">
+          <input type="text" class="jobdesc-edit-input" data-edit-input="${it.id}" value="${escapeHtml(it.label)}" />
+          <button type="button" class="secondary" data-save-jobdesc="${it.id}">💾 Save</button>
+          <button type="button" class="secondary" data-cancel-jobdesc="${it.id}">✖ Cancel</button>
+        </div>
+      `;
+    }
+    return `
+      <div class="jobdesc-row ${it.active ? '' : 'inactive'}">
+        <span class="jobdesc-label">${escapeHtml(it.label)}</span>
+        <button type="button" class="secondary" data-edit-jobdesc="${it.id}">✏️ Edit</button>
+        <button type="button" class="secondary" data-toggle-jobdesc="${it.id}" data-active="${it.active}">${it.active ? '⛔ Disable' : '✅ Enable'}</button>
+      </div>
+    `;
+  }).join('');
+
   box.querySelectorAll('[data-toggle-jobdesc]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.toggleJobdesc;
@@ -4104,6 +4119,37 @@ async function renderJobDescList() {
       const { error } = await sb.from('job_descriptions').update({ active: nowActive }).eq('id', id);
       if (error) { showToast(`Couldn't update: ${error.message}`); return; }
       showToast(nowActive ? 'Enabled.' : 'Disabled.');
+      renderJobDescList();
+      refreshGeneralDescriptionChips();
+      renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
+      renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
+    });
+  });
+
+  box.querySelectorAll('[data-edit-jobdesc]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editingJobDescId = btn.dataset.editJobdesc;
+      renderJobDescList();
+    });
+  });
+
+  box.querySelectorAll('[data-cancel-jobdesc]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      editingJobDescId = null;
+      renderJobDescList();
+    });
+  });
+
+  box.querySelectorAll('[data-save-jobdesc]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.saveJobdesc;
+      const input = box.querySelector(`[data-edit-input="${id}"]`);
+      const newLabel = (input?.value || '').trim();
+      if (!newLabel) { showToast('Description cannot be empty.'); return; }
+      const { error } = await sb.from('job_descriptions').update({ label: newLabel }).eq('id', id);
+      if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+      showToast('Saved.');
+      editingJobDescId = null;
       renderJobDescList();
       refreshGeneralDescriptionChips();
       renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
@@ -5185,15 +5231,17 @@ function ringSvg(used, allocated, hasData = true) {
   const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
   const outerOffset = cOuter * (1 - usedPct);
   const innerOffset = cInner * (1 - overPct);
+  // Over-allocation is a red ring (not the old orange/warn) so it reads as
+  // "needs attention" at a glance rather than just "getting close".
   return `
-    <svg viewBox="0 0 ${size} ${size}" class="ring-svg">
+    <svg viewBox="0 0 ${size} ${size}" class="ring-svg${overHours > 0 ? ' ring-svg-over' : ''}">
       <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
-      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--ok)" stroke-width="${stroke}"
+      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="${overHours > 0 ? 'var(--err)' : 'var(--ok)'}" stroke-width="${stroke}"
         stroke-dasharray="${cOuter}" stroke-dashoffset="${outerOffset}" stroke-linecap="round"
         transform="rotate(-90 ${cx} ${cy})" />
       ${overHours > 0 ? `
       <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke - 4}" />
-      <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--warn)" stroke-width="${stroke - 4}"
+      <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="var(--err)" stroke-width="${stroke - 4}"
         stroke-dasharray="${cInner}" stroke-dashoffset="${innerOffset}" stroke-linecap="round"
         transform="rotate(-90 ${cx} ${cy})" />` : ''}
     </svg>
@@ -5229,16 +5277,18 @@ function renderProjectContributors(data) {
   const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
   wrap.innerHTML = contributors.map((c) => {
     const allocated = allocatedByDept[c.departmentId] || 0;
+    const over = allocated > 0 ? Math.max(0, Math.round((c.hours - allocated) * 100) / 100) : 0;
     const pct = allocated > 0
       ? Math.min(Math.round((c.hours / allocated) * 100), 100)
       : Math.round((c.hours / maxHours) * 100);
     return `
-    <div class="contrib-row">
+    <div class="contrib-row${over > 0 ? ' contrib-over' : ''}">
       <div class="contrib-top">
         <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(c.departmentName)}</span></span>
-        <span class="contrib-hours">${c.hours}h</span>
+        <span class="contrib-hours">${c.hours}h${allocated > 0 ? ` <span class="contrib-allocated">of ${allocated}h</span>` : ''}</span>
       </div>
-      <div class="contrib-bar-track"><div class="contrib-bar-fill" style="width:${pct}%"></div></div>
+      <div class="contrib-bar-track"><div class="contrib-bar-fill${over > 0 ? ' over' : ''}" style="width:${pct}%"></div></div>
+      ${over > 0 ? `<div class="contrib-over-note">⚠️ Over allocated hours by ${over}h</div>` : ''}
     </div>
   `;
   }).join('');
