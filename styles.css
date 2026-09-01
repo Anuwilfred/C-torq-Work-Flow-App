@@ -1912,6 +1912,7 @@ button.ghost:hover { color: var(--text); }
 .ring-center-value { font-size: 9.5px; font-weight: 800; margin-top: 3px; }
 .ring-center-value.over { color: var(--err); }
 .ring-center-value.under { color: var(--ok); }
+.ring-center-value.nobudget { color: var(--text); }
 .ring-center-value.dim { color: var(--text-dim); }
 .ring-sub { font-size: 7px; color: var(--text-dim); margin-top: 1px; line-height: 1.15; text-align: center; }
 

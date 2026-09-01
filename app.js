@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.13.0';
+const APP_VERSION = 'v3.13.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Departments now break down by role (Engineer/Supervisor/Lead Foreman/Technician/Helper) with their own rings, and Admin -> Departments can sync allocated hours straight from your Google Sheet.';
+const APP_UPDATE_NOTES = 'Fixed a ring bug: a department/role with no budget set yet no longer falsely shows as red/over-budget the moment someone logs hours against it.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5286,8 +5286,13 @@ function ringSvg(used, allocated, hasData = true) {
       </svg>
     `;
   }
+  // "Over budget" only means something once a budget actually exists. With
+  // no allocated hours set yet (allocated === 0), ANY hours logged used to
+  // read as "infinitely over" and light up red — wrong: that's just "no
+  // budget set yet", not an overrun. Only compute overHours when there's a
+  // real allocated number to be over.
   const usedPct = allocated > 0 ? Math.min(used / allocated, 1) : (used > 0 ? 1 : 0);
-  const overHours = Math.max(0, used - allocated);
+  const overHours = allocated > 0 ? Math.max(0, used - allocated) : 0;
   const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
   const outerOffset = cOuter * (1 - usedPct);
   const innerOffset = cInner * (1 - overPct);
@@ -5309,11 +5314,15 @@ function ringSvg(used, allocated, hasData = true) {
 }
 
 function ringCard(roleLabel, used, allocated, hasData = true) {
-  const over = Math.max(0, Math.round((used - allocated) * 100) / 100);
-  const remaining = Math.max(0, Math.round((allocated - used) * 100) / 100);
-  const centerText = !hasData ? '—' : (over > 0 ? `−${over}h` : `${remaining}h left`);
-  const centerClass = !hasData ? 'dim' : (over > 0 ? 'over' : 'under');
-  const subText = !hasData ? 'No hours logged or allotted yet' : `${used}h used of ${allocated}h`;
+  // A budget of 0 (nothing set yet) is NOT the same as being over budget —
+  // it just means no one has told this ring what the budget is. Only treat
+  // it as "over" once there's a real allocated number to compare against.
+  const noBudgetSet = hasData && allocated <= 0 && used > 0;
+  const over = allocated > 0 ? Math.max(0, Math.round((used - allocated) * 100) / 100) : 0;
+  const remaining = allocated > 0 ? Math.max(0, Math.round((allocated - used) * 100) / 100) : 0;
+  const centerText = !hasData ? '—' : noBudgetSet ? `${used}h` : (over > 0 ? `−${over}h` : `${remaining}h left`);
+  const centerClass = !hasData ? 'dim' : noBudgetSet ? 'nobudget' : (over > 0 ? 'over' : 'under');
+  const subText = !hasData ? 'No hours logged or allotted yet' : noBudgetSet ? `${used}h logged — no budget set yet` : `${used}h used of ${allocated}h`;
   return `
     <div class="ring-card${hasData ? '' : ' ring-card-dim'}">
       <div class="ring-role">${escapeHtml(roleLabel)}</div>
@@ -5820,7 +5829,7 @@ async function populateShareGroupPicker() {
 function drawShareRing(ctx, cx, cy, used, allocated, label) {
   const rOuter = 58, rInner = 42, stroke = 12;
   const usedPct = allocated > 0 ? Math.min(used / allocated, 1) : (used > 0 ? 1 : 0);
-  const overHours = Math.max(0, used - allocated);
+  const overHours = allocated > 0 ? Math.max(0, used - allocated) : 0;
   const overPct = allocated > 0 && overHours > 0 ? Math.min(overHours / allocated, 1) : 0;
   const TAU = Math.PI * 2, START = -Math.PI / 2;
 
