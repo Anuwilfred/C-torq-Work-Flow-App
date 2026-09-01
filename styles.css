@@ -1900,7 +1900,7 @@ button.ghost:hover { color: var(--text); }
 .dept-ring-group-rings .ring-card { flex: 1 1 70px; max-width: 90px; background: transparent; border: none; padding: 4px; }
 .dept-ring-group { display: flex; flex-direction: column; align-items: center; }
 .dept-role-legend { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; align-self: stretch; }
-.dept-role-legend-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-dim); }
+.dept-role-legend-row { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: rgba(245,244,240,0.78); }
 .dept-role-dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
 
 /* The one big "whole job" ring above the department grid. */
@@ -1920,35 +1920,36 @@ button.ghost:hover { color: var(--text); }
 .big-total-ring-value.over { color: var(--err); }
 .big-total-ring-value.under { color: var(--ok); }
 .big-total-ring-value.dim { color: var(--text-dim); }
-.big-total-ring-warning { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--err); text-align: center; }
+.big-total-ring-card .ring-sub { font-size: 13px; color: rgba(245,244,240,0.78); margin-top: 5px; }
+.big-total-ring-warning { margin-top: 8px; font-size: 12.5px; font-weight: 700; color: var(--err); text-align: center; }
 .big-total-ring-stats { display: flex; gap: 10px; margin-top: 14px; width: 100%; max-width: 320px; }
 .big-total-ring-stat { flex: 1; text-align: center; padding: 8px 6px; background: var(--glass-1); border: 1px solid var(--glass-border); border-radius: var(--r-md); }
-.big-total-ring-stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-dim); }
+.big-total-ring-stat-label { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: rgba(245,244,240,0.68); }
 .big-total-ring-stat-value { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 3px; }
 
 .dept-ring-single-wrap { display: flex; flex-direction: column; align-items: center; }
 .dept-people-list { margin-top: 10px; width: 100%; display: flex; flex-direction: column; gap: 4px; }
-.dept-people-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); }
+.dept-people-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: rgba(245,244,240,0.78); }
 .dept-people-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; }
 .dept-people-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dept-people-hours { font-weight: 700; color: var(--text); flex: none; }
 .ring-card .ring-role {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text);
   margin-bottom: 4px;
-  line-height: 1.15;
+  line-height: 1.25;
   text-align: center;
   overflow-wrap: break-word;
 }
 .ring-svg { width: 52px; height: 52px; }
 .ring-svg-over { filter: drop-shadow(0 0 5px rgba(242, 125, 112, 0.55)); }
-.ring-center-value { font-size: 9.5px; font-weight: 800; margin-top: 3px; }
+.ring-center-value { font-size: 11.5px; font-weight: 800; margin-top: 4px; }
 .ring-center-value.over { color: var(--err); }
 .ring-center-value.under { color: var(--ok); }
 .ring-center-value.nobudget { color: var(--text); }
 .ring-center-value.dim { color: var(--text-dim); }
-.ring-sub { font-size: 7px; color: var(--text-dim); margin-top: 1px; line-height: 1.15; text-align: center; }
+.ring-sub { font-size: 10px; color: rgba(245,244,240,0.72); margin-top: 3px; line-height: 1.3; text-align: center; }
 
 /* Departments with no hours logged/allotted on this project yet — only the
    ring itself (drawn muted in ringSvg) and the card background dim; the
