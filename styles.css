@@ -1885,6 +1885,19 @@ button.ghost:hover { color: var(--text); }
   border-radius: var(--r-lg);
   min-width: 0;
 }
+/* A department broken down by role (Electrical: Engineer/Supervisor/Lead
+   Foreman/Technician/Helper, etc.) spans the whole row of rings instead of
+   sitting as one grid cell, so its title + row of role-rings has room. */
+.dept-ring-group {
+  grid-column: 1 / -1;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  padding: 10px 8px;
+}
+.dept-ring-group-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; text-align: center; }
+.dept-ring-group-rings { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.dept-ring-group-rings .ring-card { flex: 1 1 70px; max-width: 90px; background: transparent; border: none; padding: 4px; }
 .ring-card .ring-role {
   font-size: 9px;
   font-weight: 700;

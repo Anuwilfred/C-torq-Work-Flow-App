@@ -774,6 +774,10 @@
           <div class="section-divider"></div>
           <label for="deptHoursSelect">Department</label>
           <select id="deptHoursSelect"></select>
+          <div id="deptHoursPositionWrap" style="display:none;">
+            <label for="deptHoursPosition" style="margin-top:6px;">Role</label>
+            <select id="deptHoursPosition"></select>
+          </div>
           <label for="deptHoursValue" style="margin-top:6px;">Allocated hours</label>
           <input id="deptHoursValue" type="number" min="0" step="0.5" placeholder="0" />
           <button type="button" id="addDeptHoursBtn" class="primary" style="margin-top:12px;">Set hours</button>
@@ -838,6 +842,12 @@
         <button id="createDepartmentBtn" class="primary" style="margin-top:12px;">Create department</button>
       </div>
       <div id="departmentsListArea" style="margin-top:16px;"></div>
+      <div class="card glass" id="syncJobHoursCard" style="display:none; margin-top:16px;">
+        <strong style="font-size:14px;">Job hour budgets — Google Sheet sync</strong>
+        <p class="hint" style="margin-top:4px;">Pulls the allocated hours straight from your JOB DATA sheet (Engineers/Supervisor/Foremen/Technicians columns) into every job's department rings — nothing to type in by hand.</p>
+        <button type="button" id="syncJobHoursBtn" class="primary" style="margin-top:12px;">🔄 Sync now from Google Sheet</button>
+        <div id="syncJobHoursResult" style="margin-top:10px;"></div>
+      </div>
     </div>
   </div>
 </div>

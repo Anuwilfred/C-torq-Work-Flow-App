@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.12.2';
+const APP_VERSION = 'v3.13.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Active Projects: over-allocated hours now show as a clear red ring, and anyone over their department budget is flagged red with exactly how many hours over.';
+const APP_UPDATE_NOTES = 'Departments now break down by role (Engineer/Supervisor/Lead Foreman/Technician/Helper) with their own rings, and Admin -> Departments can sync allocated hours straight from your Google Sheet.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2631,7 +2631,23 @@ document.addEventListener('touchend', () => { newsDragStartX = null; });
 // need FEATURE_LIST and fetchRoles(), defined just after this block).
 // =====================================================================
 
-const POSITION_LABEL = { engineer: 'Engineer', technician: 'Technician', other: 'Other' };
+const POSITION_LABEL = { engineer: 'Engineer', supervisor: 'Supervisor', foreman: 'Lead Foreman', technician: 'Technician', helper: 'Helper', other: 'Other' };
+
+// Departments that break allocated hours down by role (matches your JOB
+// DATA sheet's Engineers/Supervisor/Foremen/Technicians columns) — keyed
+// by department name, lowercased. A department NOT in this map (e.g.
+// Marketing, Sales, Administrative) keeps the old single-ring behavior:
+// one "general" hour budget, no role split.
+const DEPARTMENT_ROLE_MAP = {
+  'software': ['engineer'],
+  'design': ['engineer'],
+  'electrical': ['engineer', 'supervisor', 'foreman', 'technician', 'helper'],
+  'commissioning and service': ['engineer', 'technician', 'helper'],
+  'workshop': ['engineer', 'supervisor', 'technician', 'helper'],
+};
+function rolesForDepartmentName(name) {
+  return DEPARTMENT_ROLE_MAP[(name || '').trim().toLowerCase()] || null;
+}
 
 // The account owner's Admin status can never be removed by anyone —
 // including other admins — not just "can't remove your own". Without this,
@@ -2700,7 +2716,10 @@ function applyFeatureAccess() {
 function positionForRoleName(name) {
   const n = (name || '').toLowerCase();
   if (n === 'engineer') return 'engineer';
+  if (n === 'supervisor') return 'supervisor';
+  if (n.includes('foreman')) return 'foreman'; // matches "Foreman" or "Lead Foreman"
   if (n === 'technician') return 'technician';
+  if (n === 'helper') return 'helper';
   return 'other';
 }
 
@@ -4463,6 +4482,7 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'departments') {
     $('newDepartmentCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    if ($('syncJobHoursCard')) $('syncJobHoursCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
     renderDepartmentsList();
   }
   if (name === 'clients') {
@@ -4569,6 +4589,46 @@ async function renderDepartmentsList(isRetry = false) {
       await sb.from('departments').delete().eq('id', btn.dataset.deleteDepartment);
       renderDepartmentsList();
     });
+  });
+}
+
+// Pulls allocated hours straight from the JOB DATA Google Sheet into
+// project_department_hours — no manual typing of hours per job. Reads the
+// same sheet every time it's tapped, so re-running it after you update the
+// sheet just overwrites with the latest numbers.
+if ($('syncJobHoursBtn')) {
+  $('syncJobHoursBtn').addEventListener('click', async () => {
+    const btn = $('syncJobHoursBtn');
+    const resultBox = $('syncJobHoursResult');
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+    resultBox.innerHTML = '<div class="empty">Reading the sheet…</div>';
+    try {
+      const { data: { session } } = await getSessionSafe();
+      const { data, error } = await withTimeout(
+        sb.functions.invoke('sync-job-hours', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        45000,
+        'Sync'
+      );
+      if (error || data?.error) {
+        resultBox.innerHTML = `<div class="empty">Couldn't sync: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
+        return;
+      }
+      const s = data.summary || {};
+      const warnings = (data.warnings || []).slice(0, 8);
+      resultBox.innerHTML = `
+        <div class="entry-meta">✅ ${s.upserted || 0} hour budgets updated across ${s.jobsMatched || 0} jobs.</div>
+        ${s.skippedNoProject ? `<div class="entry-meta">⚠️ ${s.skippedNoProject} row(s) skipped — Job No not found in Projects.</div>` : ''}
+        ${s.skippedNoDept ? `<div class="entry-meta">⚠️ ${s.skippedNoDept} row(s) skipped — Department name didn't match any department in the app.</div>` : ''}
+        ${warnings.length ? `<div class="entry-meta" style="margin-top:6px;">${warnings.map((w) => escapeHtml(w)).join('<br>')}</div>` : ''}
+      `;
+      showToast('Sheet synced.');
+    } catch (err) {
+      resultBox.innerHTML = `<div class="empty">Couldn't sync: ${escapeHtml(String(err?.message || err))}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔄 Sync now from Google Sheet';
+    }
   });
 }
 
@@ -5264,19 +5324,46 @@ function ringCard(roleLabel, used, allocated, hasData = true) {
   `;
 }
 
+// A department renders as ONE ring (old behavior) unless it has real
+// role-level rows (Electrical: Engineer/Supervisor/Lead Foreman/Technician/
+// Helper, etc.) — in that case it renders as a titled group of smaller
+// rings, one per role that actually has allocated or used hours, so an
+// org manager can see at a glance exactly which role on which department
+// is running over, not just the department as a whole.
+function deptRingBlock(dept) {
+  const roleRows = (dept.roles || []).filter((r) => r.position !== 'general' && (r.allocatedHours > 0 || r.usedHours > 0));
+  if (!roleRows.length) {
+    return ringCard(dept.name, dept.usedHours, dept.allocatedHours, dept.hasData);
+  }
+  return `
+    <div class="dept-ring-group">
+      <div class="dept-ring-group-title">${escapeHtml(dept.name)}</div>
+      <div class="dept-ring-group-rings">
+        ${roleRows.map((r) => ringCard(POSITION_LABEL[r.position] || r.position, r.usedHours, r.allocatedHours, true)).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderProjectContributors(data) {
   const wrap = $('projectContributors');
   const contributors = data.contributors || [];
   if (!contributors.length) { wrap.innerHTML = '<div class="empty">No one has logged hours on this project yet.</div>'; return; }
-  // Bar width = this person's hours as a % of THEIR ROLE's allocated budget
-  // for this project (capped at 100%) -- not relative to other contributors.
-  // Relative-to-max was wrong: with a single contributor it always came out
-  // to 100%, making the bar look "full" even at 1 of 40 hours.
-  const allocatedByDept = {};
-  (data.project?.departments || []).forEach((d) => { allocatedByDept[d.id] = Number(d.allocatedHours) || 0; });
+  // Bar width = this person's hours as a % of THEIR OWN (department, role)
+  // bucket's allocated budget for this project (capped at 100%) -- not
+  // relative to other contributors. Relative-to-max was wrong: with a
+  // single contributor it always came out to 100%, making the bar look
+  // "full" even at 1 of 40 hours.
+  const allocatedByKey = {};
+  (data.project?.departments || []).forEach((d) => {
+    (d.roles && d.roles.length ? d.roles : [{ position: 'general', allocatedHours: d.allocatedHours }])
+      .forEach((r) => { allocatedByKey[`${d.id}::${r.position}`] = Number(r.allocatedHours) || 0; });
+  });
   const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
   wrap.innerHTML = contributors.map((c) => {
-    const allocated = allocatedByDept[c.departmentId] || 0;
+    const bucketPosition = c.position || 'general';
+    const allocated = allocatedByKey[`${c.departmentId}::${bucketPosition}`] || 0;
+    const roleLabel = bucketPosition !== 'general' ? (POSITION_LABEL[bucketPosition] || bucketPosition) : '';
     const over = allocated > 0 ? Math.max(0, Math.round((c.hours - allocated) * 100) / 100) : 0;
     const pct = allocated > 0
       ? Math.min(Math.round((c.hours / allocated) * 100), 100)
@@ -5284,7 +5371,7 @@ function renderProjectContributors(data) {
     return `
     <div class="contrib-row${over > 0 ? ' contrib-over' : ''}">
       <div class="contrib-top">
-        <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(c.departmentName)}</span></span>
+        <span class="contrib-name">${escapeHtml(c.name)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(c.departmentName)}${roleLabel ? ' · ' + escapeHtml(roleLabel) : ''}</span></span>
         <span class="contrib-hours">${c.hours}h${allocated > 0 ? ` <span class="contrib-allocated">of ${allocated}h</span>` : ''}</span>
       </div>
       <div class="contrib-bar-track"><div class="contrib-bar-fill${over > 0 ? ' over' : ''}" style="width:${pct}%"></div></div>
@@ -5502,7 +5589,8 @@ async function openProjectDetail(jobId, name) {
     const existing = byId[dept.id];
     const usedHours = existing ? Number(existing.usedHours) || 0 : 0;
     const allocatedHours = existing ? Number(existing.allocatedHours) || 0 : 0;
-    return { id: dept.id, name: dept.name, usedHours, allocatedHours, hasData: usedHours > 0 || allocatedHours > 0 };
+    const roles = existing?.roles || [];
+    return { id: dept.id, name: dept.name, usedHours, allocatedHours, roles, hasData: usedHours > 0 || allocatedHours > 0 };
   });
   // Cover the edge case of a department that has report data but was since
   // deleted/renamed out of the departments table — still show it rather than
@@ -5514,7 +5602,7 @@ async function openProjectDetail(jobId, name) {
   merged.sort((a, b) => (b.hasData === a.hasData ? 0 : b.hasData ? 1 : -1));
 
   $('projectRingsArea').innerHTML = merged.length
-    ? `<div class="project-rings">${merged.map((d) => ringCard(d.name, d.usedHours, d.allocatedHours, d.hasData)).join('')}</div>`
+    ? `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
     : '<div class="empty">No departments set up yet — add one from Admin → Team → Departments.</div>';
   renderProjectContributors(data);
   renderDeptHoursManager(jobId, departments);
@@ -5555,41 +5643,78 @@ $('deleteProjectBtn')?.addEventListener('click', async () => {
   }
 });
 
-// ---------- Department hours — admin sets an hour budget PER DEPARTMENT for
-// this project (replaces the old fixed Engineer/Technician split). Same
-// add/list/delete pattern as BOQ items below. ----------
+// ---------- Department hours — admin sets an hour budget PER DEPARTMENT
+// (optionally per ROLE within that department — Engineer/Supervisor/Lead
+// Foreman/Technician/Helper, for the departments that use that split) for
+// this project. Same add/list/delete pattern as BOQ items below. ----------
+let deptHoursDeptNameById = {}; // refreshed each render, used to drive the Role dropdown
+
+function updateDeptHoursPositionOptions() {
+  const deptId = $('deptHoursSelect')?.value;
+  const deptName = deptHoursDeptNameById[deptId] || '';
+  const roles = rolesForDepartmentName(deptName);
+  const wrap = $('deptHoursPositionWrap');
+  const posSelect = $('deptHoursPosition');
+  if (!wrap || !posSelect) return;
+  if (roles && roles.length) {
+    wrap.style.display = 'block';
+    posSelect.innerHTML = roles.map((r) => `<option value="${r}">${escapeHtml(POSITION_LABEL[r] || r)}</option>`).join('');
+  } else {
+    wrap.style.display = 'none';
+    posSelect.innerHTML = '';
+  }
+}
+
 async function renderDeptHoursManager(jobId, departments) {
   const isAdmin = currentProfile?.role === 'admin';
   $('newDeptHoursCard').style.display = isAdmin ? 'block' : 'none';
 
   const { rows: allDepartments } = await fetchDepartments();
+  deptHoursDeptNameById = {};
+  allDepartments.forEach((d) => { deptHoursDeptNameById[d.id] = d.name; });
   const select = $('deptHoursSelect');
   if (select) {
     select.innerHTML = allDepartments.map((d) => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('')
       || '<option value="">No departments yet — add one from Admin → Team → Departments</option>';
+    updateDeptHoursPositionOptions();
   }
 
   const list = $('deptHoursListArea');
-  const withAllocation = departments.filter((d) => d.allocatedHours > 0);
-  if (!withAllocation.length) {
+  // Each department may have one 'general' row, or several role rows —
+  // flatten to one line per (department, role) that actually has hours.
+  const rows = [];
+  departments.forEach((d) => {
+    (d.roles && d.roles.length ? d.roles : [{ position: 'general', allocatedHours: d.allocatedHours, usedHours: d.usedHours }])
+      .forEach((r) => {
+        if (r.allocatedHours > 0) rows.push({ departmentId: d.id, departmentName: d.name, position: r.position, allocatedHours: r.allocatedHours, usedHours: r.usedHours });
+      });
+  });
+  if (!rows.length) {
     list.innerHTML = '<div class="empty">No department hours set yet.</div>';
   } else {
-    list.innerHTML = withAllocation.map((d) => `
-      <div class="entry" data-dept-hours-row="${escapeHtml(d.id)}">
+    list.innerHTML = rows.map((r) => `
+      <div class="entry" data-dept-hours-row="${escapeHtml(r.departmentId)}:${escapeHtml(r.position)}">
         <div class="entry-body">
-          <div class="entry-desc">${escapeHtml(d.name)}</div>
-          <div class="entry-meta">${d.allocatedHours}h allocated · ${d.usedHours}h used</div>
+          <div class="entry-desc">${escapeHtml(r.departmentName)}${r.position !== 'general' ? ` — ${escapeHtml(POSITION_LABEL[r.position] || r.position)}` : ''}</div>
+          <div class="entry-meta">${r.allocatedHours}h allocated · ${r.usedHours}h used</div>
         </div>
-        ${isAdmin ? `<button type="button" class="ghost" data-delete-dept-hours="${escapeHtml(d.id)}">✕</button>` : ''}
+        ${isAdmin ? `<button type="button" class="ghost" data-delete-dept-hours="${escapeHtml(r.departmentId)}" data-delete-dept-hours-position="${escapeHtml(r.position)}">✕</button>` : ''}
       </div>
     `).join('');
     list.querySelectorAll('[data-delete-dept-hours]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        await sb.from('project_department_hours').delete().eq('job_id', jobId).eq('department_id', btn.dataset.deleteDeptHours);
+        await sb.from('project_department_hours').delete()
+          .eq('job_id', jobId)
+          .eq('department_id', btn.dataset.deleteDeptHours)
+          .eq('position', btn.dataset.deleteDeptHoursPosition);
         openProjectDetail(jobId, currentProjectReport?.project?.name || null);
       });
     });
   }
+}
+
+if ($('deptHoursSelect')) {
+  $('deptHoursSelect').addEventListener('change', updateDeptHoursPositionOptions);
 }
 
 if ($('addDeptHoursBtn')) {
@@ -5598,9 +5723,10 @@ if ($('addDeptHoursBtn')) {
     if (!jobId) return;
     const departmentId = $('deptHoursSelect').value;
     if (!departmentId) { showToast('Pick a department first.'); return; }
+    const position = $('deptHoursPositionWrap')?.style.display !== 'none' ? ($('deptHoursPosition')?.value || 'general') : 'general';
     const hours = parseFloat($('deptHoursValue').value) || 0;
     const { error } = await sb.from('project_department_hours')
-      .upsert({ job_id: jobId, department_id: departmentId, allocated_hours: hours, created_by: currentUser.id }, { onConflict: 'job_id,department_id' });
+      .upsert({ job_id: jobId, department_id: departmentId, position, allocated_hours: hours, created_by: currentUser.id }, { onConflict: 'job_id,department_id,position' });
     if (error) { showToast(`Couldn't set hours: ${error.message}`); return; }
     $('deptHoursValue').value = '';
     showToast('Department hours updated.');
