@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.15.0';
+const APP_VERSION = 'v3.16.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: Special Request — enter a forgotten/late timesheet entry and send it to your department head (or an admin) for approval, right from a new Home tile.';
+const APP_UPDATE_NOTES = 'New: Admin can now set a Department Head from Admin → Departments → tap a department — that person can approve/reject Special Requests for their department.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4592,7 +4592,7 @@ let departmentsCache = null; // [{id, name}], refetched each time the picker is 
 
 async function fetchDepartments() {
   try {
-    const { data, error } = await sb.from('departments').select('id, name').order('name', { ascending: true });
+    const { data, error } = await sb.from('departments').select('id, name, head_id').order('name', { ascending: true });
     if (error) { console.error('fetchDepartments failed:', error); return { rows: [], error }; }
     return { rows: data || [], error: null };
   } catch (err) {
@@ -4690,11 +4690,29 @@ if ($('createDepartmentBtn')) {
   });
 }
 
+let currentDepartmentDetailId = null;
+
 async function openDepartmentDetail(deptId, deptName) {
+  currentDepartmentDetailId = deptId;
   $('departmentDetailTitle').textContent = deptName;
   $('departmentDetailCount').textContent = '';
   $('departmentMembersArea').innerHTML = '<div class="empty">Loading…</div>';
   openPanel('departmentDetail');
+
+  const isAdmin = currentProfile?.role === 'admin';
+  if ($('departmentHeadCard')) $('departmentHeadCard').style.display = isAdmin ? 'block' : 'none';
+  if (isAdmin) {
+    const [{ data: dept }, { data: activePeople }] = await Promise.all([
+      sb.from('departments').select('head_id').eq('id', deptId).maybeSingle(),
+      sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true }),
+    ]);
+    const sel = $('departmentHeadSelect');
+    if (sel) {
+      sel.innerHTML = '<option value="">— No head assigned —</option>' +
+        (activePeople || []).map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+      sel.value = dept?.head_id || '';
+    }
+  }
 
   const { data: people, error: peopleErr } = await sb
     .from('profiles')
@@ -4741,6 +4759,21 @@ async function openDepartmentDetail(deptId, deptName) {
       </div>
     `;
   }).join('');
+}
+
+if ($('saveDepartmentHeadBtn')) {
+  $('saveDepartmentHeadBtn').addEventListener('click', async () => {
+    if (!currentDepartmentDetailId) return;
+    const btn = $('saveDepartmentHeadBtn');
+    const headId = $('departmentHeadSelect').value || null;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    const { error } = await sb.from('departments').update({ head_id: headId }).eq('id', currentDepartmentDetailId);
+    btn.disabled = false;
+    btn.textContent = 'Save';
+    if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+    showToast('Department head updated.');
+  });
 }
 
 // =====================================================================

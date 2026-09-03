@@ -868,6 +868,14 @@
       <button type="button" class="ghost" data-close="departmentDetail">✕</button>
     </div>
     <div class="panel-body">
+      <div class="card glass" id="departmentHeadCard" style="display:none;">
+        <strong style="font-size:14px;">Department head</strong>
+        <p class="hint" style="margin-top:4px;">Approves Special Requests for this department (admins can always approve too).</p>
+        <select id="departmentHeadSelect" style="margin-top:8px;">
+          <option value="">— No head assigned —</option>
+        </select>
+        <button type="button" class="secondary" id="saveDepartmentHeadBtn" style="margin-top:8px;">Save</button>
+      </div>
       <div class="card glass">
         <strong style="font-size:14px;">People in this department</strong>
         <p class="hint" id="departmentDetailCount" style="margin-top:4px;"></p>
