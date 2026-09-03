@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.14.1';
+const APP_VERSION = 'v3.14.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed tiny, hard-to-read text near the department and total rings (sub-labels, legend, people list) — all bumped up in size and brightness.';
+const APP_UPDATE_NOTES = 'Job search (New Entry, Daily Progress/Report) now tolerates spelling mistakes — a close misspelling of a client, vessel, or job name still finds the right job.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2062,12 +2062,52 @@ let jobSearchOptions = [];
 // Matches on ANY word related to the job — not just the Job ID/name — so
 // typing a customer name, vessel name, who's responsible, or a delivery
 // note also finds the right job. All fields are optional/best-effort.
+//
+// Also typo-tolerant: if nothing matches as a plain substring, falls back to
+// a fuzzy word-level check (small misspellings, letters swapped, words run
+// together) so e.g. typing "Alseer" still finds a job for "Al Seer Marine".
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+function fuzzyAllowance(len) {
+  if (len <= 4) return 1;
+  if (len <= 7) return 2;
+  return 3;
+}
+// True if every "word" in the typed query is found — exactly, as a
+// substring, or as a close misspelling — somewhere in the haystack text.
+function fuzzyTextMatch(haystack, query) {
+  const hay = String(haystack || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (!hay) return false;
+  const hayTokens = hay.split(' ').filter(Boolean);
+  const qTokens = String(query || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!qTokens.length) return false;
+  return qTokens.every((qt) => {
+    if (qt.length < 3) return hay.includes(qt); // very short tokens: exact substring only, fuzzy is too noisy
+    if (hay.includes(qt)) return true;
+    const allowed = fuzzyAllowance(qt.length);
+    return hayTokens.some((ht) => Math.abs(ht.length - qt.length) <= allowed && levenshtein(ht, qt) <= allowed);
+  });
+}
 function jobMatchesQuery(r, query) {
-  return String(r.job_id || '').toLowerCase().includes(query)
+  if (String(r.job_id || '').toLowerCase().includes(query)
     || String(r.name || '').toLowerCase().includes(query)
     || String(r.client || '').toLowerCase().includes(query)
     || String(r.responsibility || '').toLowerCase().includes(query)
-    || String(r.delivery_status || '').toLowerCase().includes(query);
+    || String(r.delivery_status || '').toLowerCase().includes(query)) return true;
+  const haystack = [r.job_id, r.name, r.client, r.responsibility, r.delivery_status].filter(Boolean).join(' ');
+  return fuzzyTextMatch(haystack, query);
 }
 
 // RELIABILITY: this used to just come back empty on any network failure —
@@ -5078,6 +5118,16 @@ if ($('showClosedProjectsToggle')) {
   });
 }
 
+// Free-text filter over the (potentially long) projects list — matches
+// Job ID, name, or client, case-insensitively, as the admin types.
+let projectSearchQuery = '';
+if ($('projectsSearchInput')) {
+  $('projectsSearchInput').addEventListener('input', (e) => {
+    projectSearchQuery = e.target.value.trim().toLowerCase();
+    renderProjectsList();
+  });
+}
+
 async function toggleProjectStatus(jobId, currentStatus) {
   const nextStatus = currentStatus === 'active' ? 'closed' : 'active';
   const { error } = await sb.from('projects').update({ status: nextStatus }).eq('job_id', jobId);
@@ -5097,9 +5147,17 @@ async function renderProjectsList(isRetry = false) {
     wrap.innerHTML = `<div class="empty">Couldn't load projects: ${escapeHtml(error.message || String(error))}</div>`;
     return;
   }
-  const rows = showClosedProjects ? allRows : allRows.filter((r) => (r.status || 'active') === 'active');
+  let rows = showClosedProjects ? allRows : allRows.filter((r) => (r.status || 'active') === 'active');
   if (!allRows.length) { wrap.innerHTML = '<div class="empty">No projects yet' + (currentProfile?.role === 'admin' ? ' — add one above.' : ' yet.') + '</div>'; return; }
   if (!rows.length) { wrap.innerHTML = '<div class="empty">No active projects — tap "Show closed jobs" above to see them.</div>'; return; }
+  if (projectSearchQuery) {
+    rows = rows.filter((r) =>
+      (r.job_id || '').toLowerCase().includes(projectSearchQuery) ||
+      (r.name || '').toLowerCase().includes(projectSearchQuery) ||
+      (r.client || '').toLowerCase().includes(projectSearchQuery)
+    );
+    if (!rows.length) { wrap.innerHTML = `<div class="empty">No projects match "${escapeHtml(projectSearchQuery)}".</div>`; return; }
+  }
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((r) => {
     const isClosed = (r.status || 'active') !== 'active';
