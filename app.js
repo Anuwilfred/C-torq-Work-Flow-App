@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.14.3';
+const APP_VERSION = 'v3.15.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Job search (New Entry, Daily Progress/Report) now tolerates spelling mistakes — a close misspelling of a client, vessel, or job name still finds the right job.';
+const APP_UPDATE_NOTES = 'New: Special Request — enter a forgotten/late timesheet entry and send it to your department head (or an admin) for approval, right from a new Home tile.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4505,6 +4505,7 @@ const PANEL_IDS = {
   datafeed: ['dataFeedOverlay', 'dataFeedOverlayBackdrop'],
   recalledEdit: ['recalledEditOverlay', 'recalledEditOverlayBackdrop'],
   liveDrivers: ['liveDriversOverlay', 'liveDriversOverlayBackdrop'],
+  specialRequest: ['specialRequestOverlay', 'specialRequestOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -4543,6 +4544,11 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'myjobs') {
     renderMyJobsPanel();
+  }
+  if (name === 'specialRequest') {
+    renderSpecialRequestForm();
+    renderMySpecialRequests();
+    renderSpecialRequestApprovals();
   }
   if (name === 'people') {
     renderTeamList();
@@ -7380,12 +7386,267 @@ function initAllGlassSelects(root) {
   (root || document).querySelectorAll('select:not([data-glass-init])').forEach(initGlassSelect);
 }
 
+// =====================================================================
+// SPECIAL REQUEST — a late/forgot/issue timesheet entry submitted after
+// the fact. Submitting here only inserts a 'pending' row into
+// special_requests via the submit-special-request Edge Function — no
+// real timesheet entry, job_hours_ledger row, or Sheet sync happens yet.
+// A department head (departments.head_id) or any admin then approves or
+// rejects it (anytime, no deadline) via approve-special-request, which is
+// what actually creates the real entry — tagged specialRequest: true so
+// it gets the light-blue Sheet row highlight — and syncs it. Rejecting
+// just flips the status; nothing is ever created for a rejected request.
+// =====================================================================
+
+let srMode = '';
+const srDescSelected = new Set();
+let srJobIdConfirmed = false;
+let srLocationOptions = [];
+
+document.querySelectorAll('.sr-mode-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    srMode = chip.dataset.srMode;
+    document.querySelectorAll('.sr-mode-chip').forEach((c) => c.classList.toggle('selected', c === chip));
+  });
+});
+
+async function ensureSrLocationOptions() {
+  srLocationOptions = await fetchLocationAllowances();
+}
+
+function renderSrLocationResults(query) {
+  const box = $('srLocationResults');
+  if (!box) return;
+  const q = (query || '').trim().toLowerCase();
+  const matches = q ? srLocationOptions.filter((r) => r.name.toLowerCase().includes(q)) : srLocationOptions;
+  box.innerHTML = matches.length
+    ? matches.slice(0, 30).map((r) => `<div class="job-search-item" data-location-name="${escapeHtml(r.name)}"><div class="jid">📍 ${escapeHtml(r.name)}</div></div>`).join('')
+    : '<div class="job-search-empty">No matching location on file — you can still type your own.</div>';
+  box.style.display = 'block';
+  box.querySelectorAll('[data-location-name]').forEach((item) => {
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('srLocation').value = item.dataset.locationName;
+      box.style.display = 'none';
+    });
+  });
+}
+if ($('srLocation')) {
+  $('srLocation').addEventListener('focus', () => renderSrLocationResults($('srLocation').value));
+  $('srLocation').addEventListener('input', () => renderSrLocationResults($('srLocation').value));
+  $('srLocation').addEventListener('blur', () => {
+    setTimeout(() => { if ($('srLocationResults')) $('srLocationResults').style.display = 'none'; }, 150);
+  });
+}
+
+function renderSrJobSearchResults(matches) {
+  const box = $('srJobIdResults');
+  if (!box) return;
+  box.innerHTML = matches.length
+    ? matches.slice(0, 50).map((r) => `
+        <div class="job-search-item" data-job-id="${escapeHtml(r.job_id)}">
+          <div class="jid">${escapeHtml(r.job_id)}</div>
+          <div class="jdesc">${escapeHtml(r.name || '')}${r.client ? ' · ' + escapeHtml(r.client) : ''}</div>
+        </div>
+      `).join('')
+    : '<div class="job-search-empty">No matching job found — pick one from the list.</div>';
+  box.style.display = 'block';
+  box.querySelectorAll('.job-search-item[data-job-id]').forEach((item) => {
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('srJobId').value = item.dataset.jobId;
+      srJobIdConfirmed = true;
+      box.style.display = 'none';
+    });
+  });
+}
+if ($('srJobId')) {
+  $('srJobId').addEventListener('input', () => {
+    srJobIdConfirmed = false;
+    const q = $('srJobId').value.trim().toLowerCase();
+    if (!q) { $('srJobIdResults').style.display = 'none'; return; }
+    renderSrJobSearchResults(jobSearchOptions.filter((r) => jobMatchesQuery(r, q)));
+  });
+  $('srJobId').addEventListener('focus', () => { if ($('srJobId').value.trim()) $('srJobId').dispatchEvent(new Event('input')); });
+  $('srJobId').addEventListener('blur', () => {
+    setTimeout(() => { if ($('srJobIdResults')) $('srJobIdResults').style.display = 'none'; }, 150);
+    const match = jobSearchOptions.find((r) => String(r.job_id).toLowerCase() === $('srJobId').value.trim().toLowerCase());
+    if (match) { srJobIdConfirmed = true; $('srJobId').value = match.job_id; }
+  });
+}
+
+function resetSpecialRequestForm() {
+  if ($('srDate')) $('srDate').value = new Date().toISOString().slice(0, 10);
+  if ($('srStartTime')) $('srStartTime').value = '';
+  if ($('srEndTime')) $('srEndTime').value = '';
+  if ($('srLocation')) $('srLocation').value = '';
+  if ($('srJobId')) $('srJobId').value = '';
+  srJobIdConfirmed = false;
+  srMode = '';
+  document.querySelectorAll('.sr-mode-chip').forEach((c) => c.classList.remove('selected'));
+  srDescSelected.clear();
+  if ($('srDescription')) $('srDescription').value = '';
+  if ($('srReason')) $('srReason').value = '';
+}
+
+async function renderSpecialRequestForm() {
+  resetSpecialRequestForm();
+  await ensureSrLocationOptions();
+  await renderChipPicker('srDescChips', 'general', srDescSelected);
+}
+
+if ($('srSubmitBtn')) {
+  $('srSubmitBtn').addEventListener('click', async () => {
+    const entryDate = $('srDate').value;
+    const startTime = $('srStartTime').value;
+    const endTime = $('srEndTime').value;
+    const location = $('srLocation').value.trim();
+    const jobId = $('srJobId').value.trim();
+    const description = combineDescription(srDescSelected, $('srDescription').value);
+    const reason = $('srReason').value.trim();
+
+    if (!entryDate || !startTime || !endTime) { showToast('Fill in the date, clock-in and clock-out time.'); return; }
+    if (!jobId || !srJobIdConfirmed) { showToast('Pick the Job ID from the list below the field.'); return; }
+    if (!srMode) { showToast('Pick a mode of work.'); return; }
+    if (!reason) { showToast("Explain why this is being submitted late — it's required."); return; }
+    if (!confirm(`Submit a special request for ${entryDate}, ${startTime}–${endTime} on ${jobId}?\n\nThis goes to your department head (or an admin) for approval before it becomes a real entry.`)) return;
+
+    $('srSubmitBtn').disabled = true;
+    try {
+      const { data: { session } } = await getSessionSafe();
+      if (!session) { showToast('Please sign in again.'); return; }
+      const { data, error } = await withTimeout(
+        sb.functions.invoke('submit-special-request', {
+          body: { entryDate, startTime, endTime, location, jobId, mode: srMode, description, reason },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+        20000,
+        'Submit special request'
+      );
+      if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+      showToast('Special request submitted — waiting for approval.');
+      renderSpecialRequestForm();
+      renderMySpecialRequests();
+    } catch (err) {
+      showToast(`Couldn't submit: ${err.message || err}`);
+    } finally {
+      $('srSubmitBtn').disabled = false;
+    }
+  });
+}
+
+const SR_STATUS_LABEL = { pending: 'pending approval', approved: 'approved & synced', rejected: 'rejected' };
+const SR_STATUS_CLASS = { pending: 'pending', approved: 'synced', rejected: 'error' };
+
+async function renderMySpecialRequests() {
+  const wrap = $('mySpecialRequestsList');
+  if (!wrap || !currentUser) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data, error } = await sb.from('special_requests').select('*').eq('person_id', currentUser.id).order('created_at', { ascending: false }).limit(30);
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data.length) { wrap.innerHTML = '<div class="empty">No special requests yet.</div>'; return; }
+  wrap.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon">🕐</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(r.job_id || '—')} · ${escapeHtml(r.entry_date)} · ${escapeHtml(r.start_time)}–${escapeHtml(r.end_time)}</div>
+        <div class="entry-desc">${escapeHtml(r.reason || '')}</div>
+      </div>
+      <div class="entry-status-stack">
+        <span class="sr-tag">Special</span>
+        <span class="chip ${SR_STATUS_CLASS[r.status] || ''}">${SR_STATUS_LABEL[r.status] || r.status}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+let srHeadDepartmentIds = [];
+async function renderSpecialRequestApprovals() {
+  const card = $('srApprovalsCard');
+  const wrap = $('srApprovalsList');
+  if (!card || !wrap || !currentUser) return;
+
+  const isAdmin = currentProfile?.role === 'admin';
+  if (!isAdmin) {
+    const { data } = await sb.from('departments').select('id').eq('head_id', currentUser.id);
+    srHeadDepartmentIds = (data || []).map((d) => d.id);
+  }
+  if (!isAdmin && !srHeadDepartmentIds.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: rows, error } = await sb.from('special_requests').select('*').eq('status', 'pending').order('created_at', { ascending: true });
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!rows || !rows.length) { wrap.innerHTML = '<div class="empty">Nothing pending.</div>'; return; }
+
+  const personIds = [...new Set(rows.map((r) => r.person_id))];
+  const { data: people } = await sb.from('profiles').select('id, full_name, email').in('id', personIds);
+  const nameById = {};
+  (people || []).forEach((p) => { nameById[p.id] = p.full_name || p.email; });
+
+  wrap.innerHTML = rows.map((r) => `
+    <div class="entry" style="align-items:flex-start;">
+      <span class="type-icon">🕐</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(nameById[r.person_id] || 'Someone')} · ${escapeHtml(r.job_id || '—')} · ${escapeHtml(r.entry_date)} · ${escapeHtml(r.start_time)}–${escapeHtml(r.end_time)}</div>
+        <div class="entry-desc">${escapeHtml(r.reason || '')}</div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="button" class="primary" data-sr-approve="${r.id}" style="flex:1; margin-top:0;">✓ Approve</button>
+          <button type="button" class="secondary" data-sr-reject="${r.id}" style="flex:1;">✕ Reject</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('[data-sr-approve]').forEach((btn) => {
+    btn.addEventListener('click', () => reviewSpecialRequest(btn.dataset.srApprove, 'approve'));
+  });
+  wrap.querySelectorAll('[data-sr-reject]').forEach((btn) => {
+    btn.addEventListener('click', () => reviewSpecialRequest(btn.dataset.srReject, 'reject'));
+  });
+}
+
+async function reviewSpecialRequest(requestId, action) {
+  if (action === 'reject' && !confirm('Reject this special request? No entry will be created.')) return;
+  try {
+    const { data: { session } } = await getSessionSafe();
+    if (!session) { showToast('Please sign in again.'); return; }
+    const { data, error } = await withTimeout(
+      sb.functions.invoke('approve-special-request', {
+        body: { requestId, action },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }),
+      20000,
+      'Review special request'
+    );
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+    showToast(action === 'approve' ? 'Approved — synced.' : 'Rejected.');
+    renderSpecialRequestApprovals();
+    renderMySpecialRequests();
+  } catch (err) {
+    showToast(`Couldn't ${action}: ${err.message || err}`);
+  }
+}
+
 async function renderQueue() {
   const list = $('entryList');
   const entries = await getAllEntries();
-  if (!entries.length) { list.innerHTML = '<div class="empty">No entries yet.</div>'; return; }
 
-  list.innerHTML = entries.map(en => {
+  // Special requests never go through the local-first IndexedDB queue
+  // above — they're submitted straight to Supabase via submit-special-
+  // request and only ever become a real entry once approved — so they're
+  // fetched separately here just for display, merged in alongside the
+  // normal queue. The light-blue "Special" tag stays on the row before
+  // AND after approval; only the status chip next to it changes.
+  let srRows = [];
+  if (currentUser) {
+    const { data } = await sb.from('special_requests').select('*').eq('person_id', currentUser.id).order('created_at', { ascending: false }).limit(50);
+    srRows = data || [];
+  }
+
+  if (!entries.length && !srRows.length) { list.innerHTML = '<div class="empty">No entries yet.</div>'; return; }
+
+  const regularHtml = entries.map(en => {
     const icon = en.type === 'timesheet' ? (MODE_ICON[en.mode] || TYPE_ICON.timesheet) : TYPE_ICON[en.type];
     let meta;
     if (en.type === 'timesheet' && en.category === 'leave') {
@@ -7406,6 +7667,22 @@ async function renderQueue() {
       </div>
     `;
   }).join('');
+
+  const srHtml = srRows.map((r) => `
+    <div class="entry" title="Special request — see it in Special Request for full details">
+      <span class="type-icon">${MODE_ICON[r.mode] || '🕐'}</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(MODE_LABEL[r.mode] || r.mode || '')} · ${escapeHtml(r.job_id || '—')} · ${escapeHtml(r.entry_date)}</div>
+        <div class="entry-desc">${escapeHtml(r.description || r.reason || '')}</div>
+      </div>
+      <div class="entry-status-stack">
+        <span class="sr-tag">Special</span>
+        <span class="chip ${SR_STATUS_CLASS[r.status] || ''}">${SR_STATUS_LABEL[r.status] || r.status}</span>
+      </div>
+    </div>
+  `).join('');
+
+  list.innerHTML = regularHtml + srHtml;
   list.querySelectorAll('[data-entry-id]').forEach((row) => {
     row.addEventListener('click', () => openEntryDetail(row.dataset.entryId));
   });

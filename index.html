@@ -112,6 +112,10 @@
           <span class="home-tile-icon">📋</span>
           <span class="home-tile-label">Queue</span>
         </button>
+        <button type="button" class="home-tile" data-open="specialRequest" data-feature="entry">
+          <span class="home-tile-icon">🕐</span>
+          <span class="home-tile-label">Special Request</span>
+        </button>
         <button type="button" class="home-tile" data-tab="reports" data-feature="reports">
           <span class="home-tile-icon">📊</span>
           <span class="home-tile-label">Reports</span>
@@ -1028,6 +1032,93 @@
     </div>
     <div class="panel-body">
       <div id="myJobsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SPECIAL REQUEST OVERLAY — a late/forgot/issue timesheet entry entered
+     after the fact. Submitting here does NOT create a real entry — it
+     only saves a 'pending' row that a department head (or admin) must
+     approve first (see the "Pending approvals" card, only shown to
+     people who can act on it). Approval is what actually creates the
+     entry and syncs it to GitHub + the Google Sheet. -->
+<div id="specialRequestOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="specialRequestOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🕐 Special Request</strong>
+      <button type="button" class="ghost" data-close="specialRequest">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Forgot to clock in, missed a whole day, or need to fix a mistake after the fact? Fill this in — it goes to your department head (or an admin) for approval before it becomes a real entry.</p>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">New special request</strong>
+        <div class="row-2" style="margin-top:10px;">
+          <div>
+            <label for="srDate">Date</label>
+            <input id="srDate" type="date" />
+          </div>
+          <div></div>
+        </div>
+        <div class="row-2">
+          <div>
+            <label for="srStartTime">Clock-in time</label>
+            <input id="srStartTime" type="time" />
+          </div>
+          <div>
+            <label for="srEndTime">Clock-out time</label>
+            <input id="srEndTime" type="time" />
+          </div>
+        </div>
+
+        <label for="srLocation">Location</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="srLocation" type="text" placeholder="Search a location…" autocomplete="off" />
+          <div id="srLocationResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <label for="srJobId">Job ID</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="srJobId" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+          <div id="srJobIdResults" class="job-search-results" style="display:none;"></div>
+        </div>
+        <p class="hint">Pick the job from the list that appears — same search as New Entry.</p>
+
+        <label>Mode of work</label>
+        <div id="srModeGrid" class="mode-grid">
+          <div class="sr-mode-chip" data-sr-mode="office"><span class="emoji">🏢</span>Office</div>
+          <div class="sr-mode-chip" data-sr-mode="site"><span class="emoji">🏗️</span>Site</div>
+          <div class="sr-mode-chip" data-sr-mode="workshop"><span class="emoji">🔧</span>Workshop</div>
+          <div class="sr-mode-chip" data-sr-mode="driver"><span class="emoji">🚗</span>Driver</div>
+          <div class="sr-mode-chip" data-sr-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
+          <div class="sr-mode-chip" data-sr-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+          <div class="sr-mode-chip" data-sr-mode="inspection"><span class="emoji">🔍</span>Inspection</div>
+          <div class="sr-mode-chip" data-sr-mode="field_work"><span class="emoji">🌾</span>Field Work</div>
+          <div class="sr-mode-chip" data-sr-mode="other"><span class="emoji">✨</span>Other</div>
+        </div>
+
+        <label>What did you work on? (tap any that apply)</label>
+        <div id="srDescChips" class="chip-picker"></div>
+        <label for="srDescription">Other / additional notes (optional)</label>
+        <textarea id="srDescription" placeholder="Anything else worth noting?"></textarea>
+
+        <label for="srReason">Reason you're submitting this late (required)</label>
+        <textarea id="srReason" placeholder="Why wasn't this entered on time?" required></textarea>
+
+        <button type="button" class="primary" id="srSubmitBtn" style="width:100%; margin-top:12px;">Submit for approval</button>
+      </div>
+
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">My special requests</strong>
+        <div id="mySpecialRequestsList" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card glass" id="srApprovalsCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">Pending approvals</strong>
+        <p class="hint" style="margin-top:2px;">Special requests waiting on you — approve or reject anytime.</p>
+        <div id="srApprovalsList" style="margin-top:8px;"></div>
+      </div>
     </div>
   </div>
 </div>

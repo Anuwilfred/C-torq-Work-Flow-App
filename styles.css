@@ -645,7 +645,7 @@ button.ghost:hover { color: var(--text); }
 .trip-status-badge.in_progress { background: rgba(0, 161, 156, 0.18); color: #00a19c; }
 .trip-status-badge.done { background: rgba(99, 209, 151, 0.18); color: var(--ok); }
 
-.mode-chip, .qsr-mode-chip {
+.mode-chip, .qsr-mode-chip, .sr-mode-chip {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -665,9 +665,9 @@ button.ghost:hover { color: var(--text); }
   transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   line-height: 1.2;
 }
-.mode-chip .emoji, .qsr-mode-chip .emoji { font-size: 19px; }
-.mode-chip:hover, .qsr-mode-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
-.mode-chip.selected, .qsr-mode-chip.selected {
+.mode-chip .emoji, .qsr-mode-chip .emoji, .sr-mode-chip .emoji { font-size: 19px; }
+.mode-chip:hover, .qsr-mode-chip:hover, .sr-mode-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
+.mode-chip.selected, .qsr-mode-chip.selected, .sr-mode-chip.selected {
   background: linear-gradient(160deg, rgba(224,138,95,0.22), rgba(204,120,92,0.14));
   border-color: var(--accent);
   color: var(--text);
@@ -819,6 +819,25 @@ button.ghost:hover { color: var(--text); }
 .chip.synced { background: rgba(99,209,151,0.15); color: var(--ok); }
 .chip.error { background: rgba(242,125,112,0.15); color: var(--err); }
 .chip.recalled { background: rgba(168,120,224,0.18); color: #c4a8f5; }
+
+/* Persistent marker on a Special Request entry — separate from the .chip
+   status pill above (pending/approved/rejected), which changes over time.
+   This light-blue tag stays the same before AND after approval, so it's
+   always obvious at a glance which entries came in through Special
+   Request rather than a normal on-time submission — same distinction the
+   Google Sheet row highlight makes for the synced copy. */
+.sr-tag {
+  flex: none;
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  background: rgba(93,169,255,0.18);
+  color: #5da9ff;
+}
+.entry-status-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 
 .empty { color: var(--text-dim); font-size: 13.5px; text-align: center; padding: 28px 0; }
 
