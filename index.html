@@ -68,6 +68,10 @@
 <!-- ============== MAIN APP (shown once signed in) ============== -->
 <div id="appShell" style="display:none">
   <header>
+    <button type="button" id="weatherBadge" class="weather-badge" style="display:none;" title="Weather">
+      <span id="weatherBadgeIcon" class="weather-badge-icon">🌤️</span>
+      <span id="weatherBadgeTemp" class="weather-badge-temp">--°</span>
+    </button>
     <h1>C-TORQ Digital Organization</h1>
     <div style="display:flex; align-items:center; gap:10px;">
       <span id="statusBadge">checking…</span>
@@ -1013,7 +1017,8 @@
   </div>
 </div>
 
-<!-- LEARNING OVERLAY (placeholder) -->
+<!-- LEARNING OVERLAY — free courses/certifications, grouped into tap-to-expand
+     categories (AI, cybersecurity, coding, industrial/PLC, HMI, safety…). -->
 <div id="learningOverlayBackdrop" class="panel-overlay-backdrop"></div>
 <div id="learningOverlay" class="panel-overlay">
   <div class="panel-shell">
@@ -1022,7 +1027,9 @@
       <button type="button" class="ghost" data-close="learning">✕</button>
     </div>
     <div class="panel-body">
-      <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
+      <div class="category-intro">Free courses and certifications, picked for the kind of work this team does. Tap a topic to see what's available.</div>
+      <div id="learningTileGrid" class="category-tile-grid"></div>
+      <div id="learningDetailArea"></div>
     </div>
   </div>
 </div>
@@ -1491,16 +1498,38 @@
   </div>
 </div>
 
-<!-- HEALTH CHALLENGES OVERLAY (placeholder) -->
+<!-- HEALTH OVERLAY — everyday wellbeing info (exercise, food, sleep, balance)
+     plus general trusted health resources, grouped into tap-to-expand
+     categories. General information only, not medical advice. -->
 <div id="healthOverlayBackdrop" class="panel-overlay-backdrop"></div>
 <div id="healthOverlay" class="panel-overlay">
   <div class="panel-shell">
     <div class="panel-header">
-      <strong>Health Challenges</strong>
+      <strong>Health</strong>
       <button type="button" class="ghost" data-close="health">✕</button>
     </div>
     <div class="panel-body">
-      <div class="empty">Coming soon — tell me what you'd like here and I'll build it.</div>
+      <div class="category-intro">Simple, everyday wellbeing basics. Tap a topic for a few tips and some trusted places to read more.</div>
+      <div id="healthTileGrid" class="category-tile-grid"></div>
+      <div id="healthDetailArea"></div>
+      <div class="category-disclaimer">This is general wellbeing information, not medical advice. For any health concern, please speak with a licensed doctor or your local health authority — and always use your local emergency number for anything urgent.</div>
+    </div>
+  </div>
+</div>
+
+<!-- WEATHER OVERLAY — opened by tapping the badge pinned top-left of the
+     header. Location comes from the device's own GPS (same permission
+     prompt already used for clock-in location), and the data itself is
+     Open-Meteo — free, no API key needed. -->
+<div id="weatherOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="weatherOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Weather</strong>
+      <button type="button" class="ghost" data-close="weather">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="weatherDetailArea"><div class="empty">Getting your local weather…</div></div>
     </div>
   </div>
 </div>

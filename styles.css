@@ -1796,6 +1796,150 @@ button.ghost:hover { color: var(--text); }
   .panel-shell { border-radius: 0; }
 }
 
+/* ---------- Category tile grid + expandable detail, shared by the Health
+   and Learning panels (and anything similar added later) — same visual
+   language as the Home screen's icon tiles, just reused at panel scale. ---------- */
+.category-intro { font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5; }
+.category-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 18px 10px;
+  margin-bottom: 4px;
+}
+.category-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.category-tile-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 23px;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+}
+.category-tile:hover .category-tile-icon,
+.category-tile:active .category-tile-icon { transform: translateY(-2px) scale(1.05); }
+.category-tile.active .category-tile-icon { outline: 2px solid var(--accent); outline-offset: 2px; }
+.category-tile-label { font-size: 11px; font-weight: 550; color: var(--text-muted); text-align: center; line-height: 1.25; }
+
+/* A handful of tints, cycled by index, so each tile reads as distinct
+   without needing a bespoke color per category. */
+.tile-tint-1 .category-tile-icon { background: linear-gradient(160deg, rgba(224, 110, 130, 0.28), rgba(176, 68, 88, 0.14)); border: 1.5px solid rgba(224, 110, 130, 0.55); box-shadow: 0 6px 16px rgba(224, 110, 130, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+.tile-tint-2 .category-tile-icon { background: linear-gradient(160deg, rgba(120, 200, 140, 0.28), rgba(70, 150, 96, 0.14)); border: 1.5px solid rgba(120, 200, 140, 0.55); box-shadow: 0 6px 16px rgba(120, 200, 140, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+.tile-tint-3 .category-tile-icon { background: linear-gradient(160deg, rgba(94, 150, 224, 0.28), rgba(58, 105, 176, 0.14)); border: 1.5px solid rgba(94, 150, 224, 0.55); box-shadow: 0 6px 16px rgba(94, 150, 224, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+.tile-tint-4 .category-tile-icon { background: linear-gradient(160deg, rgba(224, 190, 90, 0.28), rgba(176, 140, 50, 0.14)); border: 1.5px solid rgba(224, 190, 90, 0.55); box-shadow: 0 6px 16px rgba(224, 190, 90, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+.tile-tint-5 .category-tile-icon { background: linear-gradient(160deg, rgba(168, 120, 224, 0.28), rgba(124, 82, 176, 0.14)); border: 1.5px solid rgba(168, 120, 224, 0.55); box-shadow: 0 6px 16px rgba(168, 120, 224, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+.tile-tint-6 .category-tile-icon { background: linear-gradient(160deg, rgba(224, 160, 90, 0.28), rgba(176, 110, 50, 0.14)); border: 1.5px solid rgba(224, 160, 90, 0.55); box-shadow: 0 6px 16px rgba(224, 160, 90, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+.tile-tint-7 .category-tile-icon { background: linear-gradient(160deg, rgba(90, 170, 224, 0.28), rgba(50, 120, 176, 0.14)); border: 1.5px solid rgba(90, 170, 224, 0.55); box-shadow: 0 6px 16px rgba(90, 170, 224, 0.22), inset 0 1px 0 rgba(255,255,255,0.3); }
+
+.category-detail {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  animation: categoryDetailIn 0.2s ease;
+}
+@keyframes categoryDetailIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.category-detail-title { font-size: 14.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.category-detail-tips { margin: 12px 0 4px; padding: 0; list-style: none; }
+.category-detail-tips li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 8px;
+}
+.category-detail-tips li::before { content: '•'; position: absolute; left: 4px; color: var(--accent); }
+.category-detail-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.category-link-chip {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.category-link-chip:hover { background: rgba(255, 255, 255, 0.1); }
+.category-disclaimer { font-size: 11px; color: var(--text-dim); margin-top: 14px; line-height: 1.5; padding-top: 12px; border-top: 1px solid var(--glass-border); }
+
+/* ---------- Weather badge (header, top-left) + weather detail panel ---------- */
+.weather-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  background: linear-gradient(160deg, rgba(94, 170, 224, 0.24), rgba(58, 120, 176, 0.12));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1.5px solid rgba(94, 170, 224, 0.5);
+  box-shadow: 0 4px 10px rgba(94, 170, 224, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  flex: none;
+  font-family: inherit;
+  transition: transform 0.18s ease;
+}
+.weather-badge:hover { transform: translateY(-1px); }
+.weather-badge-icon { font-size: 18px; line-height: 1; }
+.weather-badge-temp { font-size: 13px; font-weight: 700; color: var(--text); }
+
+.weather-hero {
+  text-align: center;
+  padding: 22px 10px 26px;
+}
+.weather-hero-icon { font-size: 56px; line-height: 1; }
+.weather-hero-temp { font-size: 44px; font-weight: 700; margin-top: 6px; letter-spacing: -0.5px; }
+.weather-hero-desc { font-size: 14px; color: var(--text-muted); margin-top: 2px; }
+.weather-hero-place { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.weather-stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.weather-stat-card {
+  padding: 12px 8px;
+  border-radius: 14px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  text-align: center;
+}
+.weather-stat-label { font-size: 10.5px; color: var(--text-dim); }
+.weather-stat-value { font-size: 15px; font-weight: 700; margin-top: 4px; }
+.weather-forecast-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--glass-border);
+  font-size: 13px;
+}
+.weather-forecast-row:last-child { border-bottom: none; }
+.weather-forecast-day { flex: 1; color: var(--text-muted); }
+.weather-forecast-icon { font-size: 18px; flex: none; margin: 0 10px; }
+.weather-forecast-range { flex: none; font-weight: 600; min-width: 78px; text-align: right; }
+.weather-forecast-range .lo { color: var(--text-dim); font-weight: 500; }
+
 /* More-tools tiles on the Home page — same shape/size as the top tiles,
    each with its own tint so they read as distinct at a glance instead of
    all matching the default teal. */

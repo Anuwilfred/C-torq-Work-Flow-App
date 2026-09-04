@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.17.2';
+const APP_VERSION = 'v3.18.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Made the "Last seen" text on Team/Department lists brighter and easier to read.';
+const APP_UPDATE_NOTES = 'Added a weather widget (top-left of the header, tap for the full forecast), and filled in the Health and Learning sections with tips, free courses, and trusted resources.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1608,6 +1608,8 @@ $('logoutBtn').addEventListener('click', async () => {
   $('aiOrbLabel').style.display = 'none';
   $('chatOrb').style.display = 'none';
   $('chatOrbLabel').style.display = 'none';
+  if ($('weatherBadge')) $('weatherBadge').style.display = 'none';
+  weatherData = null;
   if ($('adminMoreRow')) $('adminMoreRow').style.display = 'none';
   closeAiChat();
   closeChatOverlay();
@@ -1615,6 +1617,7 @@ $('logoutBtn').addEventListener('click', async () => {
   closePanel('projectDetail');
   closePanel('learning');
   closePanel('health');
+  closePanel('weather');
   stopPresence();
   stopLastSeenHeartbeat();
   stopGlobalMessageWatch();
@@ -1754,6 +1757,7 @@ async function enterApp(knownUser) {
   startPresence();
   startLastSeenHeartbeat();
   startGlobalMessageWatch();
+  loadWeather();
   populateAllowanceDropdown();
   // Rehydrate BEFORE checking today's allocation, so an already-in-progress
   // clock-in (possibly on a different job than today's fresh allocation)
@@ -4512,6 +4516,7 @@ const PANEL_IDS = {
   recalledEdit: ['recalledEditOverlay', 'recalledEditOverlayBackdrop'],
   liveDrivers: ['liveDriversOverlay', 'liveDriversOverlayBackdrop'],
   specialRequest: ['specialRequestOverlay', 'specialRequestOverlayBackdrop'],
+  weather: ['weatherOverlay', 'weatherOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -4560,6 +4565,9 @@ function openPanel(name, opts = {}) {
     renderTeamList();
     restorePendingInvitesIfNeeded();
   }
+  if (name === 'health') renderHealthPanel();
+  if (name === 'learning') renderLearningPanel();
+  if (name === 'weather') renderWeatherDetail();
 }
 function closePanel(name) {
   const ids = PANEL_IDS[name];
@@ -8256,6 +8264,348 @@ async function enablePushNotifications() {
   }
 }
 if ($('enablePushBtn')) $('enablePushBtn').addEventListener('click', enablePushNotifications);
+
+// =====================================================================
+// HEALTH & LEARNING — curated, minimal content: a handful of short tips
+// plus links out to real, trusted, free resources for each topic. Nothing
+// here is stored in Supabase or fetched live — it's small enough to just
+// ship as data, and it's meant as a pointer to good outside resources, not
+// a replacement for them.
+// =====================================================================
+
+const HEALTH_CATEGORIES = [
+  {
+    key: 'exercise', icon: '🏃', label: 'Exercise',
+    tips: [
+      'Aim for at least 150 minutes of moderate activity a week — even a few 10-minute walks a day adds up.',
+      'Add simple strength work twice a week (bodyweight is fine) — it protects muscle and bone as you age.',
+      'Stretch for a few minutes after any physical work shift to ease muscle tension.',
+      'Take the stairs, or walk during breaks — small bursts of movement count toward the weekly total.',
+    ],
+    links: [
+      { label: 'WHO — physical activity', url: 'https://www.who.int/news-room/fact-sheets/detail/physical-activity' },
+      { label: 'NHS — exercise guide', url: 'https://www.nhs.uk/live-well/exercise/' },
+    ],
+  },
+  {
+    key: 'food', icon: '🥗', label: 'Better Food',
+    tips: [
+      'Fill half your plate with vegetables and fruit at most meals.',
+      'Choose water over sugary drinks — one sugary drink a day adds up a lot over a year.',
+      'Favor whole grains (brown rice, whole wheat) over refined ones when you can.',
+      'Go easy on fried and heavily processed food, especially on long shifts or driving days.',
+    ],
+    links: [
+      { label: 'WHO — healthy diet', url: 'https://www.who.int/news-room/fact-sheets/detail/healthy-diet' },
+      { label: 'Harvard — Healthy Eating Plate', url: 'https://www.hsph.harvard.edu/nutritionsource/healthy-eating-plate/' },
+    ],
+  },
+  {
+    key: 'sleep', icon: '🌙', label: 'Sleep & Habits',
+    tips: [
+      'Aim for 7 to 9 hours — a consistent sleep/wake time matters almost as much as the total hours.',
+      'Avoid screens for 30 minutes before bed if you can manage it.',
+      'Limit caffeine after mid-afternoon, especially before a night shift.',
+      'Small daily habits (a short walk, a glass of water first thing) add up more than occasional big efforts.',
+    ],
+    links: [
+      { label: 'Sleep Foundation — sleep hygiene', url: 'https://www.sleepfoundation.org/sleep-hygiene' },
+      { label: 'CDC — about sleep', url: 'https://www.cdc.gov/sleep/about/index.html' },
+    ],
+  },
+  {
+    key: 'balance', icon: '⚖️', label: 'Lifestyle Balance',
+    tips: [
+      'Take real breaks during work — even 5 minutes away from a task helps focus and mood.',
+      'Make time weekly for something unrelated to work — family, a hobby, exercise.',
+      'Go easy on alcohol and avoid tobacco — both add up in long-term health risk.',
+      'Stress that lasts weeks rather than days is worth talking to someone about, not just pushing through.',
+    ],
+    links: [
+      { label: 'WHO — mental health', url: 'https://www.who.int/health-topics/mental-health' },
+      { label: 'Mayo Clinic — managing stress', url: 'https://www.mayoclinic.org/healthy-lifestyle/stress-management/basics/stress-basics' },
+    ],
+  },
+  {
+    key: 'findcare', icon: '🩺', label: 'Health Info',
+    tips: [
+      'These are general information resources, not a diagnosis — always see a licensed doctor for an actual health concern.',
+      'For anything urgent, contact your local emergency number straight away, not an app or website.',
+      'Many countries have free or low-cost public health helplines — it is worth knowing your local one in advance.',
+    ],
+    links: [
+      { label: 'World Health Organization', url: 'https://www.who.int/' },
+      { label: 'Mayo Clinic — conditions A-Z', url: 'https://www.mayoclinic.org/diseases-conditions' },
+      { label: 'MedlinePlus (free, US NLM)', url: 'https://medlineplus.gov/' },
+    ],
+  },
+];
+
+const LEARNING_CATEGORIES = [
+  {
+    key: 'ai', icon: '🤖', label: 'AI & Machine Learning',
+    tips: [
+      'Elements of AI — a genuinely free, beginner-friendly course from the University of Helsinki, certificate included.',
+      "Google's Machine Learning Crash Course — free, practical, no cost for the material.",
+      'Kaggle Learn — short, free, hands-on micro-courses on AI/ML topics.',
+    ],
+    links: [
+      { label: 'Elements of AI (free)', url: 'https://www.elementsofai.com/' },
+      { label: 'Google ML Crash Course', url: 'https://developers.google.com/machine-learning/crash-course' },
+      { label: 'Kaggle Learn', url: 'https://www.kaggle.com/learn' },
+    ],
+  },
+  {
+    key: 'cyber', icon: '🔐', label: 'Cyber Security',
+    tips: [
+      'Cisco Networking Academy — "Introduction to Cybersecurity" is free, self-paced, with a certificate.',
+      'TryHackMe has a free tier of hands-on, guided security labs — good for practical skills.',
+      'Coursera courses are usually free to audit (watch and learn); paying is only needed if you want the certificate.',
+    ],
+    links: [
+      { label: 'Cisco — Intro to Cybersecurity', url: 'https://www.netacad.com/courses/cybersecurity' },
+      { label: 'TryHackMe', url: 'https://tryhackme.com/' },
+      { label: 'ISC2 Certified in Cybersecurity', url: 'https://www.isc2.org/certifications/cc' },
+    ],
+  },
+  {
+    key: 'coding', icon: '🐍', label: 'Python & Coding',
+    tips: [
+      'freeCodeCamp is completely free end to end, including its certificates — a great place to start any language.',
+      "Python's own official tutorial is free and written for complete beginners.",
+      'Harvard\'s CS50 is free to take on edX — a verified certificate costs money, the course itself does not.',
+    ],
+    links: [
+      { label: 'freeCodeCamp', url: 'https://www.freecodecamp.org/' },
+      { label: 'Python official tutorial', url: 'https://docs.python.org/3/tutorial/' },
+      { label: 'Harvard CS50', url: 'https://cs50.harvard.edu/x/' },
+    ],
+  },
+  {
+    key: 'plc', icon: '⚙️', label: 'PLC & Industrial Automation',
+    tips: [
+      'RealPars has a large free video library covering PLC basics through to real automation projects.',
+      'Siemens SITRAIN offers some free introductory digital courses alongside its paid ones.',
+      'Instrumentation Tools publishes free write-ups on PLC, instrumentation, and control basics.',
+    ],
+    links: [
+      { label: 'RealPars (free videos)', url: 'https://realpars.com/' },
+      { label: 'SITRAIN by Siemens', url: 'https://www.sitrain-learning.siemens.com/' },
+      { label: 'Instrumentation Tools', url: 'https://instrumentationtools.com/' },
+    ],
+  },
+  {
+    key: 'hmi', icon: '🖥️', label: 'HMI Design',
+    tips: [
+      "RealPars also covers HMI design principles in its free library, not just PLCs.",
+      'Rockwell Automation publishes free introductory tutorials on its HMI/SCADA tools.',
+      'ISA (International Society of Automation) shares free articles and resources on HMI best practice.',
+    ],
+    links: [
+      { label: 'RealPars — HMI', url: 'https://realpars.com/hmi/' },
+      { label: 'Rockwell Automation', url: 'https://www.rockwellautomation.com/' },
+      { label: 'ISA — resources', url: 'https://www.isa.org/' },
+    ],
+  },
+  {
+    key: 'design', icon: '📐', label: 'Industrial & Engineering Design',
+    tips: [
+      'Autodesk gives free access to Fusion 360 and AutoCAD for students/personal learning.',
+      'GrabCAD is a free community library of real CAD models and design challenges.',
+      'Coursera has many engineering design courses that are free to audit.',
+    ],
+    links: [
+      { label: 'Autodesk (free for learners)', url: 'https://www.autodesk.com/education/edu-software/overview' },
+      { label: 'GrabCAD', url: 'https://grabcad.com/' },
+      { label: 'Coursera', url: 'https://www.coursera.org/' },
+    ],
+  },
+  {
+    key: 'safety', icon: '🦺', label: 'Workplace Safety',
+    tips: [
+      'Alison.com has genuinely free certificate courses on workplace, fire, and health & safety topics.',
+      'OSHA (US) publishes free training materials and guidance, even though its official 10/30-hour cards are paid.',
+      "The UK's HSE publishes extensive free guidance on workplace safety, usable anywhere as general reference.",
+    ],
+    links: [
+      { label: 'Alison — Health & Safety', url: 'https://alison.com/courses/health-and-safety' },
+      { label: 'OSHA — training resources', url: 'https://www.osha.gov/training' },
+      { label: 'UK HSE — guidance', url: 'https://www.hse.gov.uk/' },
+    ],
+  },
+];
+
+// Renders a tile grid + tap-to-expand detail card, shared by Health and
+// Learning — tapping a tile again (or another tile) swaps the detail
+// underneath rather than opening yet another overlay layer.
+function renderCategoryTileGrid(panelKey, categories) {
+  const grid = $(panelKey === 'health' ? 'healthTileGrid' : 'learningTileGrid');
+  const detailArea = $(panelKey === 'health' ? 'healthDetailArea' : 'learningDetailArea');
+  if (!grid || !detailArea) return;
+
+  function renderDetail(cat) {
+    detailArea.innerHTML = `
+      <div class="category-detail">
+        <div class="category-detail-title"><span>${cat.icon}</span> ${escapeHtml(cat.label)}</div>
+        <ul class="category-detail-tips">${cat.tips.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+        <div class="category-detail-links">
+          ${cat.links.map((l) => `<a class="category-link-chip" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(l.label)}</a>`).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  grid.innerHTML = categories.map((cat, i) => `
+    <button type="button" class="category-tile tile-tint-${(i % 7) + 1}" data-cat="${cat.key}">
+      <span class="category-tile-icon">${cat.icon}</span>
+      <span class="category-tile-label">${escapeHtml(cat.label)}</span>
+    </button>
+  `).join('');
+  detailArea.innerHTML = '';
+
+  grid.querySelectorAll('[data-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const alreadyActive = btn.classList.contains('active');
+      grid.querySelectorAll('.category-tile').forEach((t) => t.classList.remove('active'));
+      if (alreadyActive) { detailArea.innerHTML = ''; return; }
+      btn.classList.add('active');
+      renderDetail(categories.find((c) => c.key === btn.dataset.cat));
+    });
+  });
+}
+function renderHealthPanel() { renderCategoryTileGrid('health', HEALTH_CATEGORIES); }
+function renderLearningPanel() { renderCategoryTileGrid('learning', LEARNING_CATEGORIES); }
+
+// =====================================================================
+// WEATHER — a small badge pinned top-left of the header (icon + current
+// outdoor temp), tap for a full forecast. Location comes from the device's
+// own GPS (same permission prompt already used for clock-in location);
+// the data itself is Open-Meteo — free, no API key, no signup needed.
+// =====================================================================
+
+let weatherData = null; // { current: {...}, daily: [...], place: 'City, Country' }
+const WEATHER_CACHE_KEY = 'ctorq-weather-cache-v1';
+const WEATHER_CACHE_MS = 20 * 60 * 1000; // 20 minutes — weather doesn't change fast enough to need more
+
+// WMO weather codes (used by Open-Meteo) → a simple icon + plain-language label.
+function weatherCodeInfo(code) {
+  const map = {
+    0: ['☀️', 'Clear sky'], 1: ['🌤️', 'Mostly clear'], 2: ['⛅', 'Partly cloudy'], 3: ['☁️', 'Overcast'],
+    45: ['🌫️', 'Foggy'], 48: ['🌫️', 'Foggy'],
+    51: ['🌦️', 'Light drizzle'], 53: ['🌦️', 'Drizzle'], 55: ['🌦️', 'Heavy drizzle'],
+    61: ['🌧️', 'Light rain'], 63: ['🌧️', 'Rain'], 65: ['🌧️', 'Heavy rain'],
+    66: ['🌧️', 'Freezing rain'], 67: ['🌧️', 'Freezing rain'],
+    71: ['🌨️', 'Light snow'], 73: ['🌨️', 'Snow'], 75: ['❄️', 'Heavy snow'], 77: ['🌨️', 'Snow grains'],
+    80: ['🌦️', 'Light showers'], 81: ['🌧️', 'Showers'], 82: ['⛈️', 'Heavy showers'],
+    85: ['🌨️', 'Snow showers'], 86: ['❄️', 'Heavy snow showers'],
+    95: ['⛈️', 'Thunderstorm'], 96: ['⛈️', 'Thunderstorm + hail'], 99: ['⛈️', 'Severe thunderstorm'],
+  };
+  return map[code] || ['🌡️', 'Weather'];
+}
+function weatherDayLabel(dateStr, i) {
+  if (i === 0) return 'Today';
+  if (i === 1) return 'Tomorrow';
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' });
+}
+
+async function loadWeather() {
+  if (!('geolocation' in navigator)) return;
+  try {
+    const cachedRaw = localStorage.getItem(WEATHER_CACHE_KEY);
+    if (cachedRaw) {
+      const cached = JSON.parse(cachedRaw);
+      if (Date.now() - cached.savedAt < WEATHER_CACHE_MS) {
+        weatherData = cached.data;
+        updateWeatherBadge();
+        return;
+      }
+    }
+  } catch { /* ignore a corrupt/old cache entry */ }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
+          `&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code` +
+          `&daily=weather_code,temperature_2m_max,temperature_2m_min` +
+          `&timezone=auto&temperature_unit=celsius&wind_speed_unit=kmh`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('weather fetch failed');
+        const json = await res.json();
+
+        let place = '';
+        try {
+          const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10`);
+          const geo = await geoRes.json();
+          const a = geo.address || {};
+          place = [a.city || a.town || a.village || a.county, a.country].filter(Boolean).join(', ');
+        } catch { /* place name is a nice-to-have, not essential */ }
+
+        weatherData = {
+          current: json.current,
+          daily: (json.daily?.time || []).map((date, i) => ({
+            date,
+            code: json.daily.weather_code[i],
+            hi: Math.round(json.daily.temperature_2m_max[i]),
+            lo: Math.round(json.daily.temperature_2m_min[i]),
+          })),
+          place,
+        };
+        try {
+          localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data: weatherData }));
+        } catch { /* storage full or unavailable — not essential */ }
+        updateWeatherBadge();
+      } catch { /* network hiccup — just leave the badge hidden this session */ }
+    },
+    () => { /* permission denied or unavailable — badge simply stays hidden, never blocks anything */ },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 15 * 60 * 1000 }
+  );
+}
+function updateWeatherBadge() {
+  if (!weatherData?.current) return;
+  const [icon] = weatherCodeInfo(weatherData.current.weather_code);
+  if ($('weatherBadgeIcon')) $('weatherBadgeIcon').textContent = icon;
+  if ($('weatherBadgeTemp')) $('weatherBadgeTemp').textContent = `${Math.round(weatherData.current.temperature_2m)}°`;
+  if ($('weatherBadge')) $('weatherBadge').style.display = 'flex';
+  if ($('weatherOverlay')?.classList.contains('show')) renderWeatherDetail();
+}
+function renderWeatherDetail() {
+  const area = $('weatherDetailArea');
+  if (!area) return;
+  if (!weatherData?.current) {
+    area.innerHTML = '<div class="empty">Still getting your local weather — make sure location access is allowed for this app.</div>';
+    return;
+  }
+  const c = weatherData.current;
+  const [icon, label] = weatherCodeInfo(c.weather_code);
+  area.innerHTML = `
+    <div class="weather-hero">
+      <div class="weather-hero-icon">${icon}</div>
+      <div class="weather-hero-temp">${Math.round(c.temperature_2m)}°C</div>
+      <div class="weather-hero-desc">${escapeHtml(label)}</div>
+      ${weatherData.place ? `<div class="weather-hero-place">📍 ${escapeHtml(weatherData.place)}</div>` : ''}
+    </div>
+    <div class="weather-stat-row">
+      <div class="weather-stat-card"><div class="weather-stat-label">Feels like</div><div class="weather-stat-value">${Math.round(c.apparent_temperature)}°</div></div>
+      <div class="weather-stat-card"><div class="weather-stat-label">Humidity</div><div class="weather-stat-value">${Math.round(c.relative_humidity_2m)}%</div></div>
+      <div class="weather-stat-card"><div class="weather-stat-label">Wind</div><div class="weather-stat-value">${Math.round(c.wind_speed_10m)} km/h</div></div>
+    </div>
+    <div class="card glass">
+      ${weatherData.daily.map((d, i) => {
+        const [dIcon, dLabel] = weatherCodeInfo(d.code);
+        return `
+          <div class="weather-forecast-row">
+            <span class="weather-forecast-day">${weatherDayLabel(d.date, i)} · ${escapeHtml(dLabel)}</span>
+            <span class="weather-forecast-icon">${dIcon}</span>
+            <span class="weather-forecast-range">${d.hi}° <span class="lo">${d.lo}°</span></span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+if ($('weatherBadge')) $('weatherBadge').addEventListener('click', () => openPanel('weather'));
 
 // Give every plain <select> already in the page the glass-styled dropdown
 // treatment. Selects created dynamically later (Team roster role/department
