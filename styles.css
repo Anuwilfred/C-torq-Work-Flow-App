@@ -790,8 +790,8 @@ button.ghost:hover { color: var(--text); }
   width: 11px;
   height: 11px;
 }
-.last-seen-text { font-size: 11px; color: var(--text-dim); }
-.last-seen-text.online { color: var(--ok); font-weight: 600; }
+.last-seen-text { font-size: 12px; color: var(--text); font-weight: 500; margin-top: 1px; }
+.last-seen-text.online { color: var(--ok); font-weight: 700; }
 
 .entry-body { flex: 1; min-width: 0; }
 .entry-meta { font-size: 12px; color: var(--text-muted); }
