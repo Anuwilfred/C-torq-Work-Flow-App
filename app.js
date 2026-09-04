@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.16.1';
+const APP_VERSION = 'v3.17.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Special Request approvals now show the full details (location, mode, what was worked on, reason) so a department head or admin can review everything before deciding.';
+const APP_UPDATE_NOTES = 'Team and Department lists now show a green dot next to anyone online right now, and a "Last seen" time for everyone else.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1616,6 +1616,7 @@ $('logoutBtn').addEventListener('click', async () => {
   closePanel('learning');
   closePanel('health');
   stopPresence();
+  stopLastSeenHeartbeat();
   stopGlobalMessageWatch();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
   clearInterval(chatListTimer);
@@ -1751,6 +1752,7 @@ async function enterApp(knownUser) {
   checkForUnreadNews();
   applyFeatureAccess();
   startPresence();
+  startLastSeenHeartbeat();
   startGlobalMessageWatch();
   populateAllowanceDropdown();
   // Rehydrate BEFORE checking today's allocation, so an already-in-progress
@@ -3000,7 +3002,7 @@ $('inviteAccessSaveBtn')?.addEventListener('click', () => {
 async function renderTeamList() {
   const list = $('teamList');
   const [{ data, error }, { rows: depts }, roles] = await Promise.all([
-    sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at').order('created_at', { ascending: false }),
+    sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at, last_seen').order('created_at', { ascending: false }),
     fetchDepartments(),
     fetchRoles(),
   ]);
@@ -3008,12 +3010,15 @@ async function renderTeamList() {
   if (!data.length) { list.innerHTML = '<div class="empty">No one invited yet.</div>'; return; }
   const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
   const roleOptions = '<option value="">No role</option>' + roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
-  list.innerHTML = data.map(p => `
+  list.innerHTML = data.map(p => {
+    const isOnline = onlineUserIds.has(p.id);
+    return `
     <div class="entry team-entry">
-      <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}</span>
+      <span class="type-icon">${p.role === 'admin' ? '👑' : '🙂'}<span class="presence-dot ${isOnline ? 'online' : ''}" data-presence-user="${p.id}"></span></span>
       <div class="entry-body">
         <input type="text" class="team-name-input" data-name-user="${p.id}" value="${escapeHtml(p.full_name || '')}" placeholder="Add a name…" style="font-weight:600; border:none; background:transparent; padding:2px 0; width:100%; font-size:14px;" />
         <div class="entry-desc">${escapeHtml(p.email)}</div>
+        <div class="last-seen-text ${isOnline ? 'online' : ''}" data-last-seen-for="${p.id}" data-last-seen="${p.last_seen || ''}">${isOnline ? 'Online now' : lastSeenLabel(p.last_seen)}</div>
       </div>
       <select class="position-select" data-role-user="${p.id}">
         ${roleOptions.replace(`value="${p.role_id || ''}"`, `value="${p.role_id || ''}" selected`)}
@@ -3045,7 +3050,8 @@ async function renderTeamList() {
         })()}
       <span class="chip ${p.status === 'active' ? 'synced' : 'pending'}">${p.status}</span>
     </div>
-  `).join('');
+  `;
+  }).join('');
   list.querySelectorAll('[data-role-user]').forEach((sel) => {
     sel.addEventListener('change', async () => {
       const roleName = sel.options[sel.selectedIndex]?.textContent || '';
@@ -4716,7 +4722,7 @@ async function openDepartmentDetail(deptId, deptName) {
 
   const { data: people, error: peopleErr } = await sb
     .from('profiles')
-    .select('id, email, full_name, position')
+    .select('id, email, full_name, position, last_seen')
     .eq('department_id', deptId)
     .eq('status', 'active')
     .order('full_name', { ascending: true });
@@ -4749,12 +4755,14 @@ async function openDepartmentDetail(deptId, deptName) {
     const jobText = a
       ? `${a.assignment_type === 'transportation' ? '🚕 ' : ''}${escapeHtml(a.project || 'Assigned, no details')}${a.location ? ' · ' + escapeHtml(a.location) : ''}`
       : 'No job allocated today';
+    const isOnline = onlineUserIds.has(p.id);
     return `
       <div class="entry">
-        <span class="type-icon">🙂</span>
+        <span class="type-icon">🙂<span class="presence-dot ${isOnline ? 'online' : ''}" data-presence-user="${p.id}"></span></span>
         <div class="entry-body">
           <div class="entry-desc">${escapeHtml(p.full_name || p.email)} <span class="chip synced" style="margin-left:6px;">${escapeHtml(posLabel)}</span></div>
           <div class="entry-meta">${jobText}</div>
+          <div class="last-seen-text ${isOnline ? 'online' : ''}" data-last-seen-for="${p.id}" data-last-seen="${p.last_seen || ''}">${isOnline ? 'Online now' : lastSeenLabel(p.last_seen)}</div>
         </div>
       </div>
     `;
@@ -6672,6 +6680,7 @@ function startPresence() {
       onlineUserIds = new Set(Object.keys(presenceChannel.presenceState()));
       renderChatList();
       updateThreadPresence();
+      refreshOnlineDots();
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') await presenceChannel.track({ online_at: new Date().toISOString() });
@@ -6680,6 +6689,50 @@ function startPresence() {
 function stopPresence() {
   if (presenceChannel) { sb.removeChannel(presenceChannel); presenceChannel = null; }
   onlineUserIds = new Set();
+}
+
+// ---------- Last seen — a real timestamp for "who was here recently", not
+// just "online right now" (Presence above only knows about this instant).
+// Best-effort: writes to the person's own profile row only, on a timer
+// while the app is open, so anyone offline still shows a useful "Last seen
+// 10 minutes ago" instead of nothing.
+let lastSeenTimerId = null;
+async function pingLastSeen() {
+  if (!currentUser) return;
+  try { await sb.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', currentUser.id); } catch { /* best-effort, ignore */ }
+}
+function startLastSeenHeartbeat() {
+  if (lastSeenTimerId || !currentUser) return;
+  pingLastSeen();
+  lastSeenTimerId = setInterval(pingLastSeen, 60000);
+}
+function stopLastSeenHeartbeat() {
+  if (lastSeenTimerId) { clearInterval(lastSeenTimerId); lastSeenTimerId = null; }
+}
+function lastSeenLabel(iso) {
+  if (!iso) return 'Last seen a while ago';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'Last seen just now';
+  if (mins === 1) return 'Last seen 1 minute ago';
+  if (mins < 60) return `Last seen ${mins} minutes ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs === 1 ? 'Last seen 1 hour ago' : `Last seen ${hrs} hours ago`;
+  const days = Math.round(hrs / 24);
+  return days === 1 ? 'Last seen 1 day ago' : `Last seen ${days} days ago`;
+}
+
+// Live-updates every "is this person online" dot/label currently on screen
+// (Team list, Department member list, etc.) straight from onlineUserIds —
+// no re-fetch needed, so it can run on every presence sync tick.
+function refreshOnlineDots() {
+  document.querySelectorAll('[data-presence-user]').forEach((dot) => {
+    dot.classList.toggle('online', onlineUserIds.has(dot.dataset.presenceUser));
+  });
+  document.querySelectorAll('[data-last-seen-for]').forEach((el) => {
+    const isOnline = onlineUserIds.has(el.dataset.lastSeenFor);
+    el.textContent = isOnline ? 'Online now' : lastSeenLabel(el.dataset.lastSeen);
+    el.classList.toggle('online', isOnline);
+  });
 }
 function updateThreadPresence() {
   const dot = $('chatThreadPresence');
@@ -7853,6 +7906,15 @@ function openAiChat() {
   $('aiOrbLabel').style.display = 'none';
   setTimeout(() => $('aiInput').focus(), 200);
 }
+// Nothing about this conversation is kept once you close it — closing wipes
+// both the in-memory context sent to the AI (aiHistory) and the on-screen
+// bubbles, so reopening AEON Ai always starts a brand new conversation.
+const AI_GREETING_HTML = '<div class="ai-msg assistant">How can I help you? I can support you with things like your timesheets, leave, daily progress updates, and reports — or ask me about anything else you need, like what did I work on 23/07/2026 or summarize my last report.</div>';
+function resetAiChat() {
+  aiHistory = [];
+  const wrap = $('aiMessages');
+  if (wrap) wrap.innerHTML = AI_GREETING_HTML;
+}
 function closeAiChat() {
   aiOpen = false;
   $('aiMesh').classList.remove('show');
@@ -7860,6 +7922,7 @@ function closeAiChat() {
   if (currentUser) $('aiOrbLabel').style.display = 'block';
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   $('aiOrb').classList.remove('speaking');
+  resetAiChat();
 }
 
 $('aiOrb').addEventListener('click', () => { aiOpen ? closeAiChat() : openAiChat(); });
