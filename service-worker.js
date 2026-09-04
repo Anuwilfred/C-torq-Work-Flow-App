@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.17.0';
+const CACHE_NAME = 'ctorq-workflow-v3.17.1';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 // Resumable/chunked uploads for larger chat attachments (photos/videos) —
 // see the TUS_UPLOAD block in app.js for how this is used.
@@ -37,17 +37,37 @@ const STATIC_ASSETS = [
   LEAFLET_CSS_URL,
 ];
 
-async function cacheEach(cache, urls) {
+// BUG FIX: cache.add(url) does a normal fetch, which happily reuses whatever
+// the browser's own HTTP cache already has for that URL. GitHub Pages serves
+// app.js/index.html/styles.css with a several-minute max-age, so installing
+// a brand new service worker (a new CACHE_NAME) minutes after a fresh deploy
+// could silently re-cache the OLD file content into the NEW cache bucket —
+// the version bump looked like it worked (a new cache name really was
+// created) but it was seeded with stale code. That's exactly what caused
+// "the update banner says v3.17 but after tapping Update it's still on
+// v3.16.1": the separate cache-busted fetch used to read the version number
+// for the popup correctly saw the new file, but the actual app shell cache
+// that gets served on reload had already been poisoned with the old one.
+// `cache: 'reload'` forces these requests straight to the network, bypassing
+// the HTTP cache entirely, so the shell files that define what "the app" is
+// are always genuinely fresh whenever a new service worker installs.
+async function cacheEach(cache, urls, { forceNetwork = false } = {}) {
   await Promise.allSettled(
-    urls.map((url) => cache.add(url).catch((err) => {
-      console.warn('[SW] failed to pre-cache (continuing anyway):', url, err);
-    }))
+    urls.map((url) => {
+      const req = forceNetwork ? new Request(url, { cache: 'reload' }) : url;
+      return cache.add(req).catch((err) => {
+        console.warn('[SW] failed to pre-cache (continuing anyway):', url, err);
+      });
+    })
   );
 }
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cacheEach(cache, [...SHELL_ASSETS, ...STATIC_ASSETS]))
+    caches.open(CACHE_NAME).then((cache) => Promise.all([
+      cacheEach(cache, SHELL_ASSETS, { forceNetwork: true }),
+      cacheEach(cache, STATIC_ASSETS),
+    ]))
   );
   self.skipWaiting();
 });
@@ -92,7 +112,11 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
       const cached = await cache.match(event.request);
-      const networkUpdate = fetch(event.request)
+      // Same HTTP-cache-bypass reasoning as install above — otherwise this
+      // background refresh can just hand back the same stale bytes the
+      // browser already has cached, and the cache would never actually catch
+      // up to a new deploy until that HTTP cache entry happens to expire.
+      const networkUpdate = fetch(new Request(event.request, { cache: 'reload' }))
         .then((res) => {
           cache.put(event.request, res.clone());
           return res;
