@@ -1847,25 +1847,73 @@ button.ghost:hover { color: var(--text); }
 
 .category-detail {
   margin-top: 18px;
-  padding: 16px;
-  border-radius: 16px;
+  padding: 20px 16px;
+  border-radius: 18px;
   background: var(--glass-2);
   border: 1px solid var(--glass-border);
   animation: categoryDetailIn 0.2s ease;
+  text-align: center;
 }
 @keyframes categoryDetailIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-.category-detail-title { font-size: 14.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-.category-detail-tips { margin: 12px 0 4px; padding: 0; list-style: none; }
-.category-detail-tips li {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text);
-  padding-left: 18px;
-  position: relative;
-  margin-bottom: 8px;
+
+/* Big centered hero icon — the "art" for this topic, front and center
+   rather than a small mark tucked in a corner. */
+.category-detail-emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 84px;
+  height: 84px;
+  margin: 0 auto 12px;
+  border-radius: 26px;
+  font-size: 40px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03));
+  border: 1.5px solid var(--glass-border-strong);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
-.category-detail-tips li::before { content: '•'; position: absolute; left: 4px; color: var(--accent); }
-.category-detail-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.category-detail-title {
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Tips as a centered grid of small icon-topped cards, not a left-aligned
+   list — each one reads like its own little tile. */
+.category-detail-tips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin: 18px 0 4px;
+  text-align: center;
+}
+.category-tip-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+}
+.category-tip-icon {
+  font-size: 26px;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.category-tip-text { font-size: 12.5px; line-height: 1.4; color: var(--text); }
+.category-detail-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+.category-video-chip {
+  background: linear-gradient(160deg, rgba(224, 90, 90, 0.28), rgba(176, 50, 50, 0.16));
+  border-color: rgba(224, 90, 90, 0.55);
+}
 .category-link-chip {
   font-size: 11.5px;
   font-weight: 600;
@@ -1924,8 +1972,33 @@ button.ghost:hover { color: var(--text); }
   border: 1px solid var(--glass-border);
   text-align: center;
 }
-.weather-stat-label { font-size: 10.5px; color: var(--text-dim); }
+.weather-stat-label { font-size: 10.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
 .weather-stat-value { font-size: 15px; font-weight: 700; margin-top: 4px; }
+
+/* Bento-style stat grid, matching the density of a proper weather app —
+   each card is its own small tile rather than one long list. */
+.weather-bento-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.weather-bento-card {
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+}
+.weather-bento-value { font-size: 22px; font-weight: 700; margin-top: 8px; }
+.weather-bento-value-sm { font-size: 14px; font-weight: 650; }
+.weather-bento-unit { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.weather-bento-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+.weather-wind-card .weather-bento-sub { display: flex; align-items: center; gap: 5px; }
+.weather-compass {
+  display: inline-block;
+  font-size: 13px;
+  transition: transform 0.3s ease;
+}
 .weather-forecast-row {
   display: flex;
   justify-content: space-between;

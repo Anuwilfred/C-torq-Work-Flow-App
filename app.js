@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.18.0';
+const APP_VERSION = 'v3.18.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Added a weather widget (top-left of the header, tap for the full forecast), and filled in the Health and Learning sections with tips, free courses, and trusted resources.';
+const APP_UPDATE_NOTES = 'Health and Learning now show a big centered icon and picture-style tip cards for each topic instead of plain text, plus free video links where available.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -8277,10 +8277,10 @@ const HEALTH_CATEGORIES = [
   {
     key: 'exercise', icon: '🏃', label: 'Exercise',
     tips: [
-      'Aim for at least 150 minutes of moderate activity a week — even a few 10-minute walks a day adds up.',
-      'Add simple strength work twice a week (bodyweight is fine) — it protects muscle and bone as you age.',
-      'Stretch for a few minutes after any physical work shift to ease muscle tension.',
-      'Take the stairs, or walk during breaks — small bursts of movement count toward the weekly total.',
+      { icon: '🚶', text: '150 min a week of movement — a few 10-minute walks a day adds up.' },
+      { icon: '💪', text: 'Simple strength work, twice a week — bodyweight is fine.' },
+      { icon: '🤸', text: 'A few minutes of stretching after any physical shift.' },
+      { icon: '🪜', text: 'Stairs over elevators, walking over standing still.' },
     ],
     links: [
       { label: 'WHO — physical activity', url: 'https://www.who.int/news-room/fact-sheets/detail/physical-activity' },
@@ -8290,10 +8290,10 @@ const HEALTH_CATEGORIES = [
   {
     key: 'food', icon: '🥗', label: 'Better Food',
     tips: [
-      'Fill half your plate with vegetables and fruit at most meals.',
-      'Choose water over sugary drinks — one sugary drink a day adds up a lot over a year.',
-      'Favor whole grains (brown rice, whole wheat) over refined ones when you can.',
-      'Go easy on fried and heavily processed food, especially on long shifts or driving days.',
+      { icon: '🥦', text: 'Half the plate as vegetables and fruit, most meals.' },
+      { icon: '💧', text: 'Water over sugary drinks — it adds up fast over a year.' },
+      { icon: '🌾', text: 'Whole grains over refined ones, where you can.' },
+      { icon: '🍟', text: 'Go easy on fried and heavily processed food.' },
     ],
     links: [
       { label: 'WHO — healthy diet', url: 'https://www.who.int/news-room/fact-sheets/detail/healthy-diet' },
@@ -8303,10 +8303,10 @@ const HEALTH_CATEGORIES = [
   {
     key: 'sleep', icon: '🌙', label: 'Sleep & Habits',
     tips: [
-      'Aim for 7 to 9 hours — a consistent sleep/wake time matters almost as much as the total hours.',
-      'Avoid screens for 30 minutes before bed if you can manage it.',
-      'Limit caffeine after mid-afternoon, especially before a night shift.',
-      'Small daily habits (a short walk, a glass of water first thing) add up more than occasional big efforts.',
+      { icon: '😴', text: '7 to 9 hours, at a consistent time — that matters as much as the total.' },
+      { icon: '📵', text: 'Screens off 30 minutes before bed, if you can manage it.' },
+      { icon: '☕', text: 'Caffeine cut-off by mid-afternoon, especially before a night shift.' },
+      { icon: '🔁', text: 'Small daily habits beat occasional big efforts.' },
     ],
     links: [
       { label: 'Sleep Foundation — sleep hygiene', url: 'https://www.sleepfoundation.org/sleep-hygiene' },
@@ -8316,10 +8316,10 @@ const HEALTH_CATEGORIES = [
   {
     key: 'balance', icon: '⚖️', label: 'Lifestyle Balance',
     tips: [
-      'Take real breaks during work — even 5 minutes away from a task helps focus and mood.',
-      'Make time weekly for something unrelated to work — family, a hobby, exercise.',
-      'Go easy on alcohol and avoid tobacco — both add up in long-term health risk.',
-      'Stress that lasts weeks rather than days is worth talking to someone about, not just pushing through.',
+      { icon: '⏸️', text: 'Real breaks during work — 5 minutes away resets focus.' },
+      { icon: '🎯', text: 'Weekly time for something unrelated to work.' },
+      { icon: '🚭', text: 'Go easy on alcohol, and avoid tobacco.' },
+      { icon: '🗣️', text: 'Stress that lasts weeks, not days, is worth talking about.' },
     ],
     links: [
       { label: 'WHO — mental health', url: 'https://www.who.int/health-topics/mental-health' },
@@ -8329,9 +8329,9 @@ const HEALTH_CATEGORIES = [
   {
     key: 'findcare', icon: '🩺', label: 'Health Info',
     tips: [
-      'These are general information resources, not a diagnosis — always see a licensed doctor for an actual health concern.',
-      'For anything urgent, contact your local emergency number straight away, not an app or website.',
-      'Many countries have free or low-cost public health helplines — it is worth knowing your local one in advance.',
+      { icon: 'ℹ️', text: 'General information only — see a licensed doctor for an actual concern.' },
+      { icon: '🚨', text: 'Anything urgent — call your local emergency number directly.' },
+      { icon: '☎️', text: 'Worth knowing your local free health helpline, before you need it.' },
     ],
     links: [
       { label: 'World Health Organization', url: 'https://www.who.int/' },
@@ -8345,9 +8345,9 @@ const LEARNING_CATEGORIES = [
   {
     key: 'ai', icon: '🤖', label: 'AI & Machine Learning',
     tips: [
-      'Elements of AI — a genuinely free, beginner-friendly course from the University of Helsinki, certificate included.',
-      "Google's Machine Learning Crash Course — free, practical, no cost for the material.",
-      'Kaggle Learn — short, free, hands-on micro-courses on AI/ML topics.',
+      { icon: '🎓', text: 'Elements of AI — free, beginner-friendly, certificate included.' },
+      { icon: '📈', text: "Google's ML Crash Course — free and practical." },
+      { icon: '🧩', text: 'Kaggle Learn — short, free, hands-on micro-courses.' },
     ],
     links: [
       { label: 'Elements of AI (free)', url: 'https://www.elementsofai.com/' },
@@ -8358,9 +8358,9 @@ const LEARNING_CATEGORIES = [
   {
     key: 'cyber', icon: '🔐', label: 'Cyber Security',
     tips: [
-      'Cisco Networking Academy — "Introduction to Cybersecurity" is free, self-paced, with a certificate.',
-      'TryHackMe has a free tier of hands-on, guided security labs — good for practical skills.',
-      'Coursera courses are usually free to audit (watch and learn); paying is only needed if you want the certificate.',
+      { icon: '🛡️', text: 'Cisco — "Intro to Cybersecurity", free with a certificate.' },
+      { icon: '🕵️', text: 'TryHackMe — a free tier of hands-on guided labs.' },
+      { icon: '🎥', text: 'Coursera is usually free to audit — pay only for the certificate.' },
     ],
     links: [
       { label: 'Cisco — Intro to Cybersecurity', url: 'https://www.netacad.com/courses/cybersecurity' },
@@ -8371,10 +8371,11 @@ const LEARNING_CATEGORIES = [
   {
     key: 'coding', icon: '🐍', label: 'Python & Coding',
     tips: [
-      'freeCodeCamp is completely free end to end, including its certificates — a great place to start any language.',
-      "Python's own official tutorial is free and written for complete beginners.",
-      'Harvard\'s CS50 is free to take on edX — a verified certificate costs money, the course itself does not.',
+      { icon: '🆓', text: 'freeCodeCamp — free end to end, certificates included.' },
+      { icon: '📘', text: "Python's own official tutorial — free, for complete beginners." },
+      { icon: '🏛️', text: "Harvard's CS50 — free to take, verified certificate costs extra." },
     ],
+    video: { label: 'freeCodeCamp on YouTube', url: 'https://www.youtube.com/@freecodecamp' },
     links: [
       { label: 'freeCodeCamp', url: 'https://www.freecodecamp.org/' },
       { label: 'Python official tutorial', url: 'https://docs.python.org/3/tutorial/' },
@@ -8384,10 +8385,11 @@ const LEARNING_CATEGORIES = [
   {
     key: 'plc', icon: '⚙️', label: 'PLC & Industrial Automation',
     tips: [
-      'RealPars has a large free video library covering PLC basics through to real automation projects.',
-      'Siemens SITRAIN offers some free introductory digital courses alongside its paid ones.',
-      'Instrumentation Tools publishes free write-ups on PLC, instrumentation, and control basics.',
+      { icon: '🎬', text: 'RealPars — a large free video library, basics to real projects.' },
+      { icon: '🏭', text: 'Siemens SITRAIN — some free intro courses alongside paid ones.' },
+      { icon: '📝', text: 'Instrumentation Tools — free write-ups on PLC/control basics.' },
     ],
+    video: { label: 'RealPars on YouTube', url: 'https://www.youtube.com/@RealPars' },
     links: [
       { label: 'RealPars (free videos)', url: 'https://realpars.com/' },
       { label: 'SITRAIN by Siemens', url: 'https://www.sitrain-learning.siemens.com/' },
@@ -8397,10 +8399,11 @@ const LEARNING_CATEGORIES = [
   {
     key: 'hmi', icon: '🖥️', label: 'HMI Design',
     tips: [
-      "RealPars also covers HMI design principles in its free library, not just PLCs.",
-      'Rockwell Automation publishes free introductory tutorials on its HMI/SCADA tools.',
-      'ISA (International Society of Automation) shares free articles and resources on HMI best practice.',
+      { icon: '🎬', text: 'RealPars — HMI design principles, in the same free library.' },
+      { icon: '🏭', text: 'Rockwell Automation — free intro tutorials on its HMI/SCADA tools.' },
+      { icon: '📰', text: 'ISA — free articles on HMI best practice.' },
     ],
+    video: { label: 'RealPars on YouTube', url: 'https://www.youtube.com/@RealPars' },
     links: [
       { label: 'RealPars — HMI', url: 'https://realpars.com/hmi/' },
       { label: 'Rockwell Automation', url: 'https://www.rockwellautomation.com/' },
@@ -8410,9 +8413,9 @@ const LEARNING_CATEGORIES = [
   {
     key: 'design', icon: '📐', label: 'Industrial & Engineering Design',
     tips: [
-      'Autodesk gives free access to Fusion 360 and AutoCAD for students/personal learning.',
-      'GrabCAD is a free community library of real CAD models and design challenges.',
-      'Coursera has many engineering design courses that are free to audit.',
+      { icon: '🖱️', text: 'Autodesk — free Fusion 360 and AutoCAD access for learners.' },
+      { icon: '🧱', text: 'GrabCAD — a free community library of real CAD models.' },
+      { icon: '🎥', text: 'Coursera — many engineering design courses free to audit.' },
     ],
     links: [
       { label: 'Autodesk (free for learners)', url: 'https://www.autodesk.com/education/edu-software/overview' },
@@ -8423,9 +8426,9 @@ const LEARNING_CATEGORIES = [
   {
     key: 'safety', icon: '🦺', label: 'Workplace Safety',
     tips: [
-      'Alison.com has genuinely free certificate courses on workplace, fire, and health & safety topics.',
-      'OSHA (US) publishes free training materials and guidance, even though its official 10/30-hour cards are paid.',
-      "The UK's HSE publishes extensive free guidance on workplace safety, usable anywhere as general reference.",
+      { icon: '🎓', text: 'Alison.com — genuinely free certificate courses on safety topics.' },
+      { icon: '📋', text: 'OSHA — free training materials and guidance (US).' },
+      { icon: '📖', text: "UK HSE — extensive free guidance, useful as general reference anywhere." },
     ],
     links: [
       { label: 'Alison — Health & Safety', url: 'https://alison.com/courses/health-and-safety' },
@@ -8437,7 +8440,9 @@ const LEARNING_CATEGORIES = [
 
 // Renders a tile grid + tap-to-expand detail card, shared by Health and
 // Learning — tapping a tile again (or another tile) swaps the detail
-// underneath rather than opening yet another overlay layer.
+// underneath rather than opening yet another overlay layer. Each tip gets
+// its own little icon badge rather than a plain bulleted line, so this
+// reads as a set of designed cards rather than a wall of text.
 function renderCategoryTileGrid(panelKey, categories) {
   const grid = $(panelKey === 'health' ? 'healthTileGrid' : 'learningTileGrid');
   const detailArea = $(panelKey === 'health' ? 'healthDetailArea' : 'learningDetailArea');
@@ -8446,9 +8451,20 @@ function renderCategoryTileGrid(panelKey, categories) {
   function renderDetail(cat) {
     detailArea.innerHTML = `
       <div class="category-detail">
-        <div class="category-detail-title"><span>${cat.icon}</span> ${escapeHtml(cat.label)}</div>
-        <ul class="category-detail-tips">${cat.tips.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+        <div class="category-detail-title">
+          <span class="category-detail-emoji">${cat.icon}</span>
+          ${escapeHtml(cat.label)}
+        </div>
+        <div class="category-detail-tips">
+          ${cat.tips.map((t) => `
+            <div class="category-tip-row">
+              <span class="category-tip-icon">${t.icon}</span>
+              <span class="category-tip-text">${escapeHtml(t.text)}</span>
+            </div>
+          `).join('')}
+        </div>
         <div class="category-detail-links">
+          ${cat.video ? `<a class="category-link-chip category-video-chip" href="${escapeHtml(cat.video.url)}" target="_blank" rel="noopener">▶ ${escapeHtml(cat.video.label)}</a>` : ''}
           ${cat.links.map((l) => `<a class="category-link-chip" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(l.label)}</a>`).join('')}
         </div>
       </div>
@@ -8507,6 +8523,38 @@ function weatherDayLabel(dateStr, i) {
   if (i === 1) return 'Tomorrow';
   return new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' });
 }
+function uvIndexLabel(uv) {
+  if (uv == null) return '';
+  if (uv < 3) return 'Low';
+  if (uv < 6) return 'Moderate';
+  if (uv < 8) return 'High';
+  if (uv < 11) return 'Very high';
+  return 'Extreme';
+}
+// US AQI scale (what Open-Meteo's `us_aqi` field already reports in).
+function aqiLabel(aqi) {
+  if (aqi == null) return '';
+  if (aqi <= 50) return 'Good';
+  if (aqi <= 100) return 'Moderate';
+  if (aqi <= 150) return 'Unhealthy (sensitive)';
+  if (aqi <= 200) return 'Unhealthy';
+  if (aqi <= 300) return 'Very unhealthy';
+  return 'Hazardous';
+}
+function windDirLabel(deg) {
+  if (deg == null) return '';
+  const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+function weatherClockTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+function daylightLength(sunriseIso, sunsetIso) {
+  if (!sunriseIso || !sunsetIso) return '';
+  const mins = Math.round((new Date(sunsetIso) - new Date(sunriseIso)) / 60000);
+  return `${Math.floor(mins / 60)} hr ${mins % 60} min`;
+}
 
 async function loadWeather() {
   if (!('geolocation' in navigator)) return;
@@ -8526,13 +8574,21 @@ async function loadWeather() {
     async (pos) => {
       try {
         const { latitude, longitude } = pos.coords;
+        // `current` covers the always-available basics; UV index and
+        // visibility are hourly-only fields on Open-Meteo, so those are
+        // pulled from the hourly array at the index matching this hour.
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
-          `&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code` +
-          `&daily=weather_code,temperature_2m_max,temperature_2m_min` +
+          `&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,pressure_msl,is_day` +
+          `&hourly=uv_index,visibility` +
+          `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max` +
           `&timezone=auto&temperature_unit=celsius&wind_speed_unit=kmh`;
         const res = await fetch(url);
         if (!res.ok) throw new Error('weather fetch failed');
         const json = await res.json();
+
+        const hourKey = String(json.current?.time || '').slice(0, 13); // "YYYY-MM-DDTHH"
+        let hourIdx = (json.hourly?.time || []).findIndex((t) => t.slice(0, 13) === hourKey);
+        if (hourIdx === -1) hourIdx = 0;
 
         let place = '';
         try {
@@ -8542,8 +8598,22 @@ async function loadWeather() {
           place = [a.city || a.town || a.village || a.county, a.country].filter(Boolean).join(', ');
         } catch { /* place name is a nice-to-have, not essential */ }
 
+        // Air quality is a separate free Open-Meteo API — best-effort, never
+        // blocks the rest of the weather data if it fails or is slow.
+        let aqi = null;
+        try {
+          const aqRes = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&current=us_aqi`);
+          const aqJson = await aqRes.json();
+          aqi = aqJson.current?.us_aqi ?? null;
+        } catch { /* air quality is a bonus stat, not essential */ }
+
         weatherData = {
           current: json.current,
+          uvIndex: json.hourly?.uv_index?.[hourIdx] ?? null,
+          visibility: json.hourly?.visibility?.[hourIdx] ?? null, // meters
+          aqi,
+          sunrise: json.daily?.sunrise?.[0] || null,
+          sunset: json.daily?.sunset?.[0] || null,
           daily: (json.daily?.time || []).map((date, i) => ({
             date,
             code: json.daily.weather_code[i],
@@ -8579,18 +8649,59 @@ function renderWeatherDetail() {
   }
   const c = weatherData.current;
   const [icon, label] = weatherCodeInfo(c.weather_code);
+  const today = weatherData.daily[0];
+  const visibilityKm = weatherData.visibility != null ? (weatherData.visibility / 1000).toFixed(1) : null;
+  const windDeg = c.wind_direction_10m;
+
   area.innerHTML = `
     <div class="weather-hero">
       <div class="weather-hero-icon">${icon}</div>
       <div class="weather-hero-temp">${Math.round(c.temperature_2m)}°C</div>
-      <div class="weather-hero-desc">${escapeHtml(label)}</div>
+      <div class="weather-hero-desc">${escapeHtml(label)}${today ? ` · H:${today.hi}° L:${today.lo}°` : ''}</div>
       ${weatherData.place ? `<div class="weather-hero-place">📍 ${escapeHtml(weatherData.place)}</div>` : ''}
     </div>
-    <div class="weather-stat-row">
-      <div class="weather-stat-card"><div class="weather-stat-label">Feels like</div><div class="weather-stat-value">${Math.round(c.apparent_temperature)}°</div></div>
-      <div class="weather-stat-card"><div class="weather-stat-label">Humidity</div><div class="weather-stat-value">${Math.round(c.relative_humidity_2m)}%</div></div>
-      <div class="weather-stat-card"><div class="weather-stat-label">Wind</div><div class="weather-stat-value">${Math.round(c.wind_speed_10m)} km/h</div></div>
+
+    <div class="weather-bento-grid">
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">Feels like</div>
+        <div class="weather-bento-value">${Math.round(c.apparent_temperature)}°</div>
+      </div>
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">UV Index</div>
+        <div class="weather-bento-value">${weatherData.uvIndex != null ? Math.round(weatherData.uvIndex) : '—'}</div>
+        <div class="weather-bento-sub">${escapeHtml(uvIndexLabel(weatherData.uvIndex))}</div>
+      </div>
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">Air Quality</div>
+        <div class="weather-bento-value">${weatherData.aqi != null ? Math.round(weatherData.aqi) : '—'}</div>
+        <div class="weather-bento-sub">${escapeHtml(aqiLabel(weatherData.aqi))}</div>
+      </div>
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">Visibility</div>
+        <div class="weather-bento-value">${visibilityKm != null ? `${visibilityKm} km` : '—'}</div>
+      </div>
+      <div class="weather-bento-card weather-wind-card">
+        <div class="weather-stat-label">Wind</div>
+        <div class="weather-bento-value">${Math.round(c.wind_speed_10m)} <span class="weather-bento-unit">km/h</span></div>
+        <div class="weather-bento-sub">
+          ${windDeg != null ? `<span class="weather-compass" style="transform:rotate(${windDeg}deg);">↑</span> ${windDirLabel(windDeg)}` : ''}
+        </div>
+      </div>
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">Humidity</div>
+        <div class="weather-bento-value">${Math.round(c.relative_humidity_2m)}%</div>
+      </div>
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">Pressure</div>
+        <div class="weather-bento-value">${c.pressure_msl != null ? Math.round(c.pressure_msl) : '—'} <span class="weather-bento-unit">hPa</span></div>
+      </div>
+      <div class="weather-bento-card">
+        <div class="weather-stat-label">Sunrise &amp; Sunset</div>
+        <div class="weather-bento-value weather-bento-value-sm">🌅 ${escapeHtml(weatherClockTime(weatherData.sunrise))} &nbsp; 🌇 ${escapeHtml(weatherClockTime(weatherData.sunset))}</div>
+        <div class="weather-bento-sub">${escapeHtml(daylightLength(weatherData.sunrise, weatherData.sunset))} daylight</div>
+      </div>
     </div>
+
     <div class="card glass">
       ${weatherData.daily.map((d, i) => {
         const [dIcon, dLabel] = weatherCodeInfo(d.code);
