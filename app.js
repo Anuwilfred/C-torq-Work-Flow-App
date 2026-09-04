@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.16.0';
+const APP_VERSION = 'v3.16.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: Admin can now set a Department Head from Admin → Departments → tap a department — that person can approve/reject Special Requests for their department.';
+const APP_UPDATE_NOTES = 'Special Request approvals now show the full details (location, mode, what was worked on, reason) so a department head or admin can review everything before deciding.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -7621,8 +7621,12 @@ async function renderSpecialRequestApprovals() {
     <div class="entry" style="align-items:flex-start;">
       <span class="type-icon">🕐</span>
       <div class="entry-body">
-        <div class="entry-meta">${escapeHtml(nameById[r.person_id] || 'Someone')} · ${escapeHtml(r.job_id || '—')} · ${escapeHtml(r.entry_date)} · ${escapeHtml(r.start_time)}–${escapeHtml(r.end_time)}</div>
-        <div class="entry-desc">${escapeHtml(r.reason || '')}</div>
+        <div class="entry-desc">${escapeHtml(nameById[r.person_id] || 'Someone')}</div>
+        <div class="entry-meta">${escapeHtml(r.job_id || '—')} · ${escapeHtml(MODE_LABEL[r.mode] || r.mode || '')}</div>
+        <div class="entry-meta">📅 ${escapeHtml(r.entry_date)} · 🕐 ${escapeHtml(r.start_time)}–${escapeHtml(r.end_time)}</div>
+        ${r.location ? `<div class="entry-meta">📍 ${escapeHtml(r.location)}</div>` : ''}
+        ${r.description ? `<div class="entry-meta">What they worked on: ${escapeHtml(r.description)}</div>` : ''}
+        <div class="entry-meta" style="margin-top:4px;"><strong>Reason for late entry:</strong> ${escapeHtml(r.reason || '')}</div>
         <div style="display:flex; gap:8px; margin-top:8px;">
           <button type="button" class="primary" data-sr-approve="${r.id}" style="flex:1; margin-top:0;">✓ Approve</button>
           <button type="button" class="secondary" data-sr-reject="${r.id}" style="flex:1;">✕ Reject</button>
