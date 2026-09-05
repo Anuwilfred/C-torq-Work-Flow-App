@@ -294,6 +294,7 @@
                 <button type="button" id="fetchLocationBtn">📍 Refresh my location</button>
               </div>
               <img id="locationMapImg" style="display:none; margin-top:8px; width:100%; max-width:340px; border-radius:14px; border:1px solid var(--glass-border);" alt="Map showing your location" />
+              <a id="locationMapLink" class="clock-loc-map-link" href="#" target="_blank" rel="noopener" style="display:none;">🗺️ Open in Maps</a>
               <p class="hint" style="margin-top:4px;">No manual typing — Project comes from the Job ID you pick, and Location comes from GPS when you Clock In (tap "Refresh" if it needs updating).</p>
 
               <label for="allowanceLocation">Allowance area (optional)</label>
@@ -826,6 +827,11 @@
         <div id="projectContributors" style="margin-top:12px;"></div>
       </div>
       <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Time by task</strong>
+        <p class="hint" style="margin-top:4px;">What people actually spent hours on for this job — grouped the same way as the description picker, so it's easy to see where the time went.</p>
+        <div id="projectTaskBreakdownArea" style="margin-top:12px;"></div>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
         <strong style="font-size:14px;">Share this project</strong>
         <p class="hint" style="margin-top:4px;">Post the current status into one of your group chats.</p>
         <select id="shareProjectGroupSelect" style="margin-top:8px;"></select>
@@ -1354,6 +1360,17 @@
           <input id="newJobDescLabel" type="text" placeholder="e.g. Site visit, Office work, Loading" />
           <button type="button" id="addJobDescBtn" class="secondary">+ Add</button>
         </div>
+        <label for="newJobDescCategory" id="newJobDescCategoryLabel" style="margin-top:8px;">Category (groups it in the tap-to-select list)</label>
+        <select id="newJobDescCategory">
+          <option value="software">💻 Software</option>
+          <option value="commissioning">🔧 Commissioning</option>
+          <option value="panel">🗄️ Panel</option>
+          <option value="design">📐 Design</option>
+          <option value="operations">📋 Operations</option>
+          <option value="marketing">📣 Marketing</option>
+          <option value="workshop">🛠️ Workshop</option>
+          <option value="other">✨ Other</option>
+        </select>
         <div id="jobDescList" style="margin-top:10px;"></div>
       </div>
 

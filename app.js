@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.21.1';
+const APP_VERSION = 'v3.22.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Tutorial now also points out AEON Ai, News Room, and Quick Job Switch — not just the Home tiles.';
+const APP_UPDATE_NOTES = 'Time by task now splits an entry\'s hours evenly across every task it was tagged with, instead of counting the full hours toward each one.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -457,6 +457,11 @@ function rehydrateEntryFormFromClockState() {
       mapImg.onload = () => { mapImg.style.display = 'block'; };
       mapImg.src = staticMapUrl(state.clockInLat, state.clockInLng);
     }
+    const mapLink = $('locationMapLink');
+    if (mapLink && state.clockInLat) {
+      mapLink.href = liveMapUrl(state.clockInLat, state.clockInLng);
+      mapLink.style.display = 'inline-block';
+    }
   }
 }
 
@@ -883,6 +888,12 @@ refreshTypeVisibility();
 function staticMapUrl(lat, lng, size = '340x180') {
   return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=16&size=${size}&maptype=mapnik&markers=${lat},${lng},red-dot`;
 }
+// A real, zoomable/pannable map — the static preview image is only ever a
+// small flat snapshot, so this is what actually lets someone double-check
+// "is this really where they were" (opens in a new tab, no API key needed).
+function liveMapUrl(lat, lng) {
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+}
 function fetchAndFillLocation(opts = {}) {
   const fillField = opts.fillField !== false;
   if (!navigator.geolocation) {
@@ -915,6 +926,11 @@ function fetchAndFillLocation(opts = {}) {
             mapImg.onerror = () => { mapImg.style.display = 'none'; };
             mapImg.onload = () => { mapImg.style.display = 'block'; };
             mapImg.src = staticMapUrl(latitude, longitude);
+          }
+          const mapLink = $('locationMapLink');
+          if (mapLink) {
+            mapLink.href = liveMapUrl(latitude, longitude);
+            mapLink.style.display = 'inline-block';
           }
           if (btn) { btn.disabled = false; btn.textContent = '📍 Use my location'; }
         }
@@ -1114,6 +1130,7 @@ function clockEventBlockHtml(label, emoji, dateVal, timeVal, address, lat, lng) 
       <div class="clock-loc-label">${emoji} ${escapeHtml(label)}${escapeHtml(when)}</div>
       ${address ? `<div class="clock-loc-addr">${escapeHtml(address)}</div>` : ''}
       ${lat ? `<img class="clock-loc-map" src="${staticMapUrl(lat, lng, '300x140')}" onerror="this.style.display='none'" alt="${escapeHtml(label)} map" />` : ''}
+      ${lat ? `<a class="clock-loc-map-link" href="${liveMapUrl(lat, lng)}" target="_blank" rel="noopener">🗺️ Open in Maps</a>` : ''}
     </div>`;
 }
 
@@ -4102,8 +4119,25 @@ async function openAllocationPanel() {
 // for people.
 // =====================================================================
 
+// Groups for the (now dozens-long) General description list — Software,
+// Panel wiring, Marketing etc. were all one flat wall of chips before,
+// which was hard to scan. 'other' is the catch-all for anything not
+// explicitly tagged with a category yet. Driver scope stays flat/ungrouped
+// (that list is short).
+const JOB_DESC_CATEGORIES = {
+  software: { icon: '💻', label: 'Software' },
+  commissioning: { icon: '🔧', label: 'Commissioning' },
+  panel: { icon: '🗄️', label: 'Panel' },
+  design: { icon: '📐', label: 'Design' },
+  operations: { icon: '📋', label: 'Operations' },
+  marketing: { icon: '📣', label: 'Marketing' },
+  workshop: { icon: '🛠️', label: 'Workshop' },
+  other: { icon: '✨', label: 'Other' },
+};
+const JOB_DESC_CATEGORY_ORDER = ['software', 'commissioning', 'panel', 'design', 'operations', 'marketing', 'workshop', 'other'];
+
 async function fetchJobDescriptions(scope, activeOnly = true) {
-  let q = sb.from('job_descriptions').select('id, label, active').eq('scope', scope).order('label', { ascending: true });
+  let q = sb.from('job_descriptions').select('id, label, active, category').eq('scope', scope).order('label', { ascending: true });
   if (activeOnly) q = q.eq('active', true);
   const { data, error } = await q;
   return error ? [] : (data || []);
@@ -4117,14 +4151,61 @@ async function renderChipPicker(containerId, scope, selectedSet) {
     box.innerHTML = '<span class="chip-picker-empty">No options yet — an admin can add some in Admin → Employee Role &amp; Invitation Management → Manage Job Descriptions.</span>';
     return;
   }
-  box.innerHTML = options.map((o) => `
-    <button type="button" class="desc-chip ${selectedSet.has(o.label) ? 'selected' : ''}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>
-  `).join('');
+
+  if (scope !== 'general') {
+    // Driver task list is short enough it doesn't need grouping.
+    box.innerHTML = options.map((o) => `
+      <button type="button" class="desc-chip ${selectedSet.has(o.label) ? 'selected' : ''}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>
+    `).join('');
+  } else {
+    const byCategory = {};
+    options.forEach((o) => {
+      const cat = JOB_DESC_CATEGORIES[o.category] ? o.category : 'other';
+      (byCategory[cat] = byCategory[cat] || []).push(o);
+    });
+    box.innerHTML = JOB_DESC_CATEGORY_ORDER.filter((cat) => byCategory[cat]?.length).map((cat) => {
+      const items = byCategory[cat];
+      const meta = JOB_DESC_CATEGORIES[cat];
+      const selectedCount = items.filter((o) => selectedSet.has(o.label)).length;
+      return `
+        <div class="desc-category-group">
+          <button type="button" class="desc-category-header">
+            <span class="desc-category-icon">${meta.icon}</span>
+            <span class="desc-category-name">${escapeHtml(meta.label)}</span>
+            <span class="desc-category-count">${items.length}${selectedCount ? ` · ${selectedCount} selected` : ''}</span>
+            <span class="desc-category-chevron">▾</span>
+          </button>
+          <div class="desc-category-body">
+            <div class="chip-picker">
+              ${items.map((o) => `<button type="button" class="desc-chip ${selectedSet.has(o.label) ? 'selected' : ''}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>`).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    box.querySelectorAll('.desc-category-header').forEach((header) => {
+      header.addEventListener('click', () => {
+        const body = header.nextElementSibling;
+        const open = body.classList.toggle('show');
+        header.classList.toggle('open', open);
+      });
+    });
+  }
+
   box.querySelectorAll('.desc-chip').forEach((chip) => {
     chip.addEventListener('click', () => {
       const label = chip.dataset.label;
       if (selectedSet.has(label)) selectedSet.delete(label); else selectedSet.add(label);
       chip.classList.toggle('selected');
+      // Keep the category header's "N selected" count live without doing a
+      // full re-render (which would also collapse whatever's open).
+      const group = chip.closest('.desc-category-group');
+      if (group) {
+        const countEl = group.querySelector('.desc-category-count');
+        const total = group.querySelectorAll('.desc-chip').length;
+        const selected = group.querySelectorAll('.desc-chip.selected').length;
+        if (countEl) countEl.textContent = `${total}${selected ? ` · ${selected} selected` : ''}`;
+      }
     });
   });
 }
@@ -4173,14 +4254,30 @@ async function renderJobDescList() {
         </div>
       `;
     }
+    const categoryPicker = scope === 'general' ? `
+        <select class="jobdesc-category-select" data-recat-jobdesc="${it.id}">
+          ${JOB_DESC_CATEGORY_ORDER.map((cat) => `<option value="${cat}" ${((it.category && JOB_DESC_CATEGORIES[it.category] ? it.category : 'other') === cat) ? 'selected' : ''}>${JOB_DESC_CATEGORIES[cat].icon} ${JOB_DESC_CATEGORIES[cat].label}</option>`).join('')}
+        </select>` : '';
     return `
       <div class="jobdesc-row ${it.active ? '' : 'inactive'}">
         <span class="jobdesc-label">${escapeHtml(it.label)}</span>
+        ${categoryPicker}
         <button type="button" class="secondary" data-edit-jobdesc="${it.id}">✏️ Edit</button>
         <button type="button" class="secondary" data-toggle-jobdesc="${it.id}" data-active="${it.active}">${it.active ? '⛔ Disable' : '✅ Enable'}</button>
       </div>
     `;
   }).join('');
+
+  box.querySelectorAll('[data-recat-jobdesc]').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const id = sel.dataset.recatJobdesc;
+      const category = sel.value;
+      const { error } = await sb.from('job_descriptions').update({ category }).eq('id', id);
+      if (error) { showToast(`Couldn't update category: ${error.message}`); return; }
+      showToast('Category updated.');
+      refreshGeneralDescriptionChips();
+    });
+  });
 
   box.querySelectorAll('[data-toggle-jobdesc]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -4228,13 +4325,21 @@ async function renderJobDescList() {
   });
 }
 
-$('newJobDescScope')?.addEventListener('change', renderJobDescList);
+function refreshJobDescCategoryVisibility() {
+  const scope = $('newJobDescScope')?.value || 'general';
+  const show = scope === 'general';
+  if ($('newJobDescCategory')) $('newJobDescCategory').style.display = show ? '' : 'none';
+  if ($('newJobDescCategoryLabel')) $('newJobDescCategoryLabel').style.display = show ? '' : 'none';
+}
+refreshJobDescCategoryVisibility();
+$('newJobDescScope')?.addEventListener('change', () => { renderJobDescList(); refreshJobDescCategoryVisibility(); });
 
 $('addJobDescBtn')?.addEventListener('click', async () => {
   const label = $('newJobDescLabel').value.trim();
   const scope = $('newJobDescScope')?.value || 'general';
+  const category = scope === 'general' ? ($('newJobDescCategory')?.value || 'other') : null;
   if (!label) return;
-  const { error } = await sb.from('job_descriptions').insert({ label, scope });
+  const { error } = await sb.from('job_descriptions').insert({ label, scope, category });
   if (error) { showToast(`Couldn't add: ${error.message}`); return; }
   $('newJobDescLabel').value = '';
   showToast('Added.');
@@ -6020,6 +6125,7 @@ async function openProjectDetail(jobId, name) {
   $('projectDetailTitle').textContent = name ? `${jobId} — ${name}` : jobId;
   $('projectRingsArea').innerHTML = '<div class="empty">Loading…</div>';
   $('projectContributors').innerHTML = '';
+  if ($('projectTaskBreakdownArea')) $('projectTaskBreakdownArea').innerHTML = '';
   $('projectStageArea').innerHTML = '';
   $('boqListArea').innerHTML = '';
   $('boqTotalRow').innerHTML = '';
@@ -6101,7 +6207,58 @@ async function openProjectDetail(jobId, name) {
     ? bigTotalRingBlock(totalAllocated, totalUsed, overNames) + `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
     : '<div class="empty">No departments set up yet — add one from Admin → Team → Departments.</div>';
   renderProjectContributors(data);
+  renderProjectTaskBreakdown(data);
   renderDeptHoursManager(jobId, departments);
+}
+
+// "Time by task" — what people actually spent hours on for this job
+// (Programming, IO mapping, Panel wiring, etc.), grouped the same way as
+// the description picker (Software/Commissioning/Panel/Design/Operations/
+// Marketing/Workshop/Other), computed server-side in get-project-report
+// from job_hours_ledger's description column. Bars are sized relative to
+// this job's own busiest task (there's no "budget" per task, unlike the
+// department rings above) — so it's a quick "where did the time go" read,
+// not a pass/fail one.
+function renderProjectTaskBreakdown(data) {
+  const wrap = $('projectTaskBreakdownArea');
+  if (!wrap) return;
+  const tasks = data.taskBreakdown || [];
+  const untagged = Number(data.untaggedHours) || 0;
+  if (!tasks.length) {
+    wrap.innerHTML = untagged > 0
+      ? `<div class="empty">${untagged}h logged so far, but not tagged with any specific task yet — those entries used free-typed notes instead of the tap-to-select list.</div>`
+      : '<div class="empty">No hours logged yet.</div>';
+    return;
+  }
+  const maxHours = Math.max(...tasks.map((t) => t.hours), 0.01);
+  const byCategory = {};
+  tasks.forEach((t) => {
+    const cat = JOB_DESC_CATEGORIES[t.category] ? t.category : 'other';
+    (byCategory[cat] = byCategory[cat] || []).push(t);
+  });
+  const sections = JOB_DESC_CATEGORY_ORDER.filter((cat) => byCategory[cat]?.length).map((cat) => {
+    const meta = JOB_DESC_CATEGORIES[cat];
+    const items = byCategory[cat];
+    const catTotal = Math.round(items.reduce((s, t) => s + t.hours, 0) * 100) / 100;
+    return `
+      <div class="task-category-block">
+        <div class="task-category-heading"><span>${meta.icon}</span> ${escapeHtml(meta.label)} <span class="task-category-total">${catTotal}h</span></div>
+        ${items.map((t) => `
+          <div class="task-bar-row">
+            <div class="task-bar-top">
+              <span class="task-bar-label">${escapeHtml(t.label)}</span>
+              <span class="task-bar-hours">${t.hours}h</span>
+            </div>
+            <div class="task-bar-track"><div class="task-bar-fill" style="width:${Math.max(4, Math.round((t.hours / maxHours) * 100))}%"></div></div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }).join('');
+  const untaggedNote = untagged > 0
+    ? `<div class="task-untagged-note">+ ${untagged}h logged with free-typed notes, not matching a specific task</div>`
+    : '';
+  wrap.innerHTML = sections + untaggedNote;
 }
 
 // Admin-only cleanup tool for exactly the kind of mistake that started this

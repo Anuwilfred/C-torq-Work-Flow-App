@@ -627,6 +627,39 @@ button.ghost:hover { color: var(--text); }
 }
 .chip-picker-empty { font-size: 11.5px; color: var(--text-dim); }
 
+/* Description picker grouped by category (General scope only) — collapsed
+   category headers you tap to reveal that category's chips, instead of one
+   long flat wall of dozens of options. */
+.desc-category-group {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: var(--glass-2);
+}
+.desc-category-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.desc-category-icon { font-size: 16px; }
+.desc-category-name { flex: 1; }
+.desc-category-count { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.desc-category-chevron { font-size: 11px; color: var(--text-dim); transition: transform 0.2s ease; }
+.desc-category-header.open .desc-category-chevron { transform: rotate(180deg); }
+.desc-category-body { display: none; padding: 2px 12px 12px; }
+.desc-category-body.show { display: block; }
+.desc-category-body .chip-picker { margin: 4px 0 0; }
+
 /* Job Descriptions admin list — add + enable/disable rows */
 .jobdesc-row {
   display: flex;
@@ -634,10 +667,12 @@ button.ghost:hover { color: var(--text); }
   gap: 8px;
   padding: 8px 0;
   border-bottom: 1px solid var(--glass-border);
+  flex-wrap: wrap;
 }
 .jobdesc-row .jobdesc-label { flex: 1; font-size: 13px; }
 .jobdesc-row.inactive .jobdesc-label { color: var(--text-dim); text-decoration: line-through; }
 .jobdesc-row .jobdesc-edit-input { flex: 1; font-size: 16px; padding: 6px 8px; }
+.jobdesc-category-select { flex: none; font-size: 11.5px; padding: 5px 8px; width: auto; }
 
 /* Driver trip status badges + Start/Complete actions */
 .trip-status-badge { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin-left: 6px; }
@@ -1464,6 +1499,12 @@ button.ghost:hover { color: var(--text); }
 .clock-loc-label { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; }
 .clock-loc-addr { font-size: 12.5px; color: var(--text); margin-top: 3px; }
 .clock-loc-map { display: block; width: 100%; max-width: 300px; height: auto; border-radius: 10px; margin-top: 6px; border: 1px solid var(--glass-border); }
+.clock-loc-map-link {
+  display: inline-block; margin-top: 6px; font-size: 11.5px; font-weight: 700;
+  color: var(--accent); text-decoration: none; padding: 5px 10px;
+  border: 1px solid var(--glass-border-strong); border-radius: 10px; background: var(--glass);
+}
+.clock-loc-map-link:hover { color: var(--accent-hover); border-color: var(--accent); }
 
 /* Queue entries are tappable — opens the full entry-detail overlay. */
 .entry-clickable { cursor: pointer; transition: background 0.15s ease; }
@@ -2255,6 +2296,25 @@ button.ghost:hover { color: var(--text); }
    who's simply on track. */
 .contrib-row.contrib-over { border-color: rgba(242, 125, 112, 0.45); background: rgba(242, 125, 112, 0.07); }
 .contrib-bar-fill.over { background: linear-gradient(90deg, var(--err), #c94e42); }
+
+/* Project Detail — "Time by task" breakdown */
+.task-category-block { margin-bottom: 16px; }
+.task-category-block:last-child { margin-bottom: 0; }
+.task-category-heading {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 800; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.03em;
+  margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--glass-border);
+}
+.task-category-total { margin-left: auto; color: var(--text); font-weight: 800; text-transform: none; letter-spacing: 0; }
+.task-bar-row { margin-bottom: 10px; }
+.task-bar-row:last-child { margin-bottom: 0; }
+.task-bar-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; margin-bottom: 4px; }
+.task-bar-label { color: var(--text); font-weight: 600; }
+.task-bar-hours { color: var(--text); font-weight: 800; flex: none; }
+.task-bar-track { height: 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--glass-border); overflow: hidden; }
+.task-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); min-width: 4px; }
+.task-untagged-note { margin-top: 12px; font-size: 11.5px; color: var(--text-dim); font-style: italic; }
 .contrib-over-note { margin-top: 6px; font-size: 11.5px; font-weight: 700; color: var(--err); }
 .contrib-nobudget-note { font-size: 11.5px; color: var(--text-dim); }
 @media (max-width: 420px) {
