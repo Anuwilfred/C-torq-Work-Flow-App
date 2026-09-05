@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.23.1';
+const APP_VERSION = 'v3.24.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Added a "Manage Job Types & Categories" shortcut in Data Feed\'s quick actions — takes you straight to the job description/category editor instead of having to dig for it.';
+const APP_UPDATE_NOTES = 'Manage Job Types and Manage Job Categories now live directly inside Data Feed — add, edit, or delete job types and their categories right there, no more hunting through Job Allocation.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4829,6 +4829,14 @@ function openPanel(name, opts = {}) {
   if (name === 'learning') renderLearningPanel();
   if (name === 'weather') renderWeatherDetail();
   if (name === 'about') renderAboutPanel();
+  if (name === 'datafeed') {
+    // Manage Job Types & Categories lives right here now — refresh both
+    // lists (and the add-new category dropdown) every time the panel opens
+    // so they're never showing stale data from before.
+    populateJobDescCategorySelect();
+    renderJobDescList();
+    renderJobDescCategoryList();
+  }
 }
 function closePanel(name) {
   const ids = PANEL_IDS[name];
@@ -5794,17 +5802,6 @@ if ($('dfRulesBtn')) {
     showToast('Rules — coming soon. Tell me what rules you want and I\'ll build it.');
   });
 }
-// "Manage Job Types & Categories" lives inside the Job Allocation panel
-// (alongside driver trips) rather than as its own overlay — this just gets
-// an admin there in one tap from Data Feed instead of having to know that.
-if ($('dfManageJobTypesBtn')) {
-  $('dfManageJobTypesBtn').addEventListener('click', () => {
-    closePanel('datafeed');
-    openPanel('allocation');
-    setTimeout(() => $('jobDescCategoryList')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
-  });
-}
-
 if ($('scanImportJobsBtn')) {
   $('scanImportJobsBtn').addEventListener('click', async () => {
     const text = $('importJobsText').value.trim();
