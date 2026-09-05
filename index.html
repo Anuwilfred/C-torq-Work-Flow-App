@@ -830,6 +830,15 @@
         <strong style="font-size:14px;">📊 Project Analytics</strong>
         <p class="hint" style="margin-top:4px;">Where the time on this job actually went — which task type took the most hours, which department used the most time, and who put in the most hours.</p>
         <div id="projectTaskBreakdownArea" style="margin-top:12px;"></div>
+        <div id="projectPieSection" class="pa-section" style="display:none;">
+          <div class="pa-section-title">🥧 Category share</div>
+          <div id="projectCategoryPie" style="height:260px;"></div>
+        </div>
+        <div id="projectSurfaceSection" class="pa-section" style="display:none;">
+          <div class="pa-section-title">🌄 Department × Task surface</div>
+          <p class="hint" style="margin-top:-4px; margin-bottom:8px;">Drag to rotate, scroll to zoom. Height = hours logged; color runs blue → green → yellow → red the closer (or further over) that department is to its allocated budget. Hover any point to see who worked on it.</p>
+          <div id="projectSurfaceChart" style="height:380px;"></div>
+        </div>
       </div>
       <div class="card glass" style="margin-top:16px;">
         <strong style="font-size:14px;">Share this project</strong>
@@ -1611,6 +1620,8 @@
 <!-- Resumable/chunked uploads for larger chat attachments (photos/videos) -->
 <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Project Analytics' 3D surface + pie charts (Project Detail) -->
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.34.0/plotly.min.js"></script>
 <script src="./config.js"></script>
 <script src="./app.js"></script>
 </body>
