@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.24.0';
+const APP_VERSION = 'v3.24.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Manage Job Types and Manage Job Categories now live directly inside Data Feed — add, edit, or delete job types and their categories right there, no more hunting through Job Allocation.';
+const APP_UPDATE_NOTES = 'Removed the old "Add jobs from WhatsApp" import (jobs now come from the Google Sheet). Data Feed now has Manage Job Types and Manage Job Categories built right in.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2737,7 +2737,7 @@ const FEATURE_LIST = [
   { key: 'quotations', label: 'Quotations' },
   { key: 'tank', label: 'Project Tank' },
   { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
-  { key: 'datafeed', label: 'Data Feed (add jobs from pasted WhatsApp messages)' },
+  { key: 'datafeed', label: 'Data Feed (add/remove people & jobs, manage job types)' },
   { key: 'liveDrivers', label: 'Live Drivers (see driver locations)' },
   { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
 ];
@@ -4901,7 +4901,7 @@ const TUTORIAL_STEPS = [
   { selector: '.home-tile[data-open="quotations"]', icon: '🧾', title: 'Quotations', text: 'Create and track quotations and BOQs.' },
   { selector: '.home-tile[data-open="tank"]', icon: '🛢️', title: 'Project Tank', text: 'A quick visual read on your overall project pipeline.' },
   { selector: '.home-tile[data-open="allocation"]', icon: '🚚', title: 'Job Allocation', text: "See — or if you're an admin, publish — who's assigned to which job today." },
-  { selector: '.home-tile[data-open="datafeed"]', icon: '📥', title: 'Data Feed', text: 'Bulk-load or manage the data behind the app.' },
+  { selector: '.home-tile[data-open="datafeed"]', icon: '📥', title: 'Data Feed', text: 'Add or remove people and jobs, and manage the job types/categories used everywhere else.' },
   { selector: '.home-tile[data-tab="settings"]', icon: '⚙️', title: 'Settings', text: 'Your account, password, and notification preferences.' },
   { selector: '#aiOrb', icon: '🤖', title: 'AEON Ai', text: 'This floating button is always one tap away — ask it about your timesheets, leave, reports, or anything you need help with.' },
   { selector: '#newsHandle', icon: '📰', title: 'News Room', text: 'Pull this tab on the left edge (or tap it) to read company announcements and updates.' },
@@ -5725,66 +5725,6 @@ if ($('createProjectBtn')) {
   });
 }
 
-// =====================================================================
-// IMPORT JOBS FROM WHATSAPP — admin pastes the raw job-announcement
-// messages, AEON Ai (via the import-jobs Edge Function) extracts every job
-// number/description/client, checks them against Projects already saved,
-// and shows only the genuinely new ones for a one-click confirm — nothing
-// is written to the database until the admin reviews and hits "Add".
-// =====================================================================
-
-let lastScannedJobs = []; // the newJobs array from the last scan, kept so "Add selected" can read it back
-
-function renderImportJobsResults(newJobs, alreadyExists) {
-  const wrap = $('importJobsResultsArea');
-  if (!wrap) return;
-  lastScannedJobs = newJobs;
-  if (!newJobs.length && !alreadyExists.length) {
-    wrap.innerHTML = '<div class="empty">No job numbers found in that text.</div>';
-    return;
-  }
-  const rows = newJobs.map((j, i) => `
-    <label class="entry" style="cursor:pointer;">
-      <input type="checkbox" class="import-job-check" data-idx="${i}" checked style="margin-right:10px;" />
-      <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(j.job_id)}${j.date ? ` <span style="color:var(--text-dim); font-weight:400; font-size:11.5px;">— ${escapeHtml(j.date)}</span>` : ''}</div>
-        <div class="entry-meta">${escapeHtml(j.description || '—')}${j.client ? ' · ' + escapeHtml(j.client) : ''}</div>
-      </div>
-    </label>
-  `).join('');
-  const existingNote = alreadyExists.length
-    ? `<p class="hint" style="margin-top:10px;">${alreadyExists.length} job(s) already in your Projects list were skipped: ${alreadyExists.map((j) => escapeHtml(j.job_id)).join(', ')}.</p>`
-    : '';
-  wrap.innerHTML = newJobs.length
-    ? `<p class="hint">${newJobs.length} new job(s) found — uncheck any you don't want to add:</p>${rows}
-       <button id="addSelectedJobsBtn" class="primary" style="margin-top:10px;">Add selected jobs</button>${existingNote}`
-    : `<div class="empty">No new jobs — every job number in that text is already saved.</div>${existingNote}`;
-
-  const addBtn = $('addSelectedJobsBtn');
-  if (addBtn) {
-    addBtn.addEventListener('click', async () => {
-      addBtn.disabled = true;
-      addBtn.textContent = 'Adding…';
-      const checked = Array.from(wrap.querySelectorAll('.import-job-check:checked')).map((el) => lastScannedJobs[Number(el.dataset.idx)]);
-      if (!checked.length) { showToast('Nothing selected.'); addBtn.disabled = false; addBtn.textContent = 'Add selected jobs'; return; }
-      const rowsToInsert = checked.map((j) => ({
-        job_id: j.job_id,
-        name: j.description || null,
-        client: j.client || null,
-        received_date: j.date || null,
-        created_by: currentUser.id,
-      }));
-      const { error } = await sb.from('projects').insert(rowsToInsert);
-      if (error) { showToast(`Couldn't add jobs: ${error.message}`); addBtn.disabled = false; addBtn.textContent = 'Add selected jobs'; return; }
-      showToast(`Added ${rowsToInsert.length} job(s).`);
-      $('importJobsText').value = '';
-      wrap.innerHTML = '';
-      renderProjectsList();
-      populateJobIdDropdown();
-    });
-  }
-}
-
 // Data Feed quick actions — "Add or Remove Job" reuses the existing Projects
 // panel via the generic data-open wiring further down. These two need their
 // own handlers: People management lives inline in the Admin tab (not its own
@@ -5802,35 +5742,6 @@ if ($('dfRulesBtn')) {
     showToast('Rules — coming soon. Tell me what rules you want and I\'ll build it.');
   });
 }
-if ($('scanImportJobsBtn')) {
-  $('scanImportJobsBtn').addEventListener('click', async () => {
-    const text = $('importJobsText').value.trim();
-    if (!text) { showToast('Paste the WhatsApp messages first.'); return; }
-    const btn = $('scanImportJobsBtn');
-    btn.disabled = true;
-    btn.textContent = 'Scanning…';
-    $('importJobsResultsArea').innerHTML = '<div class="empty">Reading through the messages…</div>';
-    try {
-      const { data, error } = await withTimeout(
-        sb.functions.invoke('import-jobs', { body: { text } }),
-        35000,
-        'Scan'
-      );
-      if (error || data?.error) {
-        const message = data?.error || await readFunctionsError(error);
-        $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(message)}</div>`;
-        return;
-      }
-      renderImportJobsResults(data.newJobs || [], data.alreadyExists || []);
-    } catch (err) {
-      $('importJobsResultsArea').innerHTML = `<div class="empty">Couldn't scan: ${escapeHtml(String(err?.message || err))}</div>`;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Scan for new jobs';
-    }
-  });
-}
-
 // Apple-Watch-style dual ring: green fills 0→100% of allocated hours used;
 // once used exceeds allocated, the green ring stays full and a second,
 // smaller orange ring fills to show the overage.
