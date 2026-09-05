@@ -2206,6 +2206,24 @@ button.ghost:hover { color: var(--text); }
 .ring-card-dim { background: rgba(255,255,255,0.02); border-style: dashed; }
 .ring-card-dim .ring-role { color: var(--text); }
 
+/* Mini "Allocated" + "Used" ring pair shown directly on each Projects list
+   row — same ringSvg() as the big Project Detail rings, just scaled way
+   down and without a card wrapper, so it fits inline before the row's
+   Close/Delete buttons. */
+.mini-rings-cell { flex: none; }
+.mini-ring-pair { display: flex; align-items: flex-start; gap: 14px; }
+.mini-ring-block { display: flex; flex-direction: column; align-items: center; }
+.mini-ring-block .ring-svg { width: 40px; height: 40px; }
+.mini-ring-value { font-size: 10.5px; font-weight: 800; margin-top: 3px; }
+.mini-ring-value.over { color: var(--err); }
+.mini-ring-value.under { color: var(--ok); }
+.mini-ring-value.dim { color: var(--text-dim); }
+.mini-ring-label { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); margin-top: 1px; }
+@media (max-width: 640px) {
+  .mini-ring-label { display: none; }
+  .mini-ring-pair { gap: 10px; }
+}
+
 .contrib-row {
   margin-bottom: 14px;
   padding: 10px 12px;

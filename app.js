@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.18.2';
+const APP_VERSION = 'v3.20.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Health and Learning now show a big centered icon and picture-style tip cards for each topic instead of plain text, plus free video links where available.';
+const APP_UPDATE_NOTES = 'Projects list now shows an Allocated hours ring and a Used hours ring right on each row, so you can see progress before opening a project.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1610,6 +1610,7 @@ $('logoutBtn').addEventListener('click', async () => {
   $('chatOrbLabel').style.display = 'none';
   if ($('weatherBadge')) $('weatherBadge').style.display = 'none';
   weatherData = null;
+  projectsHoursCache = {};
   if ($('adminMoreRow')) $('adminMoreRow').style.display = 'none';
   closeAiChat();
   closeChatOverlay();
@@ -5192,6 +5193,58 @@ async function toggleProjectStatus(jobId, currentStatus) {
   populateJobIdDropdown();
 }
 
+// Small "Allocated" ring + "Used" ring shown right on each Projects list
+// row, so you can see progress without opening every project. Batched via
+// get-projects-hours-summary (one call for the whole visible list, not one
+// per row) and cached here — only re-fetched for job_ids not seen yet.
+let projectsHoursCache = {}; // jobId -> { allocatedHours, usedHours }
+async function refreshProjectsHoursCache(jobIds) {
+  if (!jobIds || !jobIds.length) return;
+  try {
+    const { data, error } = await sb.functions.invoke('get-projects-hours-summary', { body: { jobIds } });
+    if (error) throw error;
+    projectsHoursCache = { ...projectsHoursCache, ...(data?.hours || {}) };
+  } catch (err) {
+    console.warn('refreshProjectsHoursCache failed (row rings will just stay blank):', err);
+  }
+}
+function miniProjectHoursRings(jobId) {
+  const h = projectsHoursCache[jobId];
+  const allocated = h?.allocatedHours || 0;
+  const used = h?.usedHours || 0;
+  const hasAllocated = !!h && allocated > 0;
+  const hasUsed = !!h && (allocated > 0 || used > 0);
+  const isOver = hasUsed && allocated > 0 && used > allocated;
+  const ringOpts = { size: 44, stroke: 5 };
+  return `
+    <div class="mini-ring-pair">
+      <div class="mini-ring-block">
+        ${ringSvg(allocated, allocated, hasAllocated, ringOpts)}
+        <div class="mini-ring-value ${hasAllocated ? 'under' : 'dim'}">${hasAllocated ? `${allocated}h` : '—'}</div>
+        <div class="mini-ring-label">Allocated</div>
+      </div>
+      <div class="mini-ring-block">
+        ${ringSvg(used, allocated, hasUsed, ringOpts)}
+        <div class="mini-ring-value ${!hasUsed ? 'dim' : (isOver ? 'over' : 'under')}">${hasUsed ? `${used}h` : '—'}</div>
+        <div class="mini-ring-label">Used</div>
+      </div>
+    </div>
+  `;
+}
+// After the list itself renders (fast, from data already on hand), quietly
+// fill in just the rings for whichever rows aren't in the cache yet — a
+// second render pass, targeted at only the ring cells so the rest of the
+// list (scroll position, search focus) is undisturbed.
+function updateProjectRingsInPlace(jobIds) {
+  jobIds.forEach((jobId) => {
+    const cell = document.querySelector(`[data-mini-rings-for="${cssEscapeAttr(jobId)}"]`);
+    if (cell) cell.innerHTML = miniProjectHoursRings(jobId);
+  });
+}
+function cssEscapeAttr(v) {
+  return window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&');
+}
+
 async function renderProjectsList(isRetry = false) {
   const wrap = $('projectsListArea');
   if (!wrap) return;
@@ -5224,6 +5277,7 @@ async function renderProjectsList(isRetry = false) {
         ${r.client ? `<div class="entry-meta">${escapeHtml(r.client)}</div>` : ''}
         ${r.received_date ? `<div class="entry-meta">${escapeHtml(r.received_date)}</div>` : ''}
       </div>
+      <div class="mini-rings-cell" data-mini-rings-for="${escapeHtml(r.job_id)}">${miniProjectHoursRings(r.job_id)}</div>
       ${isAdmin ? `<button type="button" class="ghost" data-toggle-status="${escapeHtml(r.job_id)}" data-status="${escapeHtml(r.status || 'active')}" style="font-size:11px;">${isClosed ? 'Reopen' : 'Close'}</button>` : ''}
       ${isAdmin ? `<button type="button" class="ghost" data-delete-project="${escapeHtml(r.job_id)}">✕</button>` : ''}
     </div>
@@ -5250,6 +5304,18 @@ async function renderProjectsList(isRetry = false) {
       populateJobIdDropdown();
     });
   });
+
+  // The list itself just opened at full speed using whatever's already
+  // cached; now quietly fetch hours for any rows not seen before (first
+  // open covers everyone currently visible in one batch — a later search/
+  // filter re-render normally finds nothing missing here at all).
+  const visibleIds = rows.map((r) => r.job_id);
+  const missingIds = visibleIds.filter((id) => !projectsHoursCache[id]);
+  if (missingIds.length) {
+    refreshProjectsHoursCache(missingIds).then(() => {
+      if ($('projectsOverlay')?.classList.contains('show')) updateProjectRingsInPlace(visibleIds);
+    });
+  }
 }
 
 if ($('createProjectBtn')) {
@@ -8327,6 +8393,84 @@ const HEALTH_CATEGORIES = [
     ],
   },
   {
+    key: 'hydration', icon: '💧', label: 'Hydration',
+    tips: [
+      { icon: '🚰', text: "Drink through the day — don't wait until you feel thirsty." },
+      { icon: '🟡', text: 'Dark urine is an early sign you need more water.' },
+      { icon: '🔥', text: 'Heat or physical work means you need noticeably more than usual.' },
+      { icon: '🥤', text: 'Water first — sports drinks only matter for long, hard, sweaty work.' },
+    ],
+    links: [
+      { label: 'CDC — water & healthier drinks', url: 'https://www.cdc.gov/healthy-weight-growth/foods-drinks/water-and-healthier-drinks.html' },
+      { label: 'Mayo Clinic — water basics', url: 'https://www.mayoclinic.org/healthy-lifestyle/nutrition-and-healthy-eating/in-depth/water/art-20044256' },
+    ],
+  },
+  {
+    key: 'heat', icon: '🌡️', label: 'Heat & Sun Safety',
+    tips: [
+      { icon: '⚠️', text: 'Dizziness, nausea, or stopping sweating in heat — treat as an emergency.' },
+      { icon: '👕', text: 'Light, loose, breathable clothing when working outdoors.' },
+      { icon: '🌳', text: 'Shade breaks during the hottest part of the day, whenever possible.' },
+      { icon: '🧢', text: 'A hat and sunscreen matter as much as water on a hot site.' },
+    ],
+    links: [
+      { label: 'OSHA — heat exposure', url: 'https://www.osha.gov/heat-exposure' },
+      { label: 'WHO — heat and health', url: 'https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health' },
+    ],
+  },
+  {
+    key: 'posture', icon: '🧍', label: 'Back & Posture',
+    tips: [
+      { icon: '🏋️', text: 'Lift with your legs, not your back — keep the load close to your body.' },
+      { icon: '🌀', text: 'Avoid twisting your spine while carrying or lifting something heavy.' },
+      { icon: '🪑', text: 'Stretch or change position if you sit or stand still for long stretches.' },
+      { icon: '💻', text: 'Screens roughly at eye level — looking down all day adds up on the neck.' },
+    ],
+    links: [
+      { label: 'NHS — back pain', url: 'https://www.nhs.uk/conditions/back-pain/' },
+      { label: 'OSHA — ergonomics', url: 'https://www.osha.gov/ergonomics' },
+    ],
+  },
+  {
+    key: 'hearing', icon: '👂', label: 'Hearing Protection',
+    tips: [
+      { icon: '🎧', text: 'Ear protection around loud machinery — every time, not just sometimes.' },
+      { icon: '📉', text: 'Loud noise over years causes hearing loss you cannot get back.' },
+      { icon: '🤫', text: 'Give your ears quiet recovery time after a loud shift.' },
+      { icon: '🩺', text: 'A periodic hearing check catches damage before you notice it yourself.' },
+    ],
+    links: [
+      { label: 'OSHA — noise', url: 'https://www.osha.gov/noise' },
+      { label: 'CDC — preventing hearing loss', url: 'https://www.cdc.gov/hearing-loss-children/php/prevention/index.html' },
+    ],
+  },
+  {
+    key: 'eyesafety', icon: '👁️', label: 'Eye Safety',
+    tips: [
+      { icon: '🥽', text: 'Proper eye protection for welding, grinding, or cutting — always.' },
+      { icon: '🚫', text: 'Never look directly at a welding arc, even briefly, even with sunglasses.' },
+      { icon: '🚿', text: 'Rinse immediately if a chemical or debris gets in the eye, then seek help.' },
+      { icon: '🔍', text: 'Regular eye checkups catch strain or damage early.' },
+    ],
+    links: [
+      { label: 'OSHA — eye & face protection', url: 'https://www.osha.gov/eye-face-protection' },
+      { label: 'American Academy of Ophthalmology', url: 'https://www.aao.org/eye-health' },
+    ],
+  },
+  {
+    key: 'firstaid', icon: '🩹', label: 'First Aid Basics',
+    tips: [
+      { icon: '📍', text: 'Know where the nearest first aid kit and AED actually are.' },
+      { icon: '❤️', text: 'Basic CPR is a skill worth learning once, properly, from a real course.' },
+      { icon: '🩸', text: 'Clean and treat small cuts and burns right away, don\'t wait.' },
+      { icon: '📞', text: 'Know your workplace\'s emergency contact and reporting process in advance.' },
+    ],
+    links: [
+      { label: 'Red Cross — first aid', url: 'https://www.redcross.org/take-a-class/first-aid' },
+      { label: 'St John Ambulance — first aid advice', url: 'https://www.sja.org.uk/get-advice/first-aid-advice/' },
+    ],
+  },
+  {
     key: 'findcare', icon: '🩺', label: 'Health Info',
     tips: [
       { icon: 'ℹ️', text: 'General information only — see a licensed doctor for an actual concern.' },
@@ -8434,6 +8578,80 @@ const LEARNING_CATEGORIES = [
       { label: 'Alison — Health & Safety', url: 'https://alison.com/courses/health-and-safety' },
       { label: 'OSHA — training resources', url: 'https://www.osha.gov/training' },
       { label: 'UK HSE — guidance', url: 'https://www.hse.gov.uk/' },
+    ],
+  },
+  {
+    key: 'cloud', icon: '☁️', label: 'Cloud Computing',
+    tips: [
+      { icon: '🟠', text: 'AWS Skill Builder — genuinely free digital training, no cost to start.' },
+      { icon: '🔵', text: 'Microsoft Learn — free Azure learning paths with progress tracking.' },
+      { icon: '🟢', text: 'Google Cloud Skills Boost — free hands-on labs to try.' },
+    ],
+    links: [
+      { label: 'AWS Skill Builder', url: 'https://skillbuilder.aws/' },
+      { label: 'Microsoft Learn — Azure', url: 'https://learn.microsoft.com/en-us/training/azure/' },
+      { label: 'Google Cloud Skills Boost', url: 'https://www.cloudskillsboost.google/' },
+    ],
+  },
+  {
+    key: 'networking', icon: '🌐', label: 'Networking & IT',
+    tips: [
+      { icon: '🖧', text: 'Cisco Networking Academy — free "Networking Basics" course.' },
+      { icon: '🎬', text: 'Professor Messer — free, well-known CompTIA Network+ video series.' },
+      { icon: '🧪', text: 'Free Packet Tracer tool lets you practice real network setups.' },
+    ],
+    video: { label: 'Professor Messer on YouTube', url: 'https://www.youtube.com/@professormesser' },
+    links: [
+      { label: 'Cisco — Networking Basics', url: 'https://www.netacad.com/courses/networking-basics' },
+      { label: 'Professor Messer', url: 'https://www.professormesser.com/' },
+    ],
+  },
+  {
+    key: 'projectmgmt', icon: '📋', label: 'Project Management',
+    tips: [
+      { icon: '🎥', text: "Google's Project Management course is free to audit on Coursera." },
+      { icon: '🏛️', text: 'PMI shares free articles and resources even before you\'re a member.' },
+      { icon: '📝', text: 'Free planning templates are widely available and a great place to start.' },
+    ],
+    links: [
+      { label: 'Coursera — Google Project Management', url: 'https://www.coursera.org/professional-certificates/google-project-management' },
+      { label: 'PMI — resources', url: 'https://www.pmi.org/' },
+    ],
+  },
+  {
+    key: 'excel', icon: '📊', label: 'Excel & Data Skills',
+    tips: [
+      { icon: '📗', text: "Microsoft's own free Excel training covers everything from basics up." },
+      { icon: '📄', text: 'Google offers free training for Sheets and the rest of Workspace.' },
+      { icon: '📈', text: 'freeCodeCamp has free courses on data analysis too, not just coding.' },
+    ],
+    links: [
+      { label: 'Microsoft — Excel training', url: 'https://support.microsoft.com/en-us/excel' },
+      { label: 'Google Workspace Learning Center', url: 'https://support.google.com/a/users/answer/9282958' },
+    ],
+  },
+  {
+    key: 'communication', icon: '🗣️', label: 'Communication & English',
+    tips: [
+      { icon: '📻', text: 'BBC Learning English is completely free, for every level.' },
+      { icon: '🦉', text: 'Duolingo is free for daily practice in short bursts.' },
+      { icon: '✍️', text: 'Clear written communication is its own skill worth practicing.' },
+    ],
+    links: [
+      { label: 'BBC Learning English', url: 'https://www.bbc.co.uk/learningenglish' },
+      { label: 'Duolingo', url: 'https://www.duolingo.com/' },
+    ],
+  },
+  {
+    key: 'welding', icon: '⚓', label: 'Welding & Marine Trades',
+    tips: [
+      { icon: '🏛️', text: 'American Welding Society shares free resources and guidance.' },
+      { icon: '🎬', text: 'Well-known welding YouTube channels cover real technique, free.' },
+      { icon: '⚓', text: 'IMCA publishes free guidance for marine and offshore work.' },
+    ],
+    links: [
+      { label: 'American Welding Society', url: 'https://www.aws.org/' },
+      { label: 'IMCA — marine contractors', url: 'https://www.imca-int.com/' },
     ],
   },
 ];
