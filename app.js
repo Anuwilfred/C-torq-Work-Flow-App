@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.24.1';
+const APP_VERSION = 'v3.25.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Removed the old "Add jobs from WhatsApp" import (jobs now come from the Google Sheet). Data Feed now has Manage Job Types and Manage Job Categories built right in.';
+const APP_UPDATE_NOTES = 'Project Detail\'s "Time by task" is now a full Project Analytics view — colored bar charts for busiest task, department, and top contributors, plus stat chips at a glance. The Share to group image now includes the task breakdown too.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6282,57 +6282,151 @@ async function openProjectDetail(jobId, name) {
   renderDeptHoursManager(jobId, departments);
 }
 
-// "Time by task" — what people actually spent hours on for this job
-// (Programming, IO mapping, Panel wiring, etc.), grouped the same way as
-// the description picker (Software/Commissioning/Panel/Design/Operations/
-// Marketing/Workshop/Other), computed server-side in get-project-report
-// from job_hours_ledger's description column. Bars are sized relative to
-// this job's own busiest task (there's no "budget" per task, unlike the
-// department rings above) — so it's a quick "where did the time go" read,
-// not a pass/fail one.
+// Color palette for the Project Analytics bars below — cycles by index so
+// colors stay stable per category/department/person regardless of name,
+// without needing a matching CSS variable for every hue. Plain hex so the
+// same palette can be reused by the canvas-based share image (see
+// buildProjectShareImage) where CSS variables aren't available.
+const PA_PALETTE = ['#e08a5f', '#5fb8e0', '#a78bfa', '#5fd0a8', '#f2b755', '#f27d70', '#7ea8f2', '#e05fb0'];
+function paColor(i) { return PA_PALETTE[((i % PA_PALETTE.length) + PA_PALETTE.length) % PA_PALETTE.length]; }
+
+// "Project Analytics" — the combined "where did the time actually go" view
+// for this job: which task/category people logged hours against (matched
+// server-side in get-project-report from job_hours_ledger's free-text
+// description against the tap-to-select job type list), which department
+// used the most time, and who the top contributors are. All three reuse
+// data get-project-report already returned in one call for this screen —
+// the only extra lookup is the category list (icons/colors), which is
+// cached after the first fetch. Bars are sized relative to this job's own
+// busiest item in each section (there's no "budget" per task, unlike the
+// department rings above) — this is a "where did the time go" read, not a
+// pass/fail one.
 async function renderProjectTaskBreakdown(data) {
   const wrap = $('projectTaskBreakdownArea');
   if (!wrap) return;
   const tasks = data.taskBreakdown || [];
   const untagged = Number(data.untaggedHours) || 0;
-  if (!tasks.length) {
-    wrap.innerHTML = untagged > 0
-      ? `<div class="empty">${untagged}h logged so far, but not tagged with any specific task yet — those entries used free-typed notes instead of the tap-to-select list.</div>`
-      : '<div class="empty">No hours logged yet.</div>';
+  const contributors = data.contributors || [];
+  const departments = (data.project?.departments || []).filter((d) => (Number(d.usedHours) || 0) > 0);
+
+  if (!tasks.length && !contributors.length && untagged <= 0) {
+    wrap.innerHTML = '<div class="empty">No hours logged yet.</div>';
     return;
   }
+
   const categories = await fetchJobDescCategories();
   const catMeta = jobDescCategoryMetaMap(categories);
-  const categoryOrder = categories.map((c) => c.key).concat(categories.some((c) => c.key === 'other') ? [] : ['other']);
-  const maxHours = Math.max(...tasks.map((t) => t.hours), 0.01);
-  const byCategory = {};
+  const categoryKeyOrder = categories.map((c) => c.key).concat(categories.some((c) => c.key === 'other') ? [] : ['other']);
+  const catColorIndex = {};
+  categoryKeyOrder.forEach((key, i) => { catColorIndex[key] = i; });
+
+  // ---- stat chips across the top: the four numbers ops usually wants first ----
+  const topTask = tasks.length ? [...tasks].sort((a, b) => b.hours - a.hours)[0] : null;
+  const catTotals = {};
   tasks.forEach((t) => {
     const cat = catMeta[t.category] ? t.category : 'other';
-    (byCategory[cat] = byCategory[cat] || []).push(t);
+    catTotals[cat] = (catTotals[cat] || 0) + t.hours;
   });
-  const sections = categoryOrder.filter((cat) => byCategory[cat]?.length).map((cat) => {
-    const meta = catMeta[cat];
-    const items = byCategory[cat];
-    const catTotal = Math.round(items.reduce((s, t) => s + t.hours, 0) * 100) / 100;
-    return `
-      <div class="task-category-block">
-        <div class="task-category-heading"><span>${meta.icon}</span> ${escapeHtml(meta.label)} <span class="task-category-total">${catTotal}h</span></div>
-        ${items.map((t) => `
-          <div class="task-bar-row">
-            <div class="task-bar-top">
-              <span class="task-bar-label">${escapeHtml(t.label)}</span>
-              <span class="task-bar-hours">${t.hours}h</span>
+  const topCatKey = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0] || null;
+  const topDept = departments.length ? [...departments].sort((a, b) => b.usedHours - a.usedHours)[0] : null;
+  const topContributor = contributors.length ? [...contributors].sort((a, b) => b.hours - a.hours)[0] : null;
+
+  const statChips = [
+    topTask ? { label: 'Busiest task', value: topTask.label, sub: `${Math.round(topTask.hours * 100) / 100}h` } : null,
+    topCatKey ? { label: 'Busiest category', value: `${catMeta[topCatKey].icon} ${catMeta[topCatKey].label}`, sub: `${Math.round(catTotals[topCatKey] * 100) / 100}h` } : null,
+    topDept ? { label: 'Busiest department', value: topDept.name, sub: `${Math.round(topDept.usedHours * 100) / 100}h` } : null,
+    topContributor ? { label: 'Top contributor', value: topContributor.name, sub: `${topContributor.hours}h` } : null,
+  ].filter(Boolean);
+  const statsHtml = statChips.length ? `<div class="pa-stats-row">${statChips.map((s) => `
+    <div class="pa-stat-chip">
+      <div class="pa-stat-label">${escapeHtml(s.label)}</div>
+      <div class="pa-stat-value">${escapeHtml(s.value)}</div>
+      <div class="pa-stat-sub">${escapeHtml(s.sub)}</div>
+    </div>
+  `).join('')}</div>` : '';
+
+  // ---- Time by task — flattened, sorted by hours, colored by category ----
+  let taskChartHtml = '';
+  if (tasks.length) {
+    const sortedTasks = [...tasks].sort((a, b) => b.hours - a.hours).slice(0, 12);
+    const maxTaskHours = Math.max(...sortedTasks.map((t) => t.hours), 0.01);
+    taskChartHtml = `
+      <div class="pa-section">
+        <div class="pa-section-title">📊 Time by task</div>
+        ${sortedTasks.map((t) => {
+          const cat = catMeta[t.category] ? t.category : 'other';
+          const color = paColor(catColorIndex[cat] ?? 0);
+          return `
+            <div class="pa-bar-row">
+              <div class="pa-bar-top">
+                <span class="pa-bar-label"><span class="pa-bar-dot" style="background:${color};"></span>${escapeHtml(t.label)}</span>
+                <span class="pa-bar-hours">${t.hours}h</span>
+              </div>
+              <div class="pa-bar-track"><div class="pa-bar-fill" style="width:${Math.max(4, Math.round((t.hours / maxTaskHours) * 100))}%; background:linear-gradient(90deg, ${color}, ${color}cc);"></div></div>
             </div>
-            <div class="task-bar-track"><div class="task-bar-fill" style="width:${Math.max(4, Math.round((t.hours / maxHours) * 100))}%"></div></div>
-          </div>
-        `).join('')}
+          `;
+        }).join('')}
+        ${untagged > 0 ? `<div class="pa-untagged-note">+ ${untagged}h logged with free-typed notes, not matching a specific task yet</div>` : ''}
       </div>
     `;
-  }).join('');
-  const untaggedNote = untagged > 0
-    ? `<div class="task-untagged-note">+ ${untagged}h logged with free-typed notes, not matching a specific task</div>`
-    : '';
-  wrap.innerHTML = sections + untaggedNote;
+  } else if (untagged > 0) {
+    taskChartHtml = `
+      <div class="pa-section">
+        <div class="pa-section-title">📊 Time by task</div>
+        <div class="pa-untagged-note">${untagged}h logged so far, but not tagged with any specific task yet — those entries used free-typed notes instead of the tap-to-select list.</div>
+      </div>
+    `;
+  }
+
+  // ---- Time by department — mini chart, reuses the same data as the rings above ----
+  let deptChartHtml = '';
+  if (departments.length) {
+    const sortedDepts = [...departments].sort((a, b) => b.usedHours - a.usedHours).slice(0, 8);
+    const maxDeptHours = Math.max(...sortedDepts.map((d) => d.usedHours), 0.01);
+    deptChartHtml = `
+      <div class="pa-section">
+        <div class="pa-section-title">🏢 Time by department</div>
+        ${sortedDepts.map((d, i) => {
+          const color = paColor(i + 4);
+          return `
+            <div class="pa-bar-row">
+              <div class="pa-bar-top">
+                <span class="pa-bar-label"><span class="pa-bar-dot" style="background:${color};"></span>${escapeHtml(d.name)}</span>
+                <span class="pa-bar-hours">${d.usedHours}h${d.allocatedHours > 0 ? `<span class="pa-bar-sub"> / ${d.allocatedHours}h</span>` : ''}</span>
+              </div>
+              <div class="pa-bar-track"><div class="pa-bar-fill" style="width:${Math.max(4, Math.round((d.usedHours / maxDeptHours) * 100))}%; background:linear-gradient(90deg, ${color}, ${color}cc);"></div></div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // ---- Top contributors — who actually put in the hours ----
+  let peopleChartHtml = '';
+  if (contributors.length) {
+    const sortedPeople = [...contributors].sort((a, b) => b.hours - a.hours).slice(0, 6);
+    const maxPersonHours = Math.max(...sortedPeople.map((c) => c.hours), 0.01);
+    peopleChartHtml = `
+      <div class="pa-section">
+        <div class="pa-section-title">🙋 Top contributors</div>
+        ${sortedPeople.map((c, i) => {
+          const color = paColor(i + 2);
+          return `
+            <div class="pa-bar-row">
+              <div class="pa-bar-top">
+                <span class="pa-bar-label"><span class="pa-bar-dot" style="background:${color};"></span>${escapeHtml(c.name)}<span class="pa-bar-sub">${escapeHtml(c.departmentName || '')}</span></span>
+                <span class="pa-bar-hours">${c.hours}h</span>
+              </div>
+              <div class="pa-bar-track"><div class="pa-bar-fill" style="width:${Math.max(4, Math.round((c.hours / maxPersonHours) * 100))}%; background:linear-gradient(90deg, ${color}, ${color}cc);"></div></div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  wrap.innerHTML = statsHtml + taskChartHtml + deptChartHtml + peopleChartHtml;
 }
 
 // Admin-only cleanup tool for exactly the kind of mistake that started this
@@ -6613,13 +6707,22 @@ function roundRectPath(ctx, x, y, w, h, r) {
 async function buildProjectShareImage(data) {
   const { project, contributors = [] } = data;
   const departments = project.departments || [];
+  // Same "Time by task" data the on-screen Project Analytics card uses —
+  // top 8 by hours, so the shared image gives the full picture (task,
+  // department, and people) instead of just department rings + contributors.
+  const shareTasks = [...(data.taskBreakdown || [])].sort((a, b) => b.hours - a.hours).slice(0, 8);
+  const shareUntagged = Number(data.untaggedHours) || 0;
   const W = 720;
   const RING_ROW_H = 210;
   const ringCols = Math.min(Math.max(departments.length, 1), 3);
   const ringRows = Math.max(1, Math.ceil(departments.length / ringCols));
   const HEADER_H = 90 + ringRows * RING_ROW_H;
   const ROW_H = 56;
-  const H = HEADER_H + Math.max(contributors.length, 1) * ROW_H + 90;
+  const TASK_ROW_H = 44;
+  const taskSectionH = shareTasks.length
+    ? (54 + shareTasks.length * TASK_ROW_H + (shareUntagged > 0 ? 22 : 0))
+    : (shareUntagged > 0 ? 90 : 0);
+  const H = HEADER_H + Math.max(contributors.length, 1) * ROW_H + taskSectionH + 90;
 
   const canvas = document.createElement('canvas');
   const scale = 2;
@@ -6714,6 +6817,59 @@ async function buildProjectShareImage(data) {
       ctx.fill();
 
       y += ROW_H;
+    }
+  }
+
+  // ---- Time by task — same top-8-by-hours data as the on-screen chart ----
+  if (shareTasks.length || shareUntagged > 0) {
+    const taskY = y + 20;
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.beginPath();
+    ctx.moveTo(40, taskY - 14);
+    ctx.lineTo(W - 40, taskY - 14);
+    ctx.stroke();
+
+    ctx.fillStyle = '#f5f4f0';
+    ctx.font = '700 14px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.fillText('Time by task', 40, taskY + 8);
+
+    let ty = taskY + 40;
+    if (!shareTasks.length) {
+      ctx.fillStyle = '#a8a6a2';
+      ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillText(`${shareUntagged}h logged, not tagged with a specific task yet.`, 40, ty);
+    } else {
+      const maxTaskHours = Math.max(...shareTasks.map((t) => t.hours), 0.01);
+      shareTasks.forEach((t, i) => {
+        const barX = 40, barW = W - 80, barY = ty + 12, barH = 8;
+        const color = PA_PALETTE[i % PA_PALETTE.length];
+
+        ctx.font = '700 13.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+        ctx.fillStyle = '#f5f4f0';
+        ctx.fillText(t.label, barX, ty);
+
+        ctx.textAlign = 'right';
+        ctx.font = '800 13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+        ctx.fillStyle = '#f5f4f0';
+        ctx.fillText(`${t.hours}h`, W - 40, ty);
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        roundRectPath(ctx, barX, barY, barW, barH, barH / 2);
+        ctx.fill();
+
+        const fillW = Math.max(barH, barW * (t.hours / maxTaskHours));
+        ctx.fillStyle = color;
+        roundRectPath(ctx, barX, barY, fillW, barH, barH / 2);
+        ctx.fill();
+
+        ty += TASK_ROW_H;
+      });
+      if (shareUntagged > 0) {
+        ctx.fillStyle = '#a8a6a2';
+        ctx.font = '11.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+        ctx.fillText(`+ ${shareUntagged}h logged with free-typed notes, not matching a specific task`, 40, ty + 4);
+      }
     }
   }
 
