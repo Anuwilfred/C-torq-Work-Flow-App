@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.27.0';
+const APP_VERSION = 'v3.26.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Analytics\' pie chart and 3D surface now always show their full chart environment (all categories/departments, budget-driven coloring) even before any hours are tagged, instead of staying hidden.';
+const APP_UPDATE_NOTES = 'Category share now breaks down by actual task (not just the broad category) with a total-hours readout in the middle, and the 3D surface always shows its full department/category grid with richer, more vivid shading.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6432,48 +6432,68 @@ async function renderProjectTaskBreakdown(data) {
   // wrap's innerHTML) since Plotly needs a stable DOM node it fully owns —
   // re-rendering wrap above would otherwise destroy the chart's container
   // out from under it and throw on the next Plotly call.
-  renderProjectCategoryPie(catTotals, catMeta, categoryKeyOrder);
+  renderProjectCategoryPie(tasks, catMeta, categoryKeyOrder);
   renderProjectSurfaceChart(data.taskMatrix || [], data.project?.departments || [], catMeta, categoryKeyOrder);
 }
 
-// "Category share" pie — the same category totals used for the "Busiest
-// category" stat chip above, visualized as a whole-project split. Always
-// draws SOMETHING (the "environment") even before any hours are tagged —
-// an even placeholder ring across every category that exists — rather than
-// hiding the chart outright, so it's obvious the feature is there and
-// waiting, and it fills in for real the moment tagged hours start coming in.
-function renderProjectCategoryPie(catTotals, catMeta, categoryKeyOrder) {
+// "Category share" pie — sliced by the actual TASK (Programming, IO mapping,
+// etc.), not just the parent category, so it's clear what specifically ate
+// the hours, not only which broad bucket it fell in. Each slice is still
+// colored per-task and its hover/label carries the parent category too. A
+// bold total-hours readout sits in the donut hole (gauge-style) instead of
+// a plain empty center. Always draws SOMETHING (the "environment") even
+// before any hours are tagged — an even placeholder ring across every
+// category that exists — rather than hiding the chart outright, so it's
+// obvious the feature is there and waiting, filling in for real the moment
+// tagged hours start coming in.
+function renderProjectCategoryPie(tasks, catMeta, categoryKeyOrder) {
   const section = $('projectPieSection');
   const el = $('projectCategoryPie');
   if (!section || !el || typeof Plotly === 'undefined') { if (section) section.style.display = 'none'; return; }
-  const realEntries = Object.entries(catTotals || {}).filter(([, h]) => h > 0);
-  const hasData = realEntries.length > 0;
-  const cats = hasData ? realEntries.map(([cat]) => cat) : categoryKeyOrder;
-  if (!cats.length) { section.style.display = 'none'; return; }
+  const realTasks = (tasks || []).filter((t) => t.hours > 0);
+  const hasData = realTasks.length > 0;
+  if (!hasData && !categoryKeyOrder.length) { section.style.display = 'none'; return; }
   section.style.display = '';
 
-  const labels = cats.map((cat) => `${catMeta[cat]?.icon || ''} ${catMeta[cat]?.label || cat}`.trim());
-  const values = hasData ? realEntries.map(([, h]) => Math.round(h * 100) / 100) : cats.map(() => 1);
-  const colors = cats.map((_, i) => paColor(i));
+  let labels; let values; let colors; let customdata;
+  if (hasData) {
+    const sorted = [...realTasks].sort((a, b) => b.hours - a.hours);
+    labels = sorted.map((t) => t.label);
+    values = sorted.map((t) => Math.round(t.hours * 100) / 100);
+    colors = sorted.map((_, i) => paColor(i));
+    customdata = sorted.map((t) => `${catMeta[t.category]?.icon || ''} ${catMeta[t.category]?.label || t.category}`.trim());
+  } else {
+    labels = categoryKeyOrder.map((cat) => `${catMeta[cat]?.icon || ''} ${catMeta[cat]?.label || cat}`.trim());
+    values = categoryKeyOrder.map(() => 1);
+    colors = categoryKeyOrder.map((_, i) => paColor(i));
+    customdata = labels.map(() => '');
+  }
+  const totalHours = hasData ? Math.round(values.reduce((s, v) => s + v, 0) * 100) / 100 : 0;
 
   Plotly.newPlot(el, [{
     type: 'pie',
     labels,
     values,
+    customdata,
     marker: { colors, line: { color: '#141414', width: 2 } },
     opacity: hasData ? 1 : 0.32,
     textinfo: hasData ? 'label+percent' : 'none',
+    textposition: 'outside',
+    automargin: true,
     textfont: { color: '#f5f4f0', size: 11 },
-    hovertemplate: hasData ? '%{label}<br>%{value}h (%{percent})<extra></extra>' : '%{label}<br>No tagged hours yet<extra></extra>',
-    hole: 0.35,
+    hovertemplate: hasData ? '<b>%{label}</b><br>%{customdata}<br>%{value}h (%{percent})<extra></extra>' : '%{label}<br>No tagged hours yet<extra></extra>',
+    hole: 0.42,
   }], {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
     showlegend: false,
-    margin: { t: 10, b: 10, l: 10, r: 10 },
+    margin: { t: 30, b: 30, l: 30, r: 30 },
     font: { color: '#f5f4f0' },
-    annotations: hasData ? [] : [{
-      text: 'Waiting for tagged hours', showarrow: false, x: 0.5, y: 0.5,
+    annotations: [hasData ? {
+      text: `<b>${totalHours}h</b><br>logged`, showarrow: false, x: 0.5, y: 0.5,
+      font: { size: 16, color: '#f5f4f0' },
+    } : {
+      text: 'Waiting for<br>tagged hours', showarrow: false, x: 0.5, y: 0.5,
       font: { size: 11.5, color: 'rgba(245,244,240,0.75)' },
     }],
   }, { displayModeBar: false, responsive: true });
@@ -6510,12 +6530,13 @@ function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKey
   const deptNameById = {};
   departments.forEach((d) => { deptNameById[d.id] = d.name; });
 
-  // Columns: every category that has at least one tagged cell, or — before
-  // anything's tagged yet — every category that exists at all, so the full
-  // axis is visible from the start.
-  const catsPresent = new Set(taskMatrix.map((c) => c.category));
-  const cats = categoryKeyOrder.filter((c) => catsPresent.has(c));
-  const catsToShow = cats.length ? cats : categoryKeyOrder;
+  // Columns: ALWAYS every category that exists, whether or not it has a
+  // tagged cell yet — not just the ones with data so far. A grid with only
+  // one real column/row is degenerate (Plotly can't shade a surface between
+  // a single point), which is what made this look like a bare, colorless
+  // wireframe when only one category had hours logged. Showing the full
+  // axis every time guarantees an actual multi-cell surface to shade.
+  const catsToShow = categoryKeyOrder;
   if (!catsToShow.length) { section.style.display = 'none'; return; }
   section.style.display = '';
 
@@ -6566,16 +6587,26 @@ function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKey
     colorscale: 'Jet',
     cmin: 0,
     cmax: 1,
-    showscale: false,
-    contours: { z: { show: false } },
+    showscale: true,
+    colorbar: {
+      title: { text: 'Budget load', font: { color: '#cfcdc9', size: 10 } },
+      tickfont: { color: '#cfcdc9', size: 9 },
+      len: 0.7, thickness: 12, x: 1,
+    },
+    // Floor-projected color contour (a CFD/heat-map touch) plus a lit,
+    // glossy surface instead of a flat matte one — this is what actually
+    // makes the color read as vivid rather than a bare wireframe.
+    contours: { z: { show: true, usecolormap: true, project: { z: true }, highlightcolor: '#fff' } },
+    lighting: { ambient: 0.65, diffuse: 0.85, roughness: 0.4, specular: 0.55, fresnel: 0.2 },
+    lightposition: { x: 100, y: 150, z: 200 },
   }], {
     paper_bgcolor: 'transparent',
     font: { color: '#cfcdc9', size: 10 },
     margin: { t: 10, b: 10, l: 10, r: 10 },
     scene: {
-      xaxis: { title: 'Task type', tickvals: catsToShow.map((_, i) => i), ticktext: catsToShow.map((c) => catMeta[c]?.label || c), color: '#cfcdc9' },
-      yaxis: { title: 'Department', tickvals: deptIds.map((_, i) => i), ticktext: deptIds.map((id) => deptNameById[id] || 'Unknown'), color: '#cfcdc9' },
-      zaxis: { title: 'Hours', color: '#cfcdc9' },
+      xaxis: { title: 'Task type', tickvals: catsToShow.map((_, i) => i), ticktext: catsToShow.map((c) => catMeta[c]?.label || c), color: '#cfcdc9', gridcolor: 'rgba(207,205,201,0.25)' },
+      yaxis: { title: 'Department', tickvals: deptIds.map((_, i) => i), ticktext: deptIds.map((id) => deptNameById[id] || 'Unknown'), color: '#cfcdc9', gridcolor: 'rgba(207,205,201,0.25)' },
+      zaxis: { title: 'Hours', color: '#cfcdc9', gridcolor: 'rgba(207,205,201,0.25)' },
       bgcolor: 'transparent',
     },
   }, { displayModeBar: false, responsive: true });
@@ -8842,8 +8873,11 @@ function setUpdateDot(state) {
 
 // Glass popup under the update icon spelling out what changed, instead of
 // leaving people to guess from a plain dot. Shows on its own once a new
-// build finishes downloading; fades away after a while, or the next time
-// anyone taps/touches anywhere at all.
+// build finishes downloading, and STAYS UP — long enough to actually read —
+// closing only when someone taps the ✕, taps somewhere OUTSIDE the popup
+// itself, or the longer timeout below runs out. (Previously it dismissed on
+// literally the next tap anywhere on the page, which meant it often
+// vanished before anyone had a chance to read it.)
 function showUpdatePopup() {
   const popup = $('updatePopup');
   if (!popup) return;
@@ -8851,17 +8885,29 @@ function showUpdatePopup() {
   $('updatePopupNotes').textContent = pendingUpdateNotes || 'Tap the refresh icon above to apply it.';
   popup.classList.add('show');
   clearTimeout(showUpdatePopup._t);
-  showUpdatePopup._t = setTimeout(hideUpdatePopup, 10000);
-  // pointerdown (not click) so this also dismisses on a touch tap anywhere,
-  // not just a mouse click — { once: true } means it never needs manual
-  // removal, and re-showing the popup later just adds a fresh one-shot.
-  document.addEventListener('pointerdown', hideUpdatePopup, { once: true });
+  showUpdatePopup._t = setTimeout(hideUpdatePopup, 25000);
+  // Only dismiss on a tap OUTSIDE the popup (and outside the update icon
+  // itself, since tapping that is how you apply the update) — tapping
+  // inside the popup to read it no longer closes it.
+  document.addEventListener('pointerdown', dismissUpdatePopupIfOutside, { once: true });
+}
+function dismissUpdatePopupIfOutside(e) {
+  const popup = $('updatePopup');
+  const btn = $('updateStatusBtn');
+  if (popup && (popup.contains(e.target) || (btn && btn.contains(e.target)))) {
+    // Tap landed inside the popup or on the update icon — keep it open and
+    // keep listening for the next tap instead.
+    document.addEventListener('pointerdown', dismissUpdatePopupIfOutside, { once: true });
+    return;
+  }
+  hideUpdatePopup();
 }
 function hideUpdatePopup() {
   const popup = $('updatePopup');
   if (popup) popup.classList.remove('show');
   clearTimeout(showUpdatePopup._t);
 }
+$('updatePopupClose')?.addEventListener('click', hideUpdatePopup);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
