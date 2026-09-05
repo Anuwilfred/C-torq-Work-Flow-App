@@ -176,6 +176,10 @@
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
         </button>
+        <button type="button" class="home-tile" data-open="about">
+          <span class="home-tile-icon">ℹ️</span>
+          <span class="home-tile-label">About</span>
+        </button>
       </div>
 
       <!-- TODAY'S JOB BOARD — a message-board style broadcast, visible to
@@ -1530,6 +1534,58 @@
     </div>
     <div class="panel-body">
       <div id="weatherDetailArea"><div class="empty">Getting your local weather…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ABOUT — shows the app name and the currently-running version, plus a
+     one-tap "Start Tutorial" button that launches the beginner walkthrough
+     (tutorialOverlay below). This is the entry point new/confused users are
+     told to tap first. -->
+<div id="aboutOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="aboutOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>About</strong>
+      <button type="button" class="ghost" data-close="about">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="about-hero">
+        <div class="about-hero-icon">🧭</div>
+        <div class="about-hero-name">C-TORQ Digital Organization</div>
+        <div id="aboutVersionText" class="about-hero-version">Version —</div>
+      </div>
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">What's new</strong>
+        <p id="aboutUpdateNotes" class="hint" style="margin-top:6px;"></p>
+      </div>
+      <div class="card glass" style="margin-top:14px; text-align:center;">
+        <strong style="font-size:14px;">New here?</strong>
+        <p class="hint" style="margin-top:6px;">Take a quick guided tour — it'll point out where everything is, one step at a time.</p>
+        <button type="button" id="startTutorialBtn" class="primary" style="width:100%; margin-top:12px;">▶ Start Tutorial</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TUTORIAL — a beginner walkthrough driven by TUTORIAL_STEPS in app.js.
+     #tutorialSpotlight is a single positioned box whose huge box-shadow
+     dims the whole screen while leaving a see-through "hole" exactly over
+     whatever element the current step points at; #tutorialCard is a fixed
+     coach-mark with the explanation + Back/Next/Skip. -->
+<div id="tutorialOverlay" class="tutorial-overlay" style="display:none;">
+  <div id="tutorialSpotlight" class="tutorial-spotlight"></div>
+  <div id="tutorialCard" class="tutorial-card">
+    <div class="tutorial-card-progress"><span id="tutorialStepNum">1</span> / <span id="tutorialStepTotal">1</span></div>
+    <div class="tutorial-card-icon" id="tutorialCardIcon">✨</div>
+    <div class="tutorial-card-title" id="tutorialCardTitle"></div>
+    <div class="tutorial-card-text" id="tutorialCardText"></div>
+    <div class="tutorial-card-actions">
+      <button type="button" id="tutorialSkipBtn" class="tutorial-btn-ghost">Skip tour</button>
+      <div class="tutorial-card-nav">
+        <button type="button" id="tutorialBackBtn" class="tutorial-btn-ghost">Back</button>
+        <button type="button" id="tutorialNextBtn" class="tutorial-btn-primary">Next</button>
+      </div>
     </div>
   </div>
 </div>

@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.20.0';
+const APP_VERSION = 'v3.21.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Projects list now shows an Allocated hours ring and a Used hours ring right on each row, so you can see progress before opening a project.';
+const APP_UPDATE_NOTES = 'New: an About screen (Home → About) showing the app version, plus a Start Tutorial button that guides new users around the app step by step.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4518,6 +4518,7 @@ const PANEL_IDS = {
   liveDrivers: ['liveDriversOverlay', 'liveDriversOverlayBackdrop'],
   specialRequest: ['specialRequestOverlay', 'specialRequestOverlayBackdrop'],
   weather: ['weatherOverlay', 'weatherOverlayBackdrop'],
+  about: ['aboutOverlay', 'aboutOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -4569,6 +4570,7 @@ function openPanel(name, opts = {}) {
   if (name === 'health') renderHealthPanel();
   if (name === 'learning') renderLearningPanel();
   if (name === 'weather') renderWeatherDetail();
+  if (name === 'about') renderAboutPanel();
 }
 function closePanel(name) {
   const ids = PANEL_IDS[name];
@@ -4595,6 +4597,124 @@ if ($('departmentDetailBackBtn')) {
 if ($('quotationDetailBackBtn')) {
   $('quotationDetailBackBtn').addEventListener('click', () => { closePanel('quotationDetail'); openPanel('quotations'); });
 }
+
+// =====================================================================
+// ABOUT + TUTORIAL — a beginner-friendly entry point (Home → About) that
+// shows the currently-running app version, then a "Start Tutorial" button
+// that launches a guided spotlight tour pointing out where every feature
+// on the Home screen lives.
+// =====================================================================
+
+function renderAboutPanel() {
+  if ($('aboutVersionText')) $('aboutVersionText').textContent = `Version ${APP_VERSION}`;
+  if ($('aboutUpdateNotes')) $('aboutUpdateNotes').textContent = APP_UPDATE_NOTES || 'No release notes for this version.';
+}
+
+// Each step points at one element already on the Home screen (a home tile,
+// a nav tab, or a header icon). `optional` steps are silently skipped if
+// their target isn't in the DOM or isn't currently visible (e.g. an
+// admin-only button for a non-admin, or a weather badge that hasn't loaded
+// yet) — see tutorialVisibleSteps().
+const TUTORIAL_STEPS = [
+  { selector: 'nav.tabs [data-tab="home"]', icon: '🏠', title: 'Welcome!', text: "This is Home — everything in the app is one tap away from here. Let's take a quick look around." },
+  { selector: '#updateStatusBtn', icon: '🔄', title: 'App updates', text: 'Tap here anytime to check whether a newer version is ready to install.' },
+  { selector: '#weatherBadge', icon: '🌤️', title: 'Weather', text: "Your local weather at a glance — tap it for the full forecast." },
+  { selector: '#adminHomeBtn', icon: '⚙️', title: 'Admin tools', text: 'Admin-only management screens — Team, Projects, Departments, and more — live behind this button.' },
+  { selector: '.home-tile[data-tab="entry"]', icon: '📝', title: 'New Entry', text: 'Log your timesheet, a daily progress update, or a project report here.' },
+  { selector: '.home-tile[data-tab="queue"]', icon: '📋', title: 'Queue', text: "Everything you've submitted, and its current status, lives here." },
+  { selector: '.home-tile[data-open="specialRequest"]', icon: '🕐', title: 'Special Request', text: 'Request extra hours, leave, or another kind of special approval.' },
+  { selector: '.home-tile[data-tab="reports"]', icon: '📊', title: 'Reports', text: 'Review the daily progress reports you and your team have submitted.' },
+  { selector: '.home-tile[data-open="projects"]', icon: '📁', title: 'Active Projects', text: 'Browse every ongoing project, with allocated vs. used hours at a glance.' },
+  { selector: '#homeChatTile', icon: '💬', title: 'Chat', text: 'Message your team directly, right inside the app.' },
+  { selector: '.home-tile[data-open="myjobs"]', icon: '🗂️', title: 'My Jobs', text: "See what job you're allocated to right now." },
+  { selector: '.home-tile[data-open="liveDrivers"]', icon: '🚗', title: 'Live Drivers', text: 'Track drivers and their trips live on the map.' },
+  { selector: '.home-tile[data-open="departments"]', icon: '🏢', title: 'Departments', text: "See who's in each department and what they're working on today." },
+  { selector: '.home-tile[data-open="learning"]', icon: '🎓', title: 'Learning', text: 'Free courses and certifications — AI, coding, safety, PLC, HMI, and more.' },
+  { selector: '.home-tile[data-open="health"]', icon: '💪', title: 'Health', text: 'Simple wellbeing tips and trusted health resources.' },
+  { selector: '.home-tile[data-open="clients"]', icon: '🤝', title: 'Clients', text: 'Manage client records.' },
+  { selector: '.home-tile[data-open="quotations"]', icon: '🧾', title: 'Quotations', text: 'Create and track quotations and BOQs.' },
+  { selector: '.home-tile[data-open="tank"]', icon: '🛢️', title: 'Project Tank', text: 'A quick visual read on your overall project pipeline.' },
+  { selector: '.home-tile[data-open="allocation"]', icon: '🚚', title: 'Job Allocation', text: "See — or if you're an admin, publish — who's assigned to which job today." },
+  { selector: '.home-tile[data-open="datafeed"]', icon: '📥', title: 'Data Feed', text: 'Bulk-load or manage the data behind the app.' },
+  { selector: '.home-tile[data-tab="settings"]', icon: '⚙️', title: 'Settings', text: 'Your account, password, and notification preferences.' },
+  { selector: '.home-tile[data-open="about"]', icon: '✅', title: "You're all set!", text: "Come back to About anytime — from here you can always re-check the app version or replay this tour." },
+];
+
+let tutorialStepIndex = 0;
+let tutorialResizeHandler = null;
+
+function tutorialVisibleSteps() {
+  return TUTORIAL_STEPS.filter((step) => {
+    const el = document.querySelector(step.selector);
+    if (!el) return false;
+    if (el.offsetParent === null) return false; // hidden (display:none, feature-gated, or an ancestor is hidden)
+    return true;
+  });
+}
+
+function startTutorial() {
+  closePanel('about');
+  document.querySelector('nav.tabs [data-tab="home"]')?.click();
+  tutorialStepIndex = 0;
+  $('tutorialOverlay').style.display = 'block';
+  // Give the Home tab a moment to become visible/laid out before measuring
+  // the first target element's position.
+  setTimeout(() => showTutorialStep(), 120);
+}
+
+function endTutorial() {
+  $('tutorialOverlay').style.display = 'none';
+  if (tutorialResizeHandler) {
+    window.removeEventListener('resize', tutorialResizeHandler);
+    tutorialResizeHandler = null;
+  }
+}
+
+function showTutorialStep() {
+  const steps = tutorialVisibleSteps();
+  if (!steps.length || tutorialStepIndex >= steps.length) { endTutorial(); return; }
+  if (tutorialStepIndex < 0) tutorialStepIndex = 0;
+  const step = steps[tutorialStepIndex];
+  const el = document.querySelector(step.selector);
+  if (!el) { tutorialStepIndex++; showTutorialStep(); return; }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // Let the smooth-scroll settle before measuring the target's final position.
+  setTimeout(() => positionTutorialStep(el, step, steps.length), 240);
+}
+
+function positionTutorialStep(el, step, total) {
+  const rect = el.getBoundingClientRect();
+  const pad = 8;
+  const spot = $('tutorialSpotlight');
+  spot.style.left = `${Math.max(4, rect.left - pad)}px`;
+  spot.style.top = `${Math.max(4, rect.top - pad)}px`;
+  spot.style.width = `${rect.width + pad * 2}px`;
+  spot.style.height = `${rect.height + pad * 2}px`;
+
+  $('tutorialCardIcon').textContent = step.icon || '✨';
+  $('tutorialCardTitle').textContent = step.title;
+  $('tutorialCardText').textContent = step.text;
+  $('tutorialStepNum').textContent = String(tutorialStepIndex + 1);
+  $('tutorialStepTotal').textContent = String(total);
+  $('tutorialBackBtn').style.visibility = tutorialStepIndex === 0 ? 'hidden' : 'visible';
+  $('tutorialNextBtn').textContent = (tutorialStepIndex === total - 1) ? 'Finish' : 'Next';
+
+  // Keep the card from covering whatever it's pointing at: pin it to the
+  // top of the screen when the target sits in the lower half, and vice versa.
+  const card = $('tutorialCard');
+  const inLowerHalf = rect.top > window.innerHeight / 2;
+  card.classList.toggle('tutorial-card-top', inLowerHalf);
+  card.classList.toggle('tutorial-card-bottom', !inLowerHalf);
+
+  if (tutorialResizeHandler) window.removeEventListener('resize', tutorialResizeHandler);
+  tutorialResizeHandler = () => positionTutorialStep(el, step, total);
+  window.addEventListener('resize', tutorialResizeHandler);
+}
+
+if ($('startTutorialBtn')) $('startTutorialBtn').addEventListener('click', startTutorial);
+if ($('tutorialNextBtn')) $('tutorialNextBtn').addEventListener('click', () => { tutorialStepIndex++; showTutorialStep(); });
+if ($('tutorialBackBtn')) $('tutorialBackBtn').addEventListener('click', () => { tutorialStepIndex--; showTutorialStep(); });
+if ($('tutorialSkipBtn')) $('tutorialSkipBtn').addEventListener('click', endTutorial);
 
 // =====================================================================
 // DEPARTMENTS — admin creates/manages a list of departments; every person
@@ -5224,8 +5344,8 @@ function miniProjectHoursRings(jobId) {
         <div class="mini-ring-label">Allocated</div>
       </div>
       <div class="mini-ring-block">
-        ${ringSvg(used, allocated, hasUsed, ringOpts)}
-        <div class="mini-ring-value ${!hasUsed ? 'dim' : (isOver ? 'over' : 'under')}">${hasUsed ? `${used}h` : '—'}</div>
+        ${ringSvg(used, allocated, hasUsed, { ...ringOpts, underColor: 'var(--accent)' })}
+        <div class="mini-ring-value ${!hasUsed ? 'dim' : (isOver ? 'over' : 'used-ok')}">${hasUsed ? `${used}h` : '—'}</div>
         <div class="mini-ring-label">Used</div>
       </div>
     </div>
@@ -5482,11 +5602,15 @@ function ringSvg(used, allocated, hasData = true, opts = {}) {
   // is "is anything wrong anywhere on this job", not just the grand total.
   const isOver = overHours > 0 || !!opts.forceOver;
   // Over-allocation is a red ring (not the old orange/warn) so it reads as
-  // "needs attention" at a glance rather than just "getting close".
+  // "needs attention" at a glance rather than just "getting close". The
+  // "under budget" color defaults to green everywhere, but callers can pass
+  // opts.underColor to use a different color for that state instead (e.g.
+  // the Projects list's "Used" mini ring uses the app's orange accent here,
+  // to read as visually distinct from the "Allocated" ring next to it).
   return `
     <svg viewBox="0 0 ${size} ${size}" class="ring-svg${isOver ? ' ring-svg-over' : ''}">
       <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="var(--glass-border)" stroke-width="${stroke}" />
-      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="${isOver ? 'var(--err)' : 'var(--ok)'}" stroke-width="${stroke}"
+      <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="${isOver ? 'var(--err)' : (opts.underColor || 'var(--ok)')}" stroke-width="${stroke}"
         stroke-dasharray="${cOuter}" stroke-dashoffset="${outerOffset}" stroke-linecap="round"
         transform="rotate(-90 ${cx} ${cy})" />
       ${overHours > 0 ? `
