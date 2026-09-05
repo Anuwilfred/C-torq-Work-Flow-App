@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.26.0';
+const APP_VERSION = 'v3.27.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Analytics now has a category-share pie chart and a rotatable 3D surface (Department x Task) with a blue-to-red heat gradient tied to each department\'s budget — drag to rotate, hover any point to see who worked on it.';
+const APP_UPDATE_NOTES = 'Project Analytics\' pie chart and 3D surface now always show their full chart environment (all categories/departments, budget-driven coloring) even before any hours are tagged, instead of staying hidden.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6432,30 +6432,39 @@ async function renderProjectTaskBreakdown(data) {
   // wrap's innerHTML) since Plotly needs a stable DOM node it fully owns —
   // re-rendering wrap above would otherwise destroy the chart's container
   // out from under it and throw on the next Plotly call.
-  renderProjectCategoryPie(catTotals, catMeta);
+  renderProjectCategoryPie(catTotals, catMeta, categoryKeyOrder);
   renderProjectSurfaceChart(data.taskMatrix || [], data.project?.departments || [], catMeta, categoryKeyOrder);
 }
 
 // "Category share" pie — the same category totals used for the "Busiest
-// category" stat chip above, just visualized as a whole-project split.
-function renderProjectCategoryPie(catTotals, catMeta) {
+// category" stat chip above, visualized as a whole-project split. Always
+// draws SOMETHING (the "environment") even before any hours are tagged —
+// an even placeholder ring across every category that exists — rather than
+// hiding the chart outright, so it's obvious the feature is there and
+// waiting, and it fills in for real the moment tagged hours start coming in.
+function renderProjectCategoryPie(catTotals, catMeta, categoryKeyOrder) {
   const section = $('projectPieSection');
   const el = $('projectCategoryPie');
-  if (!section || !el) return;
-  const entries = Object.entries(catTotals || {}).filter(([, h]) => h > 0);
-  if (!entries.length || typeof Plotly === 'undefined') { section.style.display = 'none'; return; }
+  if (!section || !el || typeof Plotly === 'undefined') { if (section) section.style.display = 'none'; return; }
+  const realEntries = Object.entries(catTotals || {}).filter(([, h]) => h > 0);
+  const hasData = realEntries.length > 0;
+  const cats = hasData ? realEntries.map(([cat]) => cat) : categoryKeyOrder;
+  if (!cats.length) { section.style.display = 'none'; return; }
   section.style.display = '';
-  const labels = entries.map(([cat]) => `${catMeta[cat]?.icon || ''} ${catMeta[cat]?.label || cat}`.trim());
-  const values = entries.map(([, h]) => Math.round(h * 100) / 100);
-  const colors = entries.map((_, i) => paColor(i));
+
+  const labels = cats.map((cat) => `${catMeta[cat]?.icon || ''} ${catMeta[cat]?.label || cat}`.trim());
+  const values = hasData ? realEntries.map(([, h]) => Math.round(h * 100) / 100) : cats.map(() => 1);
+  const colors = cats.map((_, i) => paColor(i));
+
   Plotly.newPlot(el, [{
     type: 'pie',
     labels,
     values,
     marker: { colors, line: { color: '#141414', width: 2 } },
-    textinfo: 'label+percent',
+    opacity: hasData ? 1 : 0.32,
+    textinfo: hasData ? 'label+percent' : 'none',
     textfont: { color: '#f5f4f0', size: 11 },
-    hovertemplate: '%{label}<br>%{value}h (%{percent})<extra></extra>',
+    hovertemplate: hasData ? '%{label}<br>%{value}h (%{percent})<extra></extra>' : '%{label}<br>No tagged hours yet<extra></extra>',
     hole: 0.35,
   }], {
     paper_bgcolor: 'transparent',
@@ -6463,35 +6472,52 @@ function renderProjectCategoryPie(catTotals, catMeta) {
     showlegend: false,
     margin: { t: 10, b: 10, l: 10, r: 10 },
     font: { color: '#f5f4f0' },
+    annotations: hasData ? [] : [{
+      text: 'Waiting for tagged hours', showarrow: false, x: 0.5, y: 0.5,
+      font: { size: 11.5, color: 'rgba(245,244,240,0.75)' },
+    }],
   }, { displayModeBar: false, responsive: true });
 }
 
-// "Department × Task surface" — the 3D chart: rows = departments (that
-// actually have logged hours), columns = task categories, height = hours
-// logged. Color is driven by how close/over that DEPARTMENT'S budget is
-// (not raw height) so a whole over-budget department's row reads hot even
-// if any single cell on it isn't the tallest thing on the chart — this is
-// what makes "red = crossed the allotted time" true. Uses a full blue
-// -> green -> yellow -> red spectrum (Plotly's "Jet" colorscale), the same
-// look as a CFD/heat-map plot, per what was asked for.
+// "Department × Task surface" — the 3D chart: rows = departments, columns
+// = task categories, height = hours logged. Color is driven by how
+// close/over that DEPARTMENT'S budget is (not raw height) so a whole
+// over-budget department's row reads hot even if any single cell on it
+// isn't the tallest thing on the chart — this is what makes "red = crossed
+// the allotted time" true. Uses a full blue -> green -> yellow -> red
+// spectrum (Plotly's "Jet" colorscale), the same look as a CFD/heat-map
+// plot, per what was asked for.
+//
+// The grid (departments x categories, and each row's budget color) is
+// drawn even before any hours are tagged to a specific task — the
+// "environment" should be visible from the start, with peaks rising into
+// it as tagged entries come in, rather than the whole chart appearing out
+// of nowhere the first time something matches. Real per-cell hours (and
+// the "who" in each cell's hover) still only show up once actually tagged.
 function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKeyOrder) {
   const section = $('projectSurfaceSection');
   const el = $('projectSurfaceChart');
-  if (!section || !el) return;
-  if (!taskMatrix.length || typeof Plotly === 'undefined') { section.style.display = 'none'; return; }
+  if (!section || !el || typeof Plotly === 'undefined') { if (section) section.style.display = 'none'; return; }
 
-  const deptTotals = {};
-  const deptNameById = {};
-  taskMatrix.forEach((c) => {
-    deptTotals[c.departmentId] = (deptTotals[c.departmentId] || 0) + c.hours;
-    deptNameById[c.departmentId] = c.departmentName;
-  });
-  const deptIds = Object.keys(deptTotals).sort((a, b) => deptTotals[b] - deptTotals[a]).slice(0, 10);
+  // Rows: every department with either a budget or logged hours on this
+  // job, most-used first; falls back to whatever departments exist at all
+  // so the grid still has something to show on a brand-new project.
+  const deptsWithActivity = departments.filter((d) => (Number(d.usedHours) || 0) > 0 || (Number(d.allocatedHours) || 0) > 0);
+  const deptPool = deptsWithActivity.length ? deptsWithActivity : departments;
+  const sortedDepts = [...deptPool].sort((a, b) => (Number(b.usedHours) || 0) - (Number(a.usedHours) || 0)).slice(0, 10);
+  const deptIds = sortedDepts.map((d) => d.id);
   if (!deptIds.length) { section.style.display = 'none'; return; }
+  const deptNameById = {};
+  departments.forEach((d) => { deptNameById[d.id] = d.name; });
 
+  // Columns: every category that has at least one tagged cell, or — before
+  // anything's tagged yet — every category that exists at all, so the full
+  // axis is visible from the start.
   const catsPresent = new Set(taskMatrix.map((c) => c.category));
   const cats = categoryKeyOrder.filter((c) => catsPresent.has(c));
-  if (!cats.length) { section.style.display = 'none'; return; }
+  const catsToShow = cats.length ? cats : categoryKeyOrder;
+  if (!catsToShow.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
 
   const budgetByDept = {};
   departments.forEach((d) => { budgetByDept[d.id] = { allocated: Number(d.allocatedHours) || 0, used: Number(d.usedHours) || 0 }; });
@@ -6508,10 +6534,11 @@ function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKey
     const budget = budgetByDept[deptId];
     // 0 = comfortably under budget, 1 = at/over budget (capped) — this is
     // what actually drives the hot end of the color scale, not raw hours,
-    // so an over-budget department's whole row skews red/orange.
+    // so an over-budget department's whole row skews red/orange even
+    // before any of its hours are broken down by task.
     const ratio = budget && budget.allocated > 0 ? Math.min(budget.used / budget.allocated, 1.3) / 1.3 : null;
     const deptName = deptNameById[deptId] || 'Unknown department';
-    cats.forEach((cat) => {
+    catsToShow.forEach((cat) => {
       const cell = cellByKey[`${deptId}::${cat}`];
       const hours = cell ? cell.hours : 0;
       zRow.push(hours);
@@ -6519,7 +6546,7 @@ function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKey
       const catLabel = catMeta[cat]?.label || cat;
       const who = cell && cell.topPeople.length
         ? cell.topPeople.map((p) => `${p.name} (${p.hours}h)`).join(', ')
-        : 'No one yet';
+        : 'No one tagged to this task yet';
       const budgetNote = budget && budget.allocated > 0
         ? `${budget.used}h of ${budget.allocated}h department budget`
         : 'No department budget set for this job';
@@ -6530,7 +6557,6 @@ function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKey
     text.push(textRow);
   });
 
-  section.style.display = '';
   Plotly.newPlot(el, [{
     type: 'surface',
     z,
@@ -6547,7 +6573,7 @@ function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKey
     font: { color: '#cfcdc9', size: 10 },
     margin: { t: 10, b: 10, l: 10, r: 10 },
     scene: {
-      xaxis: { title: 'Task type', tickvals: cats.map((_, i) => i), ticktext: cats.map((c) => catMeta[c]?.label || c), color: '#cfcdc9' },
+      xaxis: { title: 'Task type', tickvals: catsToShow.map((_, i) => i), ticktext: catsToShow.map((c) => catMeta[c]?.label || c), color: '#cfcdc9' },
       yaxis: { title: 'Department', tickvals: deptIds.map((_, i) => i), ticktext: deptIds.map((id) => deptNameById[id] || 'Unknown'), color: '#cfcdc9' },
       zaxis: { title: 'Hours', color: '#cfcdc9' },
       bgcolor: 'transparent',
