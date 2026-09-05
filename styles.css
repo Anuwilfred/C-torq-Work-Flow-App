@@ -73,6 +73,21 @@
   line-height: 1.55;
   color: var(--text-dim, rgba(245,244,240,0.75));
 }
+.update-popup-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-dim, rgba(245,244,240,0.75));
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.update-popup-close:hover { background: rgba(255,255,255,0.16); color: var(--text); }
 
 :root {
   --bg-0: #0d0d0e;
