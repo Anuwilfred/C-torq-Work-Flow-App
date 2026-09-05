@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>C-TORQ Digital Organization</title>
+<link rel="manifest" href="./manifest.json" />
+<link rel="icon" href="./icon.svg" />
+<meta name="theme-color" content="#cc785c" />
+
+<!-- iPhone/iPad: Safari mostly ignores manifest.json for "Add to Home
+     Screen" and needs its own tags to behave like a real installed app
+     (full-screen, no address bar, proper icon, matching status bar). -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="C-TORQ" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="./icon-512.png" />
+
+<link rel="stylesheet" href="./styles.css" />
+<!-- Leaflet: real interactive map (pan/zoom/markers) for Live Drivers,
+     replacing the old single-image static-map approach which depended on
+     one small free image-rendering service and had no way to show if it
+     failed beyond just hiding silently. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+
+<!-- ============== AUTH SCREEN (shown until signed in) ============== -->
+<div id="authScreen" class="auth-wrap">
+  <div class="card glass auth-card">
+    <div class="auth-brand">
+      <img src="./icon.svg" width="40" height="40" alt="" />
+      <h2>C-TORQ Digital Organization</h2>
+    </div>
+
+    <div id="loginView">
+      <label for="loginEmail">Email</label>
+      <input id="loginEmail" type="email" autocomplete="username" />
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" />
+      <button id="loginBtn" class="primary">Log in</button>
+      <p class="hint"><a href="#" id="showForgot">Forgot password?</a></p>
+    </div>
+
+    <div id="forgotView" style="display:none">
+      <p class="hint">Enter your email and we'll send you a reset link.</p>
+      <label for="forgotEmail">Email</label>
+      <input id="forgotEmail" type="email" autocomplete="username" />
+      <button id="sendResetBtn" class="primary">Send reset link</button>
+      <p class="hint"><a href="#" id="backToLogin">Back to login</a></p>
+    </div>
+
+    <div id="setPasswordView" style="display:none">
+      <p id="setPasswordIntro" class="hint">Set a password for your account.</p>
+      <label for="newPassword">New password</label>
+      <input id="newPassword" type="password" autocomplete="new-password" />
+      <label for="confirmPassword">Confirm password</label>
+      <input id="confirmPassword" type="password" autocomplete="new-password" />
+      <button id="setPasswordBtn" class="primary">Save password</button>
+    </div>
+
+    <div id="authMsg" class="hint"></div>
+  </div>
+</div>
+
+<!-- ============== MAIN APP (shown once signed in) ============== -->
+<div id="appShell" style="display:none">
+  <header>
+    <button type="button" id="weatherBadge" class="weather-badge" style="display:none;" title="Weather">
+      <span id="weatherBadgeIcon" class="weather-badge-icon">🌤️</span>
+      <span id="weatherBadgeTemp" class="weather-badge-temp">--°</span>
+    </button>
+    <h1>C-TORQ Digital Organization</h1>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span id="statusBadge">checking…</span>
+      <div style="position:relative;">
+        <button type="button" id="updateStatusBtn" class="admin-corner-btn update-status-btn" title="Check for updates">
+          🔄
+          <span id="updateStatusDot" class="update-status-dot" style="display:none;"></span>
+        </button>
+        <div id="updatePopup" class="update-popup">
+          <strong id="updatePopupVersion">Update ready</strong>
+          <p id="updatePopupNotes" class="hint"></p>
+        </div>
+      </div>
+      <button type="button" id="adminHomeBtn" class="admin-corner-btn" style="display:none" title="Admin">⚙️</button>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs">
+      <button data-tab="home" class="active">Home</button>
+      <button data-tab="entry" data-feature="entry">New Entry</button>
+      <button data-tab="queue" data-feature="queue">Queue</button>
+      <button data-tab="reports" data-feature="reports">Reports</button>
+      <button data-tab="admin" id="adminTabBtn" style="display:none">Admin</button>
+      <button data-tab="settings" data-feature="settings">Settings</button>
+    </nav>
+
+    <!-- HOME — macOS-style icon grid, one tile per section -->
+    <section id="home" class="panel active">
+      <!-- One continuous grid — previously split into two separate <div>
+           grids (with Settings left dangling alone in its own row in
+           between), which read as an odd empty gap before the second
+           section started. Everything below is already visible to
+           everyone (not admin-gated), so there's no reason to keep them
+           visually separated. -->
+      <div class="home-grid">
+        <button type="button" class="home-tile" data-tab="entry" data-feature="entry">
+          <span class="home-tile-icon">📝</span>
+          <span class="home-tile-label">New Entry</span>
+        </button>
+        <button type="button" class="home-tile" data-tab="queue" data-feature="queue">
+          <span class="home-tile-icon">📋</span>
+          <span class="home-tile-label">Queue</span>
+        </button>
+        <button type="button" class="home-tile" data-open="specialRequest" data-feature="entry">
+          <span class="home-tile-icon">🕐</span>
+          <span class="home-tile-label">Special Request</span>
+        </button>
+        <button type="button" class="home-tile" data-tab="reports" data-feature="reports">
+          <span class="home-tile-icon">📊</span>
+          <span class="home-tile-label">Reports</span>
+        </button>
+        <button type="button" class="home-tile" data-open="projects" data-hide-create="true" data-feature="projects">
+          <span class="home-tile-icon">📁</span>
+          <span class="home-tile-label">Active Projects</span>
+        </button>
+        <button type="button" class="home-tile" id="homeChatTile" data-feature="chat">
+          <span class="home-tile-icon">💬</span>
+          <span class="home-tile-label">Chat</span>
+        </button>
+        <button type="button" class="home-tile" data-open="myjobs">
+          <span class="home-tile-icon">🗂️</span>
+          <span class="home-tile-label">My Jobs</span>
+        </button>
+        <button type="button" class="home-tile" data-open="liveDrivers" data-feature="liveDrivers">
+          <span class="home-tile-icon">🚗</span>
+          <span class="home-tile-label">Live Drivers</span>
+        </button>
+        <button type="button" class="home-tile" data-open="departments" data-feature="departments">
+          <span class="home-tile-icon home-tile-icon-departments">🏢</span>
+          <span class="home-tile-label">Departments</span>
+        </button>
+        <button type="button" class="home-tile" data-open="learning" data-feature="learning">
+          <span class="home-tile-icon home-tile-icon-learning">🎓</span>
+          <span class="home-tile-label">Learning</span>
+        </button>
+        <button type="button" class="home-tile" data-open="health" data-feature="health">
+          <span class="home-tile-icon home-tile-icon-health">💪</span>
+          <span class="home-tile-label">Health</span>
+        </button>
+        <button type="button" class="home-tile" data-open="clients" data-feature="clients">
+          <span class="home-tile-icon home-tile-icon-clients">🤝</span>
+          <span class="home-tile-label">Clients</span>
+        </button>
+        <button type="button" class="home-tile" data-open="quotations" data-feature="quotations">
+          <span class="home-tile-icon home-tile-icon-quotations">🧾</span>
+          <span class="home-tile-label">Quotations</span>
+        </button>
+        <button type="button" class="home-tile" data-open="tank" data-feature="tank">
+          <span class="home-tile-icon home-tile-icon-tank">🛢️</span>
+          <span class="home-tile-label">Project Tank</span>
+        </button>
+        <button type="button" class="home-tile" data-open="allocation" data-feature="allocation">
+          <span class="home-tile-icon home-tile-icon-allocation">🚚</span>
+          <span class="home-tile-label">Job Allocation</span>
+        </button>
+        <button type="button" class="home-tile" data-open="datafeed" data-feature="datafeed">
+          <span class="home-tile-icon home-tile-icon-datafeed">📥</span>
+          <span class="home-tile-label">Data Feed</span>
+        </button>
+        <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
+          <span class="home-tile-icon">⚙️</span>
+          <span class="home-tile-label">Settings</span>
+        </button>
+        <button type="button" class="home-tile" data-open="about">
+          <span class="home-tile-icon">ℹ️</span>
+          <span class="home-tile-label">About</span>
+        </button>
+      </div>
+
+      <!-- TODAY'S JOB BOARD — a message-board style broadcast, visible to
+           everyone (not gated by allowed_features), listing every job
+           published via Job Allocation for today: job id, location,
+           arrival time, driver, and who's on it. -->
+      <div class="card glass" id="jobBoardCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📋 Today's Job Board</strong>
+        <p class="hint" style="margin-top:2px;">What's been published for today, for everyone to see.</p>
+        <div id="jobBoardArea" style="margin-top:8px;"></div>
+      </div>
+
+      <!-- ADMIN — ALL SCHEDULES: admin-only, shows every published job
+           allocation (today plus upcoming), across every person, right on
+           the dashboard — not just today's board. -->
+      <div class="card glass" id="adminScheduleCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📅 All Schedules (Admin)</strong>
+        <p class="hint" style="margin-top:2px;">Every published job allocation, today and upcoming, across everyone.</p>
+        <div id="adminScheduleArea" style="margin-top:8px;"></div>
+      </div>
+    </section>
+
+    <!-- NEW ENTRY -->
+    <section id="entry" class="panel">
+      <div class="card glass" id="myAssignmentCard" style="display:none;">
+        <strong style="font-size:14px;">Today's job</strong>
+        <div id="myAssignmentArea" style="margin-top:8px;"></div>
+      </div>
+      <div class="card glass" id="myTripsCard" style="display:none;">
+        <strong style="font-size:14px;">🚗 Today's trips</strong>
+        <div id="myTripsArea" style="margin-top:8px;"></div>
+        <button type="button" class="secondary" id="logOwnTripBtn" style="margin-top:10px; width:100%;">+ Log a trip</button>
+        <div id="ownTripForm" style="display:none; margin-top:10px;">
+          <label for="ownTripAssignedBySelect">Who assigned this</label>
+          <select id="ownTripAssignedBySelect">
+            <option value="">Choose who asked you</option>
+          </select>
+          <label>Task (tap any that apply)</label>
+          <div id="ownTripTaskChips" class="chip-picker"></div>
+          <label for="ownTripFrom">From</label>
+          <div class="job-search-wrap" style="position:relative;">
+            <input id="ownTripFrom" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+            <div id="ownTripFromResults" class="job-search-results" style="display:none;"></div>
+          </div>
+          <label for="ownTripTo">To</label>
+          <div class="job-search-wrap" style="position:relative;">
+            <input id="ownTripTo" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+            <div id="ownTripToResults" class="job-search-results" style="display:none;"></div>
+          </div>
+          <label for="ownTripKm">Distance in KM (optional)</label>
+          <input id="ownTripKm" type="number" min="0" step="0.1" placeholder="e.g. 18.5" />
+          <button type="button" class="primary" id="ownTripStartBtn" style="width:100%; margin-top:8px;">▶ Start trip</button>
+        </div>
+      </div>
+      <div class="card glass">
+        <form id="entryForm">
+          <label for="type">Type</label>
+          <select id="type" required>
+            <option value="timesheet">Timesheet</option>
+            <option value="progress">Daily Progress</option>
+            <option value="data">Project Report</option>
+          </select>
+
+          <!-- ===== TIMESHEET-ONLY FIELDS ===== -->
+          <div id="timesheetBlock">
+            <label for="jobId">Project / Job ID</label>
+            <div class="job-search-wrap" style="position:relative;">
+              <input id="jobId" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+              <div id="jobIdResults" class="job-search-results" style="display:none;"></div>
+            </div>
+            <p class="hint">Pick the job from the list that appears — leave it blank if this isn't tied to a specific job.</p>
+
+            <label>Mode of work</label>
+            <div id="modeGrid" class="mode-grid">
+              <div class="mode-chip" data-mode="office"><span class="emoji">🏢</span>Office</div>
+              <div class="mode-chip" data-mode="site"><span class="emoji">🏗️</span>Site</div>
+              <div class="mode-chip" data-mode="workshop"><span class="emoji">🔧</span>Workshop</div>
+              <div class="mode-chip" data-mode="driver"><span class="emoji">🚗</span>Driver</div>
+              <div class="mode-chip" data-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
+              <div class="mode-chip" data-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+              <div class="mode-chip" data-mode="inspection"><span class="emoji">🔍</span>Inspection</div>
+              <div class="mode-chip" data-mode="field_work"><span class="emoji">🌾</span>Field Work</div>
+              <div class="mode-chip" data-mode="other"><span class="emoji">✨</span>Other</div>
+              <div class="mode-chip" data-mode="sick_leave"><span class="emoji">🤒</span>Sick Leave</div>
+              <div class="mode-chip" data-mode="holiday"><span class="emoji">🏖️</span>Holiday</div>
+              <div class="mode-chip" data-mode="emergency_leave"><span class="emoji">🚨</span>Emergency Leave</div>
+            </div>
+
+            <!-- work-type fields -->
+            <div id="workModeFields" class="field-group">
+              <div class="section-divider"></div>
+
+              <div class="card glass" id="clockCard" style="margin-bottom:14px;">
+                <strong style="font-size:14px;">Clock</strong>
+                <p class="hint" id="clockStatusLine" style="margin:6px 0 10px;">Not clocked in yet — tap Clock In to start your day.</p>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <button type="button" id="clockInBtn" class="secondary">🟢 Clock In</button>
+                  <button type="button" id="startBreakBtn" class="secondary" style="display:none;">☕ Start Break</button>
+                  <button type="button" id="stopBreakBtn" class="secondary" style="display:none;">▶️ Stop Break</button>
+                  <button type="button" id="clockOutBtn" class="secondary" style="display:none;">🔴 Clock Out</button>
+                </div>
+                <p class="hint" id="clockLocationStatus" style="margin-top:8px; display:none;"></p>
+                <div id="clockLocationArea" style="margin-top:10px;"></div>
+              </div>
+
+              <label for="project">Project</label>
+              <input id="project" type="text" placeholder="Filled automatically from the Job ID above" readonly />
+
+              <label for="location">Location</label>
+              <div class="location-row">
+                <input id="location" type="text" placeholder="Filled automatically by Clock In" readonly />
+                <button type="button" id="fetchLocationBtn">📍 Refresh my location</button>
+              </div>
+              <img id="locationMapImg" style="display:none; margin-top:8px; width:100%; max-width:340px; border-radius:14px; border:1px solid var(--glass-border);" alt="Map showing your location" />
+              <a id="locationMapLink" class="clock-loc-map-link" href="#" target="_blank" rel="noopener" style="display:none;">🗺️ Open in Maps</a>
+              <p class="hint" style="margin-top:4px;">No manual typing — Project comes from the Job ID you pick, and Location comes from GPS when you Clock In (tap "Refresh" if it needs updating).</p>
+
+              <label for="allowanceLocation">Allowance area (optional)</label>
+              <select id="allowanceLocation">
+                <option value="">No allowance area</option>
+              </select>
+              <p class="hint" style="margin-top:4px;">Pick this if you traveled somewhere with an extra-hours allowance — it's added automatically.</p>
+
+              <div class="row-2">
+                <div>
+                  <label for="date">Date</label>
+                  <input id="date" type="date" readonly />
+                </div>
+                <div></div>
+              </div>
+              <div class="row-2">
+                <div>
+                  <label for="startTime">Start time</label>
+                  <input id="startTime" type="time" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
+                </div>
+                <div>
+                  <label for="endTime">End time</label>
+                  <input id="endTime" type="time" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
+                </div>
+              </div>
+              <p class="hint" style="margin-top:4px;">Filled automatically by Clock In / Clock Out above — no manual typing.</p>
+
+              <label for="lunchMinutes">Break / lunch (minutes)</label>
+              <input id="lunchMinutes" type="number" min="0" step="5" value="0" readonly style="background:rgba(255,255,255,0.06); cursor:not-allowed;" />
+              <p class="hint">Filled automatically by Start Break / Stop Break above — it's subtracted from your total hours for the day.</p>
+
+              <label>What did you work on? (tap any that apply)</label>
+              <div id="workNotesChips" class="chip-picker"></div>
+              <label for="workNotes">Other / additional notes (optional)</label>
+              <textarea id="workNotes" placeholder="Anything else worth noting?"></textarea>
+            </div>
+
+            <!-- leave-type fields -->
+            <div id="leaveModeFields" class="field-group">
+              <div class="section-divider"></div>
+              <div class="row-2">
+                <div>
+                  <label for="leaveStart">Start date</label>
+                  <input id="leaveStart" type="date" />
+                </div>
+                <div>
+                  <label for="leaveEnd">End date</label>
+                  <input id="leaveEnd" type="date" />
+                </div>
+              </div>
+
+              <label for="leaveReason">Reason / notes</label>
+              <textarea id="leaveReason" placeholder="Brief reason"></textarea>
+
+              <div id="sickDocField" style="display:none">
+                <label for="sickDoc">Medical document (optional)</label>
+                <input id="sickDoc" type="file" accept="application/pdf,image/*" />
+                <p class="hint warn">No document attached? This will be recorded as a general Leave request instead of Sick Leave.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== DAILY PROGRESS / PROJECT REPORT FIELDS ===== -->
+          <div id="simpleBlock">
+            <label for="jobIdSimple">Job ID (optional)</label>
+            <div class="job-search-wrap" style="position:relative;">
+              <input id="jobIdSimple" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+              <div id="jobIdSimpleResults" class="job-search-results" style="display:none;"></div>
+            </div>
+
+            <label for="projectSimple">Project</label>
+            <input id="projectSimple" type="text" placeholder="e.g. Website Redesign" />
+
+            <label for="dateSimple">Date</label>
+            <input id="dateSimple" type="date" />
+
+            <label for="timeSimple">Time</label>
+            <input id="timeSimple" type="time" />
+
+            <label>Description (tap any that apply)</label>
+            <div id="descriptionSimpleChips" class="chip-picker"></div>
+            <label for="descriptionSimple">Other / additional notes (optional)</label>
+            <textarea id="descriptionSimple" placeholder="Anything else worth noting?"></textarea>
+
+            <!-- Daily Progress only -->
+            <div id="progressOnlyFields" style="display:none;">
+              <label for="progressPercent">Approximate progress (%)</label>
+              <input id="progressPercent" type="number" min="0" max="100" step="1" placeholder="e.g. 65" />
+              <p class="hint" style="margin-top:2px;">Optional — your best estimate of how complete this work is.</p>
+            </div>
+
+            <!-- Project Report only -->
+            <div id="reportOnlyFields" style="display:none;">
+              <label for="projectClosedSelect">Is this project closed?</label>
+              <select id="projectClosedSelect">
+                <option value="">Select...</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <div id="projectClosedReasonWrap" style="display:none; margin-top:10px;">
+                <label for="projectClosedReason">Why isn't it closed yet? (optional)</label>
+                <textarea id="projectClosedReason" placeholder="Optional note..."></textarea>
+              </div>
+            </div>
+
+            <label for="filesSimple">Attachments (photo, video, PDF, or zip — up to 50MB each)</label>
+            <input id="filesSimple" type="file" accept="application/pdf,image/*,video/*,.zip,application/zip,application/x-zip-compressed" multiple />
+            <p class="hint">Larger files (over ~6MB) upload in the background with a progress notice — just keep the app open until the queue finishes syncing.</p>
+          </div>
+
+          <button type="button" id="reviewBtn" class="primary">Review &amp; Submit</button>
+          <p class="hint">Saved to this device instantly, even with no connection. Submits automatically once you're back online.</p>
+        </form>
+      </div>
+    </section>
+
+    <!-- QUEUE -->
+    <section id="queue" class="panel">
+      <div class="card glass">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="font-size:14px;">Your entries</strong>
+          <button id="syncNowBtn" class="secondary">Sync now</button>
+        </div>
+        <div id="entryList" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- CHAT is no longer a tab — see the floating chatOrb overlay near the
+         bottom of this file, next to the AEON Ai orb. -->
+
+    <!-- NEW DM PICKER -->
+    <div id="newDmOverlay" class="overlay">
+      <div class="card glass review-card">
+        <h3>Start a direct message</h3>
+        <p class="hint">Pick a teammate to chat with.</p>
+        <div id="dmPersonList" style="margin:6px 0 4px;"></div>
+        <div class="review-actions">
+          <button type="button" id="newDmCancelBtn" class="secondary" style="flex:1;">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- NEW GROUP -->
+    <div id="newGroupOverlay" class="overlay">
+      <div class="card glass review-card">
+        <h3>Create a group</h3>
+        <label for="groupNameInput">Group name</label>
+        <input id="groupNameInput" type="text" placeholder="e.g. Site Team" />
+        <label>Add teammates</label>
+        <div id="groupMemberList" style="margin:6px 0 4px;"></div>
+        <div class="review-actions">
+          <button type="button" id="newGroupCancelBtn" class="secondary">Cancel</button>
+          <button type="button" id="newGroupCreateBtn" class="primary" style="margin-top:0;">Create group</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MANAGE GROUP (admin only — rename, add/remove members, delete) -->
+    <div id="manageGroupOverlay" class="overlay">
+      <div class="card glass review-card">
+        <h3>Manage group</h3>
+        <label for="manageGroupNameInput">Group name</label>
+        <input id="manageGroupNameInput" type="text" placeholder="e.g. Site Team" />
+        <label>Members</label>
+        <div id="manageGroupMemberList" style="margin:6px 0 4px;"></div>
+        <div class="review-actions">
+          <button type="button" id="manageGroupCancelBtn" class="secondary">Cancel</button>
+          <button type="button" id="manageGroupSaveBtn" class="primary" style="margin-top:0;">Save changes</button>
+        </div>
+        <div class="section-divider"></div>
+        <strong style="font-size:13px; color: var(--err);">Danger zone</strong>
+        <p class="hint" style="margin-top:4px;">Deleting a group removes it and every message in it for everyone, permanently. This cannot be undone.</p>
+        <button type="button" id="manageGroupDeleteBtn" class="secondary" style="margin-top:8px; color: var(--err);">🗑️ Delete this group</button>
+      </div>
+    </div>
+
+    <!-- REPORTS -->
+    <section id="reports" class="panel">
+      <div class="card glass" id="reportPersonCard" style="display:none">
+        <label for="reportPerson">Viewing report for</label>
+        <select id="reportPerson"></select>
+      </div>
+
+      <div class="card glass">
+        <div class="report-month-nav">
+          <button type="button" id="reportPrevMonth" class="ghost">‹ Prev</button>
+          <div id="reportMonthLabel" class="report-month-label">—</div>
+          <button type="button" id="reportNextMonth" class="ghost">Next ›</button>
+        </div>
+
+        <div class="report-layout">
+          <div class="report-main">
+            <div class="gauge-grid" id="gaugeGrid"></div>
+            <div class="section-divider"></div>
+            <strong style="font-size:13px;">Hours per day</strong>
+            <div id="hoursChart" style="margin-top:10px;"></div>
+            <div class="section-divider"></div>
+            <strong style="font-size:13px;">Daily breakdown</strong>
+            <div id="reportTableWrap" style="margin-top:10px;"></div>
+          </div>
+          <div class="month-strip" id="monthStrip"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ADMIN -->
+    <section id="admin" class="panel">
+      <div class="card glass admin-more-row" id="adminMoreRow" style="display:none;">
+        <button type="button" class="secondary" data-open="projects">📁 Projects</button>
+        <button type="button" class="secondary" data-open="departments">🏢 Departments</button>
+        <button type="button" class="secondary" data-open="learning">🎓 Learning</button>
+        <button type="button" class="secondary" data-open="health">💪 Health Challenges</button>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">Employee Role &amp; Invitation Management</strong>
+        <p class="hint" style="margin-top:4px;">Invite one or several teammates at once, assign roles and Map Access before they even accept, and manage everyone already on the team — all from one screen instead of scattered across this page.</p>
+        <button type="button" class="primary" data-open="people" style="margin-top:10px;">👥 Open Employee &amp; Invitation Manager</button>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">⚡ Job Hours Ledger</strong>
+        <p class="hint" style="margin-top:4px;">Project Detail, the Project Tank gauge, and AEON Ai now read project hours from a running total that updates automatically as new entries come in — instead of rescanning every timesheet in GitHub every time (that's what was making those screens slow to open). Run this once to fill it in for every entry already submitted before today. Safe to run again any time if numbers ever look off.</p>
+        <button type="button" id="backfillJobHoursBtn" class="secondary" style="margin-top:8px;">Run one-time backfill</button>
+        <div id="backfillJobHoursStatus" class="hint" style="margin-top:8px;"></div>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">🔁 Recalled Entries</strong>
+        <p class="hint" style="margin-top:4px;">Timesheet/leave entries people have pulled back before you've reviewed them — already off every dashboard and report. Correct, restore, or delete each one below.</p>
+        <button type="button" id="refreshRecalledBtn" class="secondary" style="margin-top:8px;">Refresh list</button>
+        <div id="recalledEntriesList" style="margin-top:12px;"><div class="empty">Tap Refresh to load.</div></div>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">Locations &amp; allowances</strong>
+        <p class="hint" style="margin-top:4px;">Add a place (country/city/site), how many extra hours get added automatically when someone works there, and the money rate per allowance hour — e.g. "Abu Dhabi" +2 hours at $10/hour.</p>
+        <div class="row-2" style="margin-top:10px;">
+          <input id="newLocationName" type="text" placeholder="e.g. Abu Dhabi" />
+          <input id="newLocationHours" type="number" min="0" step="0.5" placeholder="Extra hours" />
+        </div>
+        <input id="newLocationRate" type="number" min="0" step="0.01" placeholder="Money per allowance hour (e.g. 10)" style="margin-top:8px;" />
+        <button id="addLocationBtn" class="primary" style="margin-top:12px;">Add location</button>
+        <div id="locationList" style="margin-top:14px;"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="settings" class="panel">
+      <div class="card glass">
+        <label>Signed in as</label>
+        <div id="accountEmail" style="padding:6px 0 14px; font-size:14px;"></div>
+        <button id="logoutBtn" class="secondary" style="width:100%;">Log out</button>
+        <div id="appVersionLabel" style="margin-top:14px; font-size:11px; color:var(--text-dim); text-align:center;"></div>
+      </div>
+      <div class="card glass">
+        <label>Notifications</label>
+        <p class="hint" style="margin-top:0;">Get a system/lock-screen alert — even when the app is closed — for Aeon Teams Chat messages, new News Room posts, and Job Allocation assignments.</p>
+        <div id="pushStatus" class="hint" style="margin:2px 0 12px;">Checking…</div>
+        <button id="enablePushBtn" class="primary" style="margin-top:0;">Enable notifications</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- REVIEW OVERLAY -->
+<div id="reviewOverlay" class="overlay">
+  <div class="card glass review-card">
+    <h3>Review your entry</h3>
+    <p class="hint">Check the details below before submitting.</p>
+    <div id="reviewContent"></div>
+    <div class="review-actions">
+      <button type="button" id="reviewBackBtn" class="secondary">Back to edit</button>
+      <button type="button" id="reviewConfirmBtn" class="primary">Confirm &amp; Submit</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- NEW MESSAGE BANNER (WhatsApp-style, slides down from the top) -->
+<div id="newMsgBanner" class="new-msg-banner">
+  <span class="new-msg-banner-icon">💬</span>
+  <div class="new-msg-banner-body">
+    <div class="new-msg-banner-title"></div>
+    <div class="new-msg-banner-subtitle"></div>
+  </div>
+</div>
+
+<!-- AI CHAT WIDGET -->
+<div id="aiMesh" class="ai-mesh"></div>
+
+<span id="aiOrbLabel" class="ai-orb-label" style="display:none">Ask AEON Ai</span>
+<button id="aiOrb" class="ai-orb" aria-label="Ask AEON Ai" title="AEON Ai" style="display:none">
+  <span class="ai-orb-core"></span>
+</button>
+
+<div id="aiChatPanel" class="ai-chat-panel">
+  <div class="ai-chat-header">
+    <span class="ai-chat-title">AEON Ai</span>
+    <div style="display:flex; align-items:center; gap:4px;">
+      <button type="button" id="aiVoiceToggle" class="ghost" title="Voice replies on — tap to mute">🔊</button>
+      <button type="button" id="aiCloseBtn" class="ghost">✕</button>
+    </div>
+  </div>
+  <div id="aiMessages" class="ai-messages">
+    <div class="ai-msg assistant">How can I help you? I can support you with things like your timesheets, leave, daily progress updates, and reports — or ask me about anything else you need, like what did I work on 23/07/2026 or summarize my last report.</div>
+  </div>
+  <div class="ai-input-row">
+    <button type="button" id="aiMicBtn" class="ai-mic-btn" title="Speak your question">🎙️</button>
+    <input id="aiInput" type="text" placeholder="Ask about your saved entries…" />
+    <button type="button" id="aiSendBtn" class="ai-send-btn">➤</button>
+  </div>
+</div>
+
+<!-- QUICK JOB SWITCH — right-edge pull handle + sliding glass drawer, only
+     shown while clocked in (mirrors the News Room drawer, but on the right).
+     Tap the handle to open: pick a job from the scrollable list, then use
+     the game-console style D-pad — Job ID (top, tap to change job), Start
+     (left), Stop (right, pauses the timer), Submit (bottom, saves that
+     stretch as its own entry, same as filling the form and submitting
+     normally). After Submit, pick the next Job ID and tap Start again. -->
+<button type="button" id="qsrHandle" class="qsr-handle" style="display:none;" title="Quick Job Switch">🎮</button>
+<div id="qsrDrawerBackdrop" class="chat-overlay-backdrop"></div>
+<div id="qsrDrawer" class="qsr-drawer">
+  <div class="qsr-drawer-header">
+    <strong>Quick Job Switch</strong>
+    <button type="button" class="ghost" id="qsrDrawerCloseBtn">✕</button>
+  </div>
+  <div class="qsr-drawer-body">
+    <label for="qsrJobSearch">Job ID</label>
+    <div class="job-search-wrap" style="position:relative;">
+      <input id="qsrJobSearch" type="text" placeholder="Tap to see all jobs, or type to filter..." autocomplete="off" />
+      <div id="qsrJobResults" class="job-search-results" style="display:none;"></div>
+    </div>
+    <div id="qsrSelectedBadge" class="qsr-selected-badge">No job selected yet</div>
+
+    <label style="margin-top:14px;">Mode of work</label>
+    <div class="mode-grid" id="qsrModeGrid" style="max-height:none;">
+      <div class="qsr-mode-chip selected" data-qsr-mode="site"><span class="emoji">🏗️</span>Site</div>
+      <div class="qsr-mode-chip" data-qsr-mode="workshop"><span class="emoji">🔧</span>Workshop</div>
+      <div class="qsr-mode-chip" data-qsr-mode="office"><span class="emoji">🏢</span>Office</div>
+      <div class="qsr-mode-chip" data-qsr-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
+      <div class="qsr-mode-chip" data-qsr-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+      <div class="qsr-mode-chip" data-qsr-mode="other"><span class="emoji">✨</span>Other</div>
+    </div>
+
+    <div class="qsr-dpad-wrap">
+      <div class="qsr-dpad">
+        <div class="qsr-dpad-plate"></div>
+        <button type="button" class="qsr-slot qsr-top" id="qsrJobIdBtn" title="Tap to pick or change the job">
+          <span class="qsr-dpad-icon">🆔</span>
+          <span class="qsr-dpad-text">Job ID</span>
+        </button>
+        <button type="button" class="qsr-slot qsr-side qsr-left" id="qsrStartBtn" disabled>
+          <span class="qsr-dpad-icon">▶</span>
+          <span class="qsr-dpad-text">Start</span>
+        </button>
+        <button type="button" class="qsr-slot qsr-side qsr-right" id="qsrStopBtn" disabled>
+          <span class="qsr-dpad-icon">⏸</span>
+          <span class="qsr-dpad-text">Stop</span>
+        </button>
+        <button type="button" class="qsr-slot qsr-bottom" id="qsrSubmitBtn" disabled>
+          <span class="qsr-dpad-icon">✅</span>
+          <span class="qsr-dpad-text">Submit</span>
+        </button>
+        <div class="qsr-center" id="qsrElapsed">—</div>
+      </div>
+    </div>
+
+    <label style="margin-top:14px;">What are you doing on this job? (tap any that apply)</label>
+    <div id="qsrNotesChips" class="chip-picker"></div>
+    <label for="qsrNotes">Other / additional notes (optional)</label>
+    <textarea id="qsrNotes" placeholder="Anything else worth noting?" rows="3"></textarea>
+  </div>
+</div>
+
+<!-- NEWS ROOM — left-edge pull handle + sliding glass drawer. Tap the handle,
+     or swipe right starting from the very left edge, to open it. Admins get
+     a small compose card at the top; everyone can read. -->
+<button type="button" id="newsHandle" class="news-handle" title="News">
+  <span id="newsHandleDot" class="news-handle-dot" style="display:none;"></span>
+  📰
+</button>
+<div id="newsDrawerBackdrop" class="chat-overlay-backdrop"></div>
+<div id="newsDrawer" class="news-drawer">
+  <div class="news-drawer-header">
+    <strong>News Room</strong>
+    <button type="button" class="ghost" id="newsCloseBtn">✕</button>
+  </div>
+  <div id="newsComposeCard" class="card glass" style="display:none; margin:12px 14px 0;">
+    <label for="newsTitle">Title</label>
+    <input id="newsTitle" type="text" placeholder="e.g. New safety policy" />
+    <label for="newsBody">Message</label>
+    <textarea id="newsBody" placeholder="What's the news?"></textarea>
+    <label for="newsFile">Attach a PDF or image (optional)</label>
+    <input id="newsFile" type="file" accept="application/pdf,image/*" />
+    <button type="button" id="postNewsBtn" class="primary">Post news</button>
+  </div>
+  <div id="newsList" class="news-list"></div>
+</div>
+
+<!-- AEON TEAMS CHAT — floating icon, bottom-left, mirrors the AEON Ai orb -->
+<span id="chatOrbLabel" class="chat-orb-label" style="display:none">Aeon Teams Chat</span>
+<button id="chatOrb" class="chat-orb" aria-label="Open Aeon Teams Chat" title="Aeon Teams Chat" style="display:none">💬</button>
+
+<div id="chatOverlayBackdrop" class="chat-overlay-backdrop"></div>
+<div id="chatOverlay" class="chat-overlay">
+  <div class="card glass chat-shell" id="chatShell">
+    <div class="chat-sidebar">
+      <div class="chat-sidebar-header">
+        <strong>Aeon Teams Chat</strong>
+        <div class="chat-new-buttons">
+          <button type="button" id="newDmBtn" class="ghost" title="New direct message">💬+</button>
+          <button type="button" id="newGroupBtn" class="ghost" style="display:none" title="New group">👥+</button>
+          <button type="button" id="chatCloseBtn" class="ghost" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="chatList" class="chat-list"><div class="empty">No chats yet.</div></div>
+    </div>
+
+    <div class="chat-main">
+      <div id="chatEmpty" class="chat-empty">Pick a chat on the left, or start a new one.</div>
+      <div id="chatThreadWrap" class="chat-thread-wrap" style="display:none">
+        <div class="chat-thread-header">
+          <button type="button" id="chatBackBtn" class="ghost chat-back-btn">‹</button>
+          <span id="chatThreadPresence" class="presence-dot" style="display:none"></span>
+          <div style="display:flex; flex-direction:column; line-height:1.2; flex:1; min-width:0;">
+            <strong id="chatThreadTitle">—</strong>
+            <span id="chatThreadStatus" class="chat-thread-status"></span>
+          </div>
+          <button type="button" id="manageGroupBtn" class="ghost" style="display:none;" title="Manage group">⚙️</button>
+          <button type="button" id="chatHomeBtn" class="ghost chat-home-btn" title="Back to home">🏠 Home</button>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div id="chatAttachPreview" class="chat-attach-preview" style="display:none"></div>
+        <div class="chat-input-row">
+          <input type="file" id="chatFileInput" style="display:none" />
+          <button type="button" id="chatAttachBtn" class="chat-attach-btn" title="Attach a file">📎</button>
+          <input id="chatTextInput" type="text" placeholder="Type a message…" />
+          <button type="button" id="chatSendBtn" class="ai-send-btn">➤</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROJECTS OVERLAY -->
+<div id="projectsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="projectsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Projects</strong>
+      <button type="button" class="ghost" data-close="projects">✕</button>
+    </div>
+    <div class="panel-body">
+      <input id="projectsSearchInput" type="text" placeholder="🔍 Search projects by Job ID, name, or client…" style="margin-bottom:14px;" />
+
+      <div class="card glass" id="newProjectCard" style="display:none;">
+        <strong style="font-size:14px;">New project</strong>
+        <label for="newProjectJobId">Job ID</label>
+        <input id="newProjectJobId" type="text" placeholder="e.g. JOB-1042" />
+        <label for="newProjectName">Name (optional)</label>
+        <input id="newProjectName" type="text" placeholder="e.g. Tower 3 site inspection" />
+        <p class="hint" style="margin-top:6px;">Set each department's hour budget after creating the project, from its detail screen.</p>
+        <button id="createProjectBtn" class="primary" style="margin-top:12px;">Create project</button>
+      </div>
+
+      <label style="display:flex; align-items:center; gap:8px; margin-top:16px; font-size:13px; font-weight:400;">
+        <input type="checkbox" id="showClosedProjectsToggle" style="width:auto;" />
+        Show closed jobs
+      </label>
+      <p class="hint" style="margin-top:2px;">Closed jobs are hidden here by default and no longer appear in the Job ID search — mark a finished job Closed instead of deleting it to keep this list short without losing its history.</p>
+      <div id="projectsListArea" style="margin-top:12px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PROJECT DETAIL OVERLAY -->
+<div id="projectDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="projectDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="projectDetailBackBtn">‹ Back</button>
+      <strong id="projectDetailTitle">Project</strong>
+      <button type="button" class="ghost" data-close="projectDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="projectStatusArea" style="margin-bottom:12px;"></div>
+      <div id="projectRingsArea"></div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Department hours</strong>
+        <p class="hint" style="margin-top:4px;">Each department's hour budget for this project — hours a person logs count toward whichever department they belong to (Admin → Team).</p>
+        <div id="deptHoursListArea" style="margin-top:12px;"></div>
+        <div id="newDeptHoursCard" style="display:none; margin-top:14px;">
+          <div class="section-divider"></div>
+          <label for="deptHoursSelect">Department</label>
+          <select id="deptHoursSelect"></select>
+          <div id="deptHoursPositionWrap" style="display:none;">
+            <label for="deptHoursPosition" style="margin-top:6px;">Role</label>
+            <select id="deptHoursPosition"></select>
+          </div>
+          <label for="deptHoursValue" style="margin-top:6px;">Allocated hours</label>
+          <input id="deptHoursValue" type="number" min="0" step="0.5" placeholder="0" />
+          <button type="button" id="addDeptHoursBtn" class="primary" style="margin-top:12px;">Set hours</button>
+        </div>
+      </div>
+      <div id="projectStageArea" style="margin-top:16px;"></div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Bill of Quantities</strong>
+        <div id="boqListArea" style="margin-top:12px;"></div>
+        <div id="boqTotalRow" style="margin-top:8px;"></div>
+        <div id="newBoqItemCard" style="display:none; margin-top:14px;">
+          <div class="section-divider"></div>
+          <label for="boqItemDescription">Description</label>
+          <input id="boqItemDescription" type="text" placeholder="e.g. Cable tray, galvanized" />
+          <div class="row-2" style="margin-top:6px;">
+            <div>
+              <label for="boqItemUnit">Unit</label>
+              <input id="boqItemUnit" type="text" placeholder="e.g. m, nos, lot" />
+            </div>
+            <div>
+              <label for="boqItemQuantity">Quantity</label>
+              <input id="boqItemQuantity" type="number" min="0" step="0.01" placeholder="0" />
+            </div>
+          </div>
+          <label for="boqItemRate" style="margin-top:6px;">Unit rate</label>
+          <input id="boqItemRate" type="number" min="0" step="0.01" placeholder="0" />
+          <button type="button" id="addBoqItemBtn" class="primary" style="margin-top:12px;">Add item</button>
+        </div>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Who worked on this</strong>
+        <div id="projectContributors" style="margin-top:12px;"></div>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Time by task</strong>
+        <p class="hint" style="margin-top:4px;">What people actually spent hours on for this job — grouped the same way as the description picker, so it's easy to see where the time went.</p>
+        <div id="projectTaskBreakdownArea" style="margin-top:12px;"></div>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Share this project</strong>
+        <p class="hint" style="margin-top:4px;">Post the current status into one of your group chats.</p>
+        <select id="shareProjectGroupSelect" style="margin-top:8px;"></select>
+        <button id="shareProjectBtn" class="primary" style="margin-top:10px;">Share to group</button>
+      </div>
+      <div id="deleteProjectCard" class="card glass" style="margin-top:16px; display:none; border-color:rgba(220,90,70,0.4);">
+        <strong style="font-size:14px;">Danger zone</strong>
+        <p class="hint" style="margin-top:4px;">Permanently removes this project and its department hour budgets. Use this to clean up a duplicate or mistyped Job ID — it does not change the Job ID already saved on past timesheet entries, so lock the Job ID field going forward to avoid creating new duplicates.</p>
+        <button type="button" id="deleteProjectBtn" class="secondary" style="margin-top:10px; color:#e5867a; border-color:rgba(220,90,70,0.5);">Delete this project</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DEPARTMENTS OVERLAY -->
+<div id="departmentsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="departmentsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Departments</strong>
+      <button type="button" class="ghost" data-close="departments">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newDepartmentCard" style="display:none;">
+        <strong style="font-size:14px;">Create department</strong>
+        <label for="newDepartmentName">Name</label>
+        <input id="newDepartmentName" type="text" placeholder="e.g. Quality Assurance" />
+        <button id="createDepartmentBtn" class="primary" style="margin-top:12px;">Create department</button>
+      </div>
+      <div id="departmentsListArea" style="margin-top:16px;"></div>
+      <div class="card glass" id="syncJobHoursCard" style="display:none; margin-top:16px;">
+        <strong style="font-size:14px;">Job hour budgets — Google Sheet sync</strong>
+        <p class="hint" style="margin-top:4px;">Pulls the allocated hours straight from your JOB DATA sheet (Engineers/Supervisor/Foremen/Technicians columns) into every job's department rings — nothing to type in by hand.</p>
+        <button type="button" id="syncJobHoursBtn" class="primary" style="margin-top:12px;">🔄 Sync now from Google Sheet</button>
+        <div id="syncJobHoursResult" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DEPARTMENT DETAIL OVERLAY -->
+<div id="departmentDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="departmentDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="departmentDetailBackBtn">‹ Back</button>
+      <strong id="departmentDetailTitle">Department</strong>
+      <button type="button" class="ghost" data-close="departmentDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="departmentHeadCard" style="display:none;">
+        <strong style="font-size:14px;">Department head</strong>
+        <p class="hint" style="margin-top:4px;">Approves Special Requests for this department (admins can always approve too).</p>
+        <select id="departmentHeadSelect" style="margin-top:8px;">
+          <option value="">— No head assigned —</option>
+        </select>
+        <button type="button" class="secondary" id="saveDepartmentHeadBtn" style="margin-top:8px;">Save</button>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">People in this department</strong>
+        <p class="hint" id="departmentDetailCount" style="margin-top:4px;"></p>
+        <div id="departmentMembersArea" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENTS OVERLAY -->
+<div id="clientsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="clientsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Clients</strong>
+      <button type="button" class="ghost" data-close="clients">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newClientCard" style="display:none;">
+        <strong style="font-size:14px;">Add client</strong>
+        <label for="newClientName">Company / client name</label>
+        <input id="newClientName" type="text" placeholder="e.g. Falcon Towers LLC" />
+        <label for="newClientContact">Contact person (optional)</label>
+        <input id="newClientContact" type="text" placeholder="e.g. Ahmed Rahman" />
+        <div class="row-2" style="margin-top:6px;">
+          <div>
+            <label for="newClientEmail">Email</label>
+            <input id="newClientEmail" type="email" placeholder="name@example.com" />
+          </div>
+          <div>
+            <label for="newClientPhone">Phone</label>
+            <input id="newClientPhone" type="text" placeholder="+971…" />
+          </div>
+        </div>
+        <label for="newClientNotes">Notes (optional)</label>
+        <textarea id="newClientNotes" placeholder="Anything worth remembering about this client"></textarea>
+        <button id="createClientBtn" class="primary" style="margin-top:12px;">Add client</button>
+      </div>
+      <div id="clientsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- QUOTATIONS OVERLAY -->
+<div id="quotationsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="quotationsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Quotations</strong>
+      <button type="button" class="ghost" data-close="quotations">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newQuotationCard" style="display:none;">
+        <strong style="font-size:14px;">New quotation</strong>
+        <label for="newQuoteNumber">Quote number</label>
+        <input id="newQuoteNumber" type="text" placeholder="e.g. Q-1042" />
+        <label for="newQuoteClient">Client</label>
+        <select id="newQuoteClient"><option value="">Select a client</option></select>
+        <label for="newQuoteJobId">Project / Job ID (optional)</label>
+        <select id="newQuoteJobId"><option value="">No project linked</option></select>
+        <label for="newQuoteTitle">Title</label>
+        <input id="newQuoteTitle" type="text" placeholder="e.g. Fire alarm system upgrade" />
+        <button id="createQuotationBtn" class="primary" style="margin-top:12px;">Create quotation</button>
+      </div>
+      <div id="quotationsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- QUOTATION DETAIL OVERLAY -->
+<div id="quotationDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="quotationDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="quotationDetailBackBtn">‹ Back</button>
+      <strong id="quotationDetailTitle">Quotation</strong>
+      <button type="button" class="ghost" data-close="quotationDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div id="quotationDetailClient" style="font-size:14px; font-weight:600;">—</div>
+            <div id="quotationDetailMeta" class="hint" style="margin-top:2px;">—</div>
+          </div>
+          <div id="quotationStatusBadge"></div>
+        </div>
+        <div class="row-2" id="quotationStatusButtons" style="margin-top:14px; display:none;">
+          <button type="button" class="secondary" data-quote-status="sent">Mark sent</button>
+          <button type="button" class="secondary" data-quote-status="accepted">Mark accepted</button>
+        </div>
+        <button type="button" class="secondary" id="quotationRejectBtn" style="width:100%; margin-top:8px; display:none;">Mark rejected</button>
+      </div>
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">Line items</strong>
+        <div id="quotationItemsArea" style="margin-top:12px;"></div>
+        <div id="quotationTotalRow" style="margin-top:8px;"></div>
+        <div id="newQuoteItemCard" style="display:none; margin-top:14px;">
+          <div class="section-divider"></div>
+          <label for="quoteItemDescription">Description</label>
+          <input id="quoteItemDescription" type="text" placeholder="e.g. Supply and install smoke detectors" />
+          <div class="row-2" style="margin-top:6px;">
+            <div>
+              <label for="quoteItemQuantity">Quantity</label>
+              <input id="quoteItemQuantity" type="number" min="0" step="0.01" placeholder="1" />
+            </div>
+            <div>
+              <label for="quoteItemUnitPrice">Unit price</label>
+              <input id="quoteItemUnitPrice" type="number" min="0" step="0.01" placeholder="0" />
+            </div>
+          </div>
+          <button type="button" id="addQuoteItemBtn" class="primary" style="margin-top:12px;">Add item</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROJECT TANK OVERLAY -->
+<div id="tankOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="tankOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>CTQ Project Tank</strong>
+      <button type="button" class="ghost" data-close="tank">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" style="text-align:center;">
+        <p class="hint" style="margin-bottom:10px;">How much of the next 12 months is already covered by lined-up work.</p>
+        <div id="tankSvgArea"></div>
+        <div id="tankAlertBanner" style="display:none;"></div>
+        <div id="tankStatsArea" style="margin-top:14px; text-align:left;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LEARNING OVERLAY — free courses/certifications, grouped into tap-to-expand
+     categories (AI, cybersecurity, coding, industrial/PLC, HMI, safety…). -->
+<div id="learningOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="learningOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Learning</strong>
+      <button type="button" class="ghost" data-close="learning">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="category-intro">Free courses and certifications, picked for the kind of work this team does. Tap a topic to see what's available.</div>
+      <div id="learningTileGrid" class="category-tile-grid"></div>
+      <div id="learningDetailArea"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MY JOBS OVERLAY — everyone's own view of what they've been allocated,
+     today plus every other day (past and upcoming). Not gated by
+     allowed_features — this is just each person's own information, same as
+     the "Today's job" card on New Entry. -->
+<div id="myJobsOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="myJobsOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>My Jobs</strong>
+      <button type="button" class="ghost" data-close="myjobs">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="myJobsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SPECIAL REQUEST OVERLAY — a late/forgot/issue timesheet entry entered
+     after the fact. Submitting here does NOT create a real entry — it
+     only saves a 'pending' row that a department head (or admin) must
+     approve first (see the "Pending approvals" card, only shown to
+     people who can act on it). Approval is what actually creates the
+     entry and syncs it to GitHub + the Google Sheet. -->
+<div id="specialRequestOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="specialRequestOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🕐 Special Request</strong>
+      <button type="button" class="ghost" data-close="specialRequest">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Forgot to clock in, missed a whole day, or need to fix a mistake after the fact? Fill this in — it goes to your department head (or an admin) for approval before it becomes a real entry.</p>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">New special request</strong>
+        <div class="row-2" style="margin-top:10px;">
+          <div>
+            <label for="srDate">Date</label>
+            <input id="srDate" type="date" />
+          </div>
+          <div></div>
+        </div>
+        <div class="row-2">
+          <div>
+            <label for="srStartTime">Clock-in time</label>
+            <input id="srStartTime" type="time" />
+          </div>
+          <div>
+            <label for="srEndTime">Clock-out time</label>
+            <input id="srEndTime" type="time" />
+          </div>
+        </div>
+
+        <label for="srLocation">Location</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="srLocation" type="text" placeholder="Search a location…" autocomplete="off" />
+          <div id="srLocationResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <label for="srJobId">Job ID</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="srJobId" type="text" placeholder="Type a job number or description to search..." autocomplete="off" />
+          <div id="srJobIdResults" class="job-search-results" style="display:none;"></div>
+        </div>
+        <p class="hint">Pick the job from the list that appears — same search as New Entry.</p>
+
+        <label>Mode of work</label>
+        <div id="srModeGrid" class="mode-grid">
+          <div class="sr-mode-chip" data-sr-mode="office"><span class="emoji">🏢</span>Office</div>
+          <div class="sr-mode-chip" data-sr-mode="site"><span class="emoji">🏗️</span>Site</div>
+          <div class="sr-mode-chip" data-sr-mode="workshop"><span class="emoji">🔧</span>Workshop</div>
+          <div class="sr-mode-chip" data-sr-mode="driver"><span class="emoji">🚗</span>Driver</div>
+          <div class="sr-mode-chip" data-sr-mode="wfh"><span class="emoji">🏠</span>Work from Home</div>
+          <div class="sr-mode-chip" data-sr-mode="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+          <div class="sr-mode-chip" data-sr-mode="inspection"><span class="emoji">🔍</span>Inspection</div>
+          <div class="sr-mode-chip" data-sr-mode="field_work"><span class="emoji">🌾</span>Field Work</div>
+          <div class="sr-mode-chip" data-sr-mode="other"><span class="emoji">✨</span>Other</div>
+        </div>
+
+        <label>What did you work on? (tap any that apply)</label>
+        <div id="srDescChips" class="chip-picker"></div>
+        <label for="srDescription">Other / additional notes (optional)</label>
+        <textarea id="srDescription" placeholder="Anything else worth noting?"></textarea>
+
+        <label for="srReason">Reason you're submitting this late (required)</label>
+        <textarea id="srReason" placeholder="Why wasn't this entered on time?" required></textarea>
+
+        <button type="button" class="primary" id="srSubmitBtn" style="width:100%; margin-top:12px;">Submit for approval</button>
+      </div>
+
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">My special requests</strong>
+        <div id="mySpecialRequestsList" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card glass" id="srApprovalsCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">Pending approvals</strong>
+        <p class="hint" style="margin-top:2px;">Special requests waiting on you — approve or reject anytime.</p>
+        <div id="srApprovalsList" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LIVE DRIVERS OVERLAY — where each person with the "Driver" role last
+     showed up while the app was open. Not true background tracking (a
+     browser/PWA can't do that while fully closed) — location only updates
+     while a driver's app is open in the foreground. -->
+<div id="liveDriversOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="liveDriversOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🚗 Live Drivers</strong>
+      <button type="button" class="ghost" data-close="liveDrivers">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Last known location while each driver's app was open — not a continuous live feed.</p>
+      <button type="button" class="secondary" id="refreshLiveDriversBtn" style="margin-top:8px;">🔄 Refresh</button>
+      <div id="liveDriversMapArea" style="margin-top:12px; height:min(45vh, 380px); border-radius:14px; overflow:hidden; display:none;"></div>
+      <div id="liveDriversList" style="margin-top:12px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ENTRY DETAIL OVERLAY — tap any Queue entry, or any My Jobs row, to
+     review its full details. Placed AFTER every panel that can open it
+     (Queue's tab is not an overlay, but My Jobs above is) so it always
+     paints on top — .panel-overlay has no per-panel z-index, so DOM order
+     is what decides which overlay stacks above another when two are open
+     at once. This used to sit BEFORE myJobsOverlay, which put it behind
+     the My Jobs list instead of in front of it. -->
+<div id="entryDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="entryDetailOverlay" class="panel-overlay">
+  <div class="panel-shell" style="max-width:460px; margin:auto; max-height:76vh; align-self:center;">
+    <div class="panel-header">
+      <strong id="entryDetailTitle">Entry details</strong>
+      <button type="button" class="ghost" data-close="entryDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="entryDetailBody"></div>
+      <div id="entryDetailActions" style="margin-top:14px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DATA FEED OVERLAY — admin pastes raw WhatsApp job-announcement
+     messages; AEON Ai automatically pulls out the job number, description,
+     and client for each one, skips anything already saved, and shows a
+     checklist to confirm before adding. First-class Home tile now (used to
+     be buried inside Admin → Projects, which nobody could find). -->
+<div id="dataFeedOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="dataFeedOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Data Feed</strong>
+      <button type="button" class="ghost" data-close="datafeed">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">Quick actions</strong>
+        <p class="hint" style="margin-top:4px;">Anything else data-related starts here too.</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+          <button type="button" class="secondary" id="dfGoToTeamBtn" style="width:100%;">👥 Add or Remove People</button>
+          <button type="button" class="secondary" data-open="projects" style="width:100%;">🗂️ Add or Remove Job</button>
+          <button type="button" class="secondary" id="dfRulesBtn" style="width:100%;">📐 Rules</button>
+        </div>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">Add jobs from WhatsApp</strong>
+        <p class="hint">Paste the job announcement messages below — AEON Ai will pull out every job number, description, and client, skip anything already in your Projects list, and show you just the new ones to confirm.</p>
+        <textarea id="importJobsText" rows="8" placeholder="Paste the WhatsApp messages here..."></textarea>
+        <button id="scanImportJobsBtn" class="secondary" style="margin-top:8px;">Scan for new jobs</button>
+        <div id="importJobsResultsArea" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JOB ALLOCATION OVERLAY — pick a job, see/add/remove who's on it today -->
+<div id="allocationOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="allocationOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Job Allocation</strong>
+      <button type="button" class="ghost" data-close="allocation">✕</button>
+    </div>
+    <div class="panel-body">
+      <div style="display:flex; gap:8px; margin-bottom:14px;">
+        <button type="button" class="secondary" id="allocPlanTabBtn">📝 Plan &amp; Publish</button>
+        <button type="button" class="secondary" id="allocManageTabBtn">📋 Manage</button>
+      </div>
+
+      <!-- PLAN — build up any number of jobs (each with its own people +
+           one driver) before anything is saved. Nothing here touches the
+           database until Publish is tapped. -->
+      <div id="allocPlanView">
+
+        <!-- Morning (job-based) vs Evening (transport pickup/drop) — two
+             completely separate allocations, both publishable for the same
+             date without one overwriting the other. -->
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+          <button type="button" class="secondary" id="allocSlotDayBtn">🌅 Morning (Job)</button>
+          <button type="button" class="secondary" id="allocSlotEveningBtn">🌆 Evening (Transport)</button>
+        </div>
+
+        <div id="allocPlanMorning">
+        <label for="allocationDate">Date</label>
+        <input id="allocationDate" type="date" />
+
+        <label for="allocationJobSearch">Job ID</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="allocationJobSearch" type="text" placeholder="Tap to see all jobs, or type to filter..." autocomplete="off" />
+          <div id="allocationJobResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <div id="allocationDraftList" style="margin-top:14px;"><div class="empty">No jobs added yet — search above to add one.</div></div>
+        </div>
+
+        <!-- EVENING — no job id needed. Just who's being picked up/dropped,
+             when, and by which driver. Publishes as its own set of rows so
+             it never touches anyone's morning job allocation for the same
+             date. -->
+        <div id="allocPlanEvening" style="display:none;">
+          <label for="eveningDate">Date</label>
+          <input id="eveningDate" type="date" />
+
+          <label for="eveningDriverSelect">🚗 Driver</label>
+          <select id="eveningDriverSelect"><option value="">Choose a driver</option></select>
+
+          <label for="eveningTime">Pickup / departure time</label>
+          <input id="eveningTime" type="time" />
+
+          <label for="eveningPersonSearch" style="margin-top:10px;">Add people to pick up / drop</label>
+          <div class="job-search-wrap" style="position:relative;">
+            <input id="eveningPersonSearch" type="text" placeholder="Type a name..." autocomplete="off" />
+            <div id="eveningPersonResults" class="job-search-results" style="display:none;"></div>
+          </div>
+
+          <div id="eveningDraftList" style="margin-top:14px;"><div class="empty">No one added yet — search above to add someone.</div></div>
+
+          <button type="button" id="eveningPublishBtn" class="primary" style="margin-top:18px;">🚀 Publish evening transport<span id="eveningPublishCount"></span></button>
+          <p class="hint">Nothing is saved or visible to anyone until you tap Publish.</p>
+        </div>
+
+        <button type="button" id="allocationPublishBtn" class="primary" style="margin-top:18px;">🚀 Publish <span id="allocationPublishCount"></span></button>
+        <p class="hint">Nothing is saved or visible to anyone until you tap Publish.</p>
+      </div>
+
+      <!-- MANAGE — everything already published; edit or delete directly. -->
+      <div id="allocManageView" style="display:none;">
+        <label for="allocManageDate">Date</label>
+        <input id="allocManageDate" type="date" />
+        <div id="allocManageList" style="margin-top:14px;"></div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">🚗 Assign a driver trip</strong>
+        <p class="hint" style="margin-top:2px;">For any pick-up/drop-off — site visits or office runs. Doesn't need a job picked above.</p>
+
+        <label for="tripDriverSelect">Driver</label>
+        <select id="tripDriverSelect">
+          <option value="">Choose a driver</option>
+        </select>
+
+        <label for="tripDate">Date</label>
+        <input id="tripDate" type="date" />
+
+        <label for="tripTime">Time</label>
+        <input id="tripTime" type="time" />
+
+        <label for="tripFrom">From</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="tripFrom" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+          <div id="tripFromResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <label for="tripTo">To</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="tripTo" type="text" placeholder="Type an address, or search..." autocomplete="off" />
+          <div id="tripToResults" class="job-search-results" style="display:none;"></div>
+        </div>
+
+        <label for="tripKm">Distance in KM (optional)</label>
+        <input id="tripKm" type="number" min="0" step="0.1" placeholder="e.g. 18.5" />
+
+        <label for="tripJobId">Link to a job (optional)</label>
+        <input id="tripJobId" type="text" placeholder="Leave blank for office runs / non-job trips" />
+
+        <label for="tripAssignedBySelect">Who assigned this</label>
+        <select id="tripAssignedBySelect">
+          <option value="">Choose who's sending the driver</option>
+        </select>
+
+        <label>Task (tap any that apply)</label>
+        <div id="tripTaskChips" class="chip-picker"></div>
+
+        <button type="button" id="addTripBtn" class="primary">Add trip — notifies the driver right away</button>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <!-- MANAGE JOB CATEGORIES — the section headers used to group the
+           General description list (New Entry / Daily Progress / Report /
+           Quick Job Switch) and each project's "Time by task" breakdown.
+           Fully admin-editable: add a new one, rename/re-icon an existing
+           one, or delete one (its descriptions fall back to "Other"). -->
+      <div class="card glass">
+        <strong style="font-size:14px;">🗂️ Manage Job Categories</strong>
+        <p class="hint" style="margin-top:2px;">These group the General description list into sections (Software, Panel, Marketing, etc.) and also label the "Time by task" breakdown on each project. Add your own, rename one, or delete one — changes show up everywhere immediately.</p>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newJobDescCategoryIcon" type="text" placeholder="Icon (e.g. 🎨)" maxlength="8" style="max-width:90px; flex:none;" />
+          <input id="newJobDescCategoryLabelInput" type="text" placeholder="Category name, e.g. Quality Control" />
+          <button type="button" id="addJobDescCategoryBtn" class="secondary">+ Add</button>
+        </div>
+        <div id="jobDescCategoryList" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">🚗 Manage Job Descriptions</strong>
+        <p class="hint" style="margin-top:2px;">These are the tap-to-select options everyone sees instead of typing — General ones show up in New Entry / Daily Progress / Report / Quick Job Switch; Driver ones show up only in driver trips.</p>
+
+        <label for="newJobDescScope">List</label>
+        <select id="newJobDescScope">
+          <option value="general">General (Entry / Daily Progress / Report / Quick Job)</option>
+          <option value="driver">Driver tasks (trips)</option>
+        </select>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newJobDescLabel" type="text" placeholder="e.g. Site visit, Office work, Loading" />
+          <button type="button" id="addJobDescBtn" class="secondary">+ Add</button>
+        </div>
+        <label for="newJobDescCategory" id="newJobDescCategoryLabel" style="margin-top:8px;">Category (groups it in the tap-to-select list)</label>
+        <select id="newJobDescCategory"></select>
+        <div id="jobDescList" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">👁 Driver Activity</strong>
+        <p class="hint" style="margin-top:2px;">Pick a driver and a date to see every trip they ran and the total distance.</p>
+
+        <label for="activityDriverSelect">Driver</label>
+        <select id="activityDriverSelect">
+          <option value="">Choose a driver</option>
+        </select>
+
+        <label for="activityDate">Date</label>
+        <input id="activityDate" type="date" />
+
+        <button type="button" id="viewActivityBtn" class="secondary" style="margin-top:8px;">View activity</button>
+
+        <div id="activitySummary" style="margin-top:14px; display:none;">
+          <div class="tank-stat-row"><span class="tank-stat-label">Total distance</span><span class="tank-stat-value" id="activityTotalKm">0 km</span></div>
+          <div class="tank-stat-row"><span class="tank-stat-label">Trips</span><span class="tank-stat-value" id="activityTripCount">0</span></div>
+        </div>
+        <div id="activityTripList" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RECALLED ENTRY EDIT OVERLAY — admin corrects/restores/deletes one
+     recalled timesheet or leave entry -->
+<div id="recalledEditOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="recalledEditOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Recalled entry — <span id="recalledEditPersonName">—</span></strong>
+      <button type="button" class="ghost" data-close="recalledEdit">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="recalledEditTimesheetFields">
+        <label for="recEditDate">Date</label>
+        <input id="recEditDate" type="date" />
+        <label for="recEditStart">Start time</label>
+        <input id="recEditStart" type="time" />
+        <label for="recEditEnd">End time</label>
+        <input id="recEditEnd" type="time" />
+        <label for="recEditLunch">Lunch/break (min)</label>
+        <input id="recEditLunch" type="number" min="0" />
+        <label for="recEditJobId">Job ID</label>
+        <input id="recEditJobId" type="text" />
+        <label for="recEditProject">Project</label>
+        <input id="recEditProject" type="text" />
+        <label for="recEditLocation">Location</label>
+        <input id="recEditLocation" type="text" />
+      </div>
+      <div id="recalledEditLeaveFields" style="display:none;">
+        <label for="recEditLeaveStart">Leave start</label>
+        <input id="recEditLeaveStart" type="date" />
+        <label for="recEditLeaveEnd">Leave end</label>
+        <input id="recEditLeaveEnd" type="date" />
+      </div>
+      <label for="recEditNotes">Notes / description</label>
+      <textarea id="recEditNotes" rows="3"></textarea>
+
+      <button type="button" id="recalledSaveRestoreBtn" class="primary" style="margin-top:14px; width:100%;">💾 Save corrections &amp; restore</button>
+      <button type="button" id="recalledRestoreAsIsBtn" class="secondary" style="margin-top:8px; width:100%;">↩️ Restore as-is (no changes)</button>
+      <button type="button" id="recalledDeleteBtn" class="secondary" style="margin-top:8px; width:100%; color:var(--err);">🗑️ Delete permanently</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAP ACCESS OVERLAY — admin ticks which dashboard features one person can see -->
+<div id="mapAccessOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="mapAccessOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Map Access — <span id="mapAccessPersonName">—</span></strong>
+      <button type="button" class="ghost" data-close="mapAccess">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Tick what this person is allowed to see on their dashboard. Untick everything else to hide it.</p>
+      <label class="map-access-row" id="mapAccessAllRow">
+        <input type="checkbox" id="mapAccessAllCb" />
+        <span>🔑 Admin access — permit them to do anything (ticks every feature below)</span>
+      </label>
+      <div id="mapAccessList" style="display:flex; flex-direction:column; gap:8px; margin:10px 0;"></div>
+      <button type="button" id="mapAccessSaveBtn" class="primary">Save access</button>
+    </div>
+  </div>
+</div>
+
+<!-- EMPLOYEE ROLE & INVITATION MANAGEMENT OVERLAY -->
+<div id="peopleOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="peopleOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Employee Role &amp; Invitation Management</strong>
+      <button type="button" class="ghost" data-close="people">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">Roles</strong>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newRoleName" type="text" placeholder="Add a new role (e.g. Quality Inspector)" />
+          <button type="button" id="addRoleBtn" class="secondary">+ Add Role</button>
+        </div>
+      </div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">Invite people</strong>
+        <p class="hint" style="margin-top:4px;">Add as many rows as you like, set each person's email, role, and Map Access, then invite them one by one with each row's own Invite button — or send everyone at once with Invite All below. Rows you haven't sent yet are saved automatically, even offline — they'll still be here if you close the app or lose signal.</p>
+        <button type="button" id="addInviteRowBtn" class="secondary" style="margin-top:10px;">+ Add person</button>
+        <div id="pendingInviteRows" style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+          <div class="empty" id="pendingInviteRowsEmpty">No pending invites — tap "+ Add person" to start.</div>
+        </div>
+        <button type="button" id="inviteAllBtn" class="primary" style="margin-top:12px;">Invite All</button>
+        <p class="hint" style="margin-top:6px;">They'll get an email to confirm and set their own password. Once accepted, they show up as "active" in Team below. Anyone without custom Map Access starts with basic access (New Entry, Queue, Chat).</p>
+      </div>
+
+      <div class="card glass">
+        <strong style="font-size:14px;">Team</strong>
+        <div id="teamList" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- INVITE ROW ACCESS OVERLAY — same feature checklist as Map Access, but for
+     a not-yet-sent invite row instead of an existing person -->
+<div id="inviteAccessOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="inviteAccessOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Access for this invite</strong>
+      <button type="button" class="ghost" data-close="inviteAccess">✕</button>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Tick what this person should be able to see once they accept. Leave everything unticked to use the default basic access.</p>
+      <label class="map-access-row" id="inviteAccessAllRow">
+        <input type="checkbox" id="inviteAccessAllCb" />
+        <span>🔑 Admin access — permit them to do anything (ticks every feature below)</span>
+      </label>
+      <div id="inviteAccessList" style="display:flex; flex-direction:column; gap:8px; margin:10px 0;"></div>
+      <button type="button" id="inviteAccessSaveBtn" class="primary">Save access</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEALTH OVERLAY — everyday wellbeing info (exercise, food, sleep, balance)
+     plus general trusted health resources, grouped into tap-to-expand
+     categories. General information only, not medical advice. -->
+<div id="healthOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="healthOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Health</strong>
+      <button type="button" class="ghost" data-close="health">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="category-intro">Simple, everyday wellbeing basics. Tap a topic for a few tips and some trusted places to read more.</div>
+      <div id="healthTileGrid" class="category-tile-grid"></div>
+      <div id="healthDetailArea"></div>
+      <div class="category-disclaimer">This is general wellbeing information, not medical advice. For any health concern, please speak with a licensed doctor or your local health authority — and always use your local emergency number for anything urgent.</div>
+    </div>
+  </div>
+</div>
+
+<!-- WEATHER OVERLAY — opened by tapping the badge pinned top-left of the
+     header. Location comes from the device's own GPS (same permission
+     prompt already used for clock-in location), and the data itself is
+     Open-Meteo — free, no API key needed. -->
+<div id="weatherOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="weatherOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Weather</strong>
+      <button type="button" class="ghost" data-close="weather">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="weatherDetailArea"><div class="empty">Getting your local weather…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ABOUT — shows the app name and the currently-running version, plus a
+     one-tap "Start Tutorial" button that launches the beginner walkthrough
+     (tutorialOverlay below). This is the entry point new/confused users are
+     told to tap first. -->
+<div id="aboutOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="aboutOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>About</strong>
+      <button type="button" class="ghost" data-close="about">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="about-hero">
+        <div class="about-hero-icon">🧭</div>
+        <div class="about-hero-name">C-TORQ Digital Organization</div>
+        <div id="aboutVersionText" class="about-hero-version">Version —</div>
+      </div>
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">What's new</strong>
+        <p id="aboutUpdateNotes" class="hint" style="margin-top:6px;"></p>
+      </div>
+      <div class="card glass" style="margin-top:14px; text-align:center;">
+        <strong style="font-size:14px;">New here?</strong>
+        <p class="hint" style="margin-top:6px;">Take a quick guided tour — it'll point out where everything is, one step at a time.</p>
+        <button type="button" id="startTutorialBtn" class="primary" style="width:100%; margin-top:12px;">▶ Start Tutorial</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TUTORIAL — a beginner walkthrough driven by TUTORIAL_STEPS in app.js.
+     #tutorialSpotlight is a single positioned box whose huge box-shadow
+     dims the whole screen while leaving a see-through "hole" exactly over
+     whatever element the current step points at; #tutorialCard is a fixed
+     coach-mark with the explanation + Back/Next/Skip. -->
+<div id="tutorialOverlay" class="tutorial-overlay" style="display:none;">
+  <div id="tutorialSpotlight" class="tutorial-spotlight"></div>
+  <div id="tutorialCard" class="tutorial-card">
+    <div class="tutorial-card-progress"><span id="tutorialStepNum">1</span> / <span id="tutorialStepTotal">1</span></div>
+    <div class="tutorial-card-icon" id="tutorialCardIcon">✨</div>
+    <div class="tutorial-card-title" id="tutorialCardTitle"></div>
+    <div class="tutorial-card-text" id="tutorialCardText"></div>
+    <div class="tutorial-card-actions">
+      <button type="button" id="tutorialSkipBtn" class="tutorial-btn-ghost">Skip tour</button>
+      <div class="tutorial-card-nav">
+        <button type="button" id="tutorialBackBtn" class="tutorial-btn-ghost">Back</button>
+        <button type="button" id="tutorialNextBtn" class="tutorial-btn-primary">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<!-- Resumable/chunked uploads for larger chat attachments (photos/videos) -->
+<script src="https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

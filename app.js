@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.22.1';
+const APP_VERSION = 'v3.23.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Time by task now splits an entry\'s hours evenly across every task it was tagged with, instead of counting the full hours toward each one.';
+const APP_UPDATE_NOTES = 'Job categories are now fully yours to manage — add, rename, or delete categories in Admin, plus a real Delete button on individual job descriptions. Changes show up instantly in New Entry, Daily Progress, Quick Job Switch, and each project\'s Time by task view.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4124,17 +4124,37 @@ async function openAllocationPanel() {
 // which was hard to scan. 'other' is the catch-all for anything not
 // explicitly tagged with a category yet. Driver scope stays flat/ungrouped
 // (that list is short).
-const JOB_DESC_CATEGORIES = {
-  software: { icon: '💻', label: 'Software' },
-  commissioning: { icon: '🔧', label: 'Commissioning' },
-  panel: { icon: '🗄️', label: 'Panel' },
-  design: { icon: '📐', label: 'Design' },
-  operations: { icon: '📋', label: 'Operations' },
-  marketing: { icon: '📣', label: 'Marketing' },
-  workshop: { icon: '🛠️', label: 'Workshop' },
-  other: { icon: '✨', label: 'Other' },
-};
-const JOB_DESC_CATEGORY_ORDER = ['software', 'commissioning', 'panel', 'design', 'operations', 'marketing', 'workshop', 'other'];
+// Job description categories are admin-manageable (Admin -> Employee Role &
+// Invitation Management -> Manage Job Categories) and backed by the
+// job_description_categories table instead of a hardcoded list, so adding,
+// renaming, or deleting a category here reflects immediately everywhere
+// categories show up (chip pickers, the job description list, and each
+// project's "Time by task" breakdown). The category "key" saved on each
+// job_descriptions row is a stable slug, not a foreign key, so renaming a
+// category's label later never orphans anything.
+let jobDescCategoriesCache = null;
+async function fetchJobDescCategories(forceRefresh = false) {
+  if (jobDescCategoriesCache && !forceRefresh) return jobDescCategoriesCache;
+  const { data, error } = await sb.from('job_description_categories').select('key, label, icon, sort_order').order('sort_order', { ascending: true });
+  jobDescCategoriesCache = error ? [] : (data || []);
+  return jobDescCategoriesCache;
+}
+
+// { software: {icon,label}, ... } plus a safety-net 'other' entry so lookups
+// never blow up even if that row is somehow missing or not loaded yet.
+function jobDescCategoryMetaMap(categories) {
+  const map = {};
+  (categories || []).forEach((c) => { map[c.key] = { icon: c.icon || '✨', label: c.label || c.key }; });
+  if (!map.other) map.other = { icon: '✨', label: 'Other' };
+  return map;
+}
+
+// Builds a stable slug key from a typed category name, e.g. "Quality
+// Control" -> "quality_control", for use as the new category's DB key.
+function slugifyCategoryKey(label) {
+  const slug = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return slug || 'category';
+}
 
 async function fetchJobDescriptions(scope, activeOnly = true) {
   let q = sb.from('job_descriptions').select('id, label, active, category').eq('scope', scope).order('label', { ascending: true });
@@ -4158,14 +4178,17 @@ async function renderChipPicker(containerId, scope, selectedSet) {
       <button type="button" class="desc-chip ${selectedSet.has(o.label) ? 'selected' : ''}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>
     `).join('');
   } else {
+    const categories = await fetchJobDescCategories();
+    const catMeta = jobDescCategoryMetaMap(categories);
+    const categoryOrder = categories.map((c) => c.key).concat(categories.some((c) => c.key === 'other') ? [] : ['other']);
     const byCategory = {};
     options.forEach((o) => {
-      const cat = JOB_DESC_CATEGORIES[o.category] ? o.category : 'other';
+      const cat = catMeta[o.category] ? o.category : 'other';
       (byCategory[cat] = byCategory[cat] || []).push(o);
     });
-    box.innerHTML = JOB_DESC_CATEGORY_ORDER.filter((cat) => byCategory[cat]?.length).map((cat) => {
+    box.innerHTML = categoryOrder.filter((cat) => byCategory[cat]?.length).map((cat) => {
       const items = byCategory[cat];
-      const meta = JOB_DESC_CATEGORIES[cat];
+      const meta = catMeta[cat];
       const selectedCount = items.filter((o) => selectedSet.has(o.label)).length;
       return `
         <div class="desc-category-group">
@@ -4242,7 +4265,12 @@ async function renderJobDescList() {
   const box = $('jobDescList');
   if (!box) return;
   const scope = $('newJobDescScope')?.value || 'general';
-  const items = await fetchJobDescriptions(scope, false); // admin sees inactive too
+  const [items, categories] = await Promise.all([
+    fetchJobDescriptions(scope, false), // admin sees inactive too
+    scope === 'general' ? fetchJobDescCategories() : Promise.resolve([]),
+  ]);
+  const catMeta = jobDescCategoryMetaMap(categories);
+  const categoryOrder = categories.map((c) => c.key).concat(categories.some((c) => c.key === 'other') ? [] : ['other']);
   if (!items.length) { box.innerHTML = '<div class="empty">No job descriptions added yet for this list.</div>'; return; }
   box.innerHTML = items.map((it) => {
     if (editingJobDescId === it.id) {
@@ -4256,7 +4284,7 @@ async function renderJobDescList() {
     }
     const categoryPicker = scope === 'general' ? `
         <select class="jobdesc-category-select" data-recat-jobdesc="${it.id}">
-          ${JOB_DESC_CATEGORY_ORDER.map((cat) => `<option value="${cat}" ${((it.category && JOB_DESC_CATEGORIES[it.category] ? it.category : 'other') === cat) ? 'selected' : ''}>${JOB_DESC_CATEGORIES[cat].icon} ${JOB_DESC_CATEGORIES[cat].label}</option>`).join('')}
+          ${categoryOrder.map((cat) => `<option value="${cat}" ${((it.category && catMeta[it.category] ? it.category : 'other') === cat) ? 'selected' : ''}>${catMeta[cat].icon} ${catMeta[cat].label}</option>`).join('')}
         </select>` : '';
     return `
       <div class="jobdesc-row ${it.active ? '' : 'inactive'}">
@@ -4264,6 +4292,7 @@ async function renderJobDescList() {
         ${categoryPicker}
         <button type="button" class="secondary" data-edit-jobdesc="${it.id}">✏️ Edit</button>
         <button type="button" class="secondary" data-toggle-jobdesc="${it.id}" data-active="${it.active}">${it.active ? '⛔ Disable' : '✅ Enable'}</button>
+        <button type="button" class="secondary" data-delete-jobdesc="${it.id}">🗑️ Delete</button>
       </div>
     `;
   }).join('');
@@ -4323,6 +4352,27 @@ async function renderJobDescList() {
       renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
     });
   });
+
+  box.querySelectorAll('[data-delete-jobdesc]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.deleteJobdesc;
+      if (!confirm('Delete this job description permanently? Entries that already used it keep their saved text, but it will disappear from the tap-to-select list everywhere.')) return;
+      const { error } = await sb.from('job_descriptions').delete().eq('id', id);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      showToast('Deleted.');
+      renderJobDescList();
+      refreshGeneralDescriptionChips();
+      renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
+      renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
+    });
+  });
+}
+
+async function populateJobDescCategorySelect() {
+  const sel = $('newJobDescCategory');
+  if (!sel) return;
+  const categories = await fetchJobDescCategories();
+  sel.innerHTML = categories.map((c) => `<option value="${c.key}">${c.icon} ${escapeHtml(c.label)}</option>`).join('');
 }
 
 function refreshJobDescCategoryVisibility() {
@@ -4332,6 +4382,7 @@ function refreshJobDescCategoryVisibility() {
   if ($('newJobDescCategoryLabel')) $('newJobDescCategoryLabel').style.display = show ? '' : 'none';
 }
 refreshJobDescCategoryVisibility();
+populateJobDescCategorySelect();
 $('newJobDescScope')?.addEventListener('change', () => { renderJobDescList(); refreshJobDescCategoryVisibility(); });
 
 $('addJobDescBtn')?.addEventListener('click', async () => {
@@ -4347,6 +4398,108 @@ $('addJobDescBtn')?.addEventListener('click', async () => {
   refreshGeneralDescriptionChips();
   renderChipPicker('tripTaskChips', 'driver', tripTaskSelected);
   renderChipPicker('ownTripTaskChips', 'driver', ownTripTaskSelected);
+});
+
+// ---------------------------------------------------------------------
+// ADMIN: manage the categories themselves (add / rename / re-icon / delete).
+// Deleting a category re-tags every job description using it to 'other'
+// first, so nothing is ever silently orphaned; 'other' itself can't be
+// deleted since it's the fallback everything else falls back to.
+// ---------------------------------------------------------------------
+let editingJobDescCategoryKey = null;
+
+async function renderJobDescCategoryList() {
+  const box = $('jobDescCategoryList');
+  if (!box) return;
+  const categories = await fetchJobDescCategories(true);
+  if (!categories.length) { box.innerHTML = '<div class="empty">No categories yet.</div>'; return; }
+  box.innerHTML = categories.map((c) => {
+    if (editingJobDescCategoryKey === c.key) {
+      return `
+        <div class="jobdesc-row">
+          <input type="text" class="jobdesc-edit-input" data-cat-edit-icon="${c.key}" value="${escapeHtml(c.icon)}" maxlength="8" style="max-width:70px; flex:none;" />
+          <input type="text" class="jobdesc-edit-input" data-cat-edit-label="${c.key}" value="${escapeHtml(c.label)}" />
+          <button type="button" class="secondary" data-cat-save="${c.key}">💾 Save</button>
+          <button type="button" class="secondary" data-cat-cancel="${c.key}">✖ Cancel</button>
+        </div>
+      `;
+    }
+    return `
+      <div class="jobdesc-row">
+        <span class="jobdesc-label">${c.icon} ${escapeHtml(c.label)}</span>
+        <button type="button" class="secondary" data-cat-edit="${c.key}">✏️ Edit</button>
+        ${c.key !== 'other' ? `<button type="button" class="secondary" data-cat-delete="${c.key}">🗑️ Delete</button>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  box.querySelectorAll('[data-cat-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => { editingJobDescCategoryKey = btn.dataset.catEdit; renderJobDescCategoryList(); });
+  });
+  box.querySelectorAll('[data-cat-cancel]').forEach((btn) => {
+    btn.addEventListener('click', () => { editingJobDescCategoryKey = null; renderJobDescCategoryList(); });
+  });
+  box.querySelectorAll('[data-cat-save]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.catSave;
+      const iconInput = box.querySelector(`[data-cat-edit-icon="${key}"]`);
+      const labelInput = box.querySelector(`[data-cat-edit-label="${key}"]`);
+      const icon = (iconInput?.value || '✨').trim() || '✨';
+      const label = (labelInput?.value || '').trim();
+      if (!label) { showToast('Category name cannot be empty.'); return; }
+      const { error } = await sb.from('job_description_categories').update({ icon, label }).eq('key', key);
+      if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+      showToast('Saved.');
+      editingJobDescCategoryKey = null;
+      await fetchJobDescCategories(true);
+      renderJobDescCategoryList();
+      renderJobDescList();
+      populateJobDescCategorySelect();
+      refreshGeneralDescriptionChips();
+    });
+  });
+  box.querySelectorAll('[data-cat-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.catDelete;
+      if (!confirm('Delete this category? Any job description currently tagged with it will move to "Other" instead of disappearing.')) return;
+      const { error: reassignError } = await sb.from('job_descriptions').update({ category: 'other' }).eq('category', key);
+      if (reassignError) { showToast(`Couldn't reassign existing items: ${reassignError.message}`); return; }
+      const { error } = await sb.from('job_description_categories').delete().eq('key', key);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      showToast('Category deleted — anything using it moved to Other.');
+      await fetchJobDescCategories(true);
+      renderJobDescCategoryList();
+      renderJobDescList();
+      populateJobDescCategorySelect();
+      refreshGeneralDescriptionChips();
+    });
+  });
+}
+renderJobDescCategoryList();
+
+$('addJobDescCategoryBtn')?.addEventListener('click', async () => {
+  const iconInput = $('newJobDescCategoryIcon');
+  const labelInput = $('newJobDescCategoryLabelInput');
+  const label = (labelInput?.value || '').trim();
+  const icon = (iconInput?.value || '✨').trim() || '✨';
+  if (!label) { showToast('Enter a category name.'); return; }
+  const key = slugifyCategoryKey(label);
+  const existing = await fetchJobDescCategories(true);
+  if (existing.some((c) => c.key === key)) { showToast('A category with that name (or a very similar one) already exists.'); return; }
+  // 'other' is always sort_order 999 so it stays last — new categories
+  // should slot in before it, not after.
+  const nonOther = existing.filter((c) => c.key !== 'other');
+  const sortOrder = nonOther.length ? Math.max(...nonOther.map((c) => c.sort_order || 0)) + 1 : 1;
+  const { error } = await sb.from('job_description_categories').insert({ key, label, icon, sort_order: sortOrder });
+  if (error) { showToast(`Couldn't add category: ${error.message}`); return; }
+  if (iconInput) iconInput.value = '';
+  if (labelInput) labelInput.value = '';
+  showToast('Category added.');
+  await fetchJobDescCategories(true);
+  renderJobDescCategoryList();
+  renderJobDescList();
+  populateJobDescCategorySelect();
+  refreshGeneralDescriptionChips();
 });
 
 async function populateDriverSelects() {
@@ -6207,7 +6360,7 @@ async function openProjectDetail(jobId, name) {
     ? bigTotalRingBlock(totalAllocated, totalUsed, overNames) + `<div class="project-rings">${merged.map((d) => deptRingBlock(d)).join('')}</div>`
     : '<div class="empty">No departments set up yet — add one from Admin → Team → Departments.</div>';
   renderProjectContributors(data);
-  renderProjectTaskBreakdown(data);
+  await renderProjectTaskBreakdown(data);
   renderDeptHoursManager(jobId, departments);
 }
 
@@ -6219,7 +6372,7 @@ async function openProjectDetail(jobId, name) {
 // this job's own busiest task (there's no "budget" per task, unlike the
 // department rings above) — so it's a quick "where did the time go" read,
 // not a pass/fail one.
-function renderProjectTaskBreakdown(data) {
+async function renderProjectTaskBreakdown(data) {
   const wrap = $('projectTaskBreakdownArea');
   if (!wrap) return;
   const tasks = data.taskBreakdown || [];
@@ -6230,14 +6383,17 @@ function renderProjectTaskBreakdown(data) {
       : '<div class="empty">No hours logged yet.</div>';
     return;
   }
+  const categories = await fetchJobDescCategories();
+  const catMeta = jobDescCategoryMetaMap(categories);
+  const categoryOrder = categories.map((c) => c.key).concat(categories.some((c) => c.key === 'other') ? [] : ['other']);
   const maxHours = Math.max(...tasks.map((t) => t.hours), 0.01);
   const byCategory = {};
   tasks.forEach((t) => {
-    const cat = JOB_DESC_CATEGORIES[t.category] ? t.category : 'other';
+    const cat = catMeta[t.category] ? t.category : 'other';
     (byCategory[cat] = byCategory[cat] || []).push(t);
   });
-  const sections = JOB_DESC_CATEGORY_ORDER.filter((cat) => byCategory[cat]?.length).map((cat) => {
-    const meta = JOB_DESC_CATEGORIES[cat];
+  const sections = categoryOrder.filter((cat) => byCategory[cat]?.length).map((cat) => {
+    const meta = catMeta[cat];
     const items = byCategory[cat];
     const catTotal = Math.round(items.reduce((s, t) => s + t.hours, 0) * 100) / 100;
     return `
