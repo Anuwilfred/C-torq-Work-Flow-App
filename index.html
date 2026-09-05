@@ -1189,11 +1189,9 @@
   </div>
 </div>
 
-<!-- DATA FEED OVERLAY — admin pastes raw WhatsApp job-announcement
-     messages; AEON Ai automatically pulls out the job number, description,
-     and client for each one, skips anything already saved, and shows a
-     checklist to confirm before adding. First-class Home tile now (used to
-     be buried inside Admin → Projects, which nobody could find). -->
+<!-- DATA FEED OVERLAY — quick actions (people/jobs/rules) plus the
+     admin-managed job type & category editor. First-class Home tile now
+     (used to be buried inside Admin → Projects, which nobody could find). -->
 <div id="dataFeedOverlayBackdrop" class="panel-overlay-backdrop"></div>
 <div id="dataFeedOverlay" class="panel-overlay">
   <div class="panel-shell">
@@ -1211,12 +1209,43 @@
           <button type="button" class="secondary" id="dfRulesBtn" style="width:100%;">📐 Rules</button>
         </div>
       </div>
+      <!-- MANAGE JOB TYPES — what shows up in "What did you work on?" across
+           New Entry / Daily Progress / Report / Quick Job Switch. Add a new
+           job type, edit its name, recategorize it, disable it, or delete it
+           outright — every change reflects immediately everywhere it's used,
+           including each project's "Time by task" breakdown. -->
       <div class="card glass">
-        <strong style="font-size:14px;">Add jobs from WhatsApp</strong>
-        <p class="hint">Paste the job announcement messages below — AEON Ai will pull out every job number, description, and client, skip anything already in your Projects list, and show you just the new ones to confirm.</p>
-        <textarea id="importJobsText" rows="8" placeholder="Paste the WhatsApp messages here..."></textarea>
-        <button id="scanImportJobsBtn" class="secondary" style="margin-top:8px;">Scan for new jobs</button>
-        <div id="importJobsResultsArea" style="margin-top:12px;"></div>
+        <strong style="font-size:14px;">🛠️ Manage Job Types</strong>
+        <p class="hint" style="margin-top:2px;">These are the tap-to-select options everyone sees instead of typing — General ones show up in New Entry / Daily Progress / Report / Quick Job Switch; Driver ones show up only in driver trips.</p>
+
+        <label for="newJobDescScope">List</label>
+        <select id="newJobDescScope">
+          <option value="general">General (Entry / Daily Progress / Report / Quick Job)</option>
+          <option value="driver">Driver tasks (trips)</option>
+        </select>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newJobDescLabel" type="text" placeholder="e.g. Site visit, Office work, Loading" />
+          <button type="button" id="addJobDescBtn" class="secondary">+ Add</button>
+        </div>
+        <label for="newJobDescCategory" id="newJobDescCategoryLabel" style="margin-top:8px;">Category (groups it in the tap-to-select list)</label>
+        <select id="newJobDescCategory"></select>
+        <div id="jobDescList" style="margin-top:10px;"></div>
+      </div>
+
+      <!-- MANAGE JOB CATEGORIES — the section headers used to group the
+           General description list (New Entry / Daily Progress / Report /
+           Quick Job Switch) and each project's "Time by task" breakdown.
+           Fully admin-editable: add a new one, rename/re-icon an existing
+           one, or delete one (its job types fall back to "Other"). -->
+      <div class="card glass">
+        <strong style="font-size:14px;">🗂️ Manage Job Categories</strong>
+        <p class="hint" style="margin-top:2px;">These group the General job-type list into sections (Software, Panel, Marketing, etc.) and also label the "Time by task" breakdown on each project. Add your own, rename one, or delete one — changes show up everywhere immediately.</p>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newJobDescCategoryIcon" type="text" placeholder="Icon (e.g. 🎨)" maxlength="8" style="max-width:90px; flex:none;" />
+          <input id="newJobDescCategoryLabelInput" type="text" placeholder="Category name, e.g. Quality Control" />
+          <button type="button" id="addJobDescCategoryBtn" class="secondary">+ Add</button>
+        </div>
+        <div id="jobDescCategoryList" style="margin-top:10px;"></div>
       </div>
     </div>
   </div>
@@ -1343,35 +1372,6 @@
         <div id="tripTaskChips" class="chip-picker"></div>
 
         <button type="button" id="addTripBtn" class="primary">Add trip — notifies the driver right away</button>
-      </div>
-
-      <div class="section-divider"></div>
-
-      <div class="card glass">
-        <strong style="font-size:14px;">🚗 Manage Job Descriptions</strong>
-        <p class="hint" style="margin-top:2px;">These are the tap-to-select options everyone sees instead of typing — General ones show up in New Entry / Daily Progress / Report / Quick Job Switch; Driver ones show up only in driver trips.</p>
-
-        <label for="newJobDescScope">List</label>
-        <select id="newJobDescScope">
-          <option value="general">General (Entry / Daily Progress / Report / Quick Job)</option>
-          <option value="driver">Driver tasks (trips)</option>
-        </select>
-        <div class="location-row" style="margin-top:8px;">
-          <input id="newJobDescLabel" type="text" placeholder="e.g. Site visit, Office work, Loading" />
-          <button type="button" id="addJobDescBtn" class="secondary">+ Add</button>
-        </div>
-        <label for="newJobDescCategory" id="newJobDescCategoryLabel" style="margin-top:8px;">Category (groups it in the tap-to-select list)</label>
-        <select id="newJobDescCategory">
-          <option value="software">💻 Software</option>
-          <option value="commissioning">🔧 Commissioning</option>
-          <option value="panel">🗄️ Panel</option>
-          <option value="design">📐 Design</option>
-          <option value="operations">📋 Operations</option>
-          <option value="marketing">📣 Marketing</option>
-          <option value="workshop">🛠️ Workshop</option>
-          <option value="other">✨ Other</option>
-        </select>
-        <div id="jobDescList" style="margin-top:10px;"></div>
       </div>
 
       <div class="section-divider"></div>
