@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.21.0';
+const APP_VERSION = 'v3.21.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: an About screen (Home → About) showing the app version, plus a Start Tutorial button that guides new users around the app step by step.';
+const APP_UPDATE_NOTES = 'Tutorial now also points out AEON Ai, News Room, and Quick Job Switch — not just the Home tiles.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4637,6 +4637,9 @@ const TUTORIAL_STEPS = [
   { selector: '.home-tile[data-open="allocation"]', icon: '🚚', title: 'Job Allocation', text: "See — or if you're an admin, publish — who's assigned to which job today." },
   { selector: '.home-tile[data-open="datafeed"]', icon: '📥', title: 'Data Feed', text: 'Bulk-load or manage the data behind the app.' },
   { selector: '.home-tile[data-tab="settings"]', icon: '⚙️', title: 'Settings', text: 'Your account, password, and notification preferences.' },
+  { selector: '#aiOrb', icon: '🤖', title: 'AEON Ai', text: 'This floating button is always one tap away — ask it about your timesheets, leave, reports, or anything you need help with.' },
+  { selector: '#newsHandle', icon: '📰', title: 'News Room', text: 'Pull this tab on the left edge (or tap it) to read company announcements and updates.' },
+  { selector: '#qsrHandle', icon: '🎮', title: 'Quick Job Switch', text: 'Once you\'re clocked in, this handle appears on the right edge — use it to jump between jobs during the day without leaving your current screen.' },
   { selector: '.home-tile[data-open="about"]', icon: '✅', title: "You're all set!", text: "Come back to About anytime — from here you can always re-check the app version or replay this tour." },
 ];
 
