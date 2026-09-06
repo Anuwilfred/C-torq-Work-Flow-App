@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.27.0';
+const APP_VERSION = 'v3.27.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project timeline is now a real department hand-off workflow: admin starts it, each stage\'s department head acknowledges and hands off their stage, durations are tracked, and it\'s all admin-configurable in Data Feed → Manage Project Stages.';
+const APP_UPDATE_NOTES = 'Project timeline polish: active stage is now light red and done stages are green, the hand-off point pulses so it stands out, the duration text no longer overlaps the connector line, and the department chip is easier to read.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6272,15 +6272,18 @@ function drawStageLadder(container, templates, byKey, activeIdx) {
   gGray.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#8a8985', 'stop-opacity': 0.55 }));
   gGray.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#5f5e5a', 'stop-opacity': 0.4 }));
   gGray.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#5f5e5a', 'stop-opacity': 0.25 }));
-  const gOrange = svgEl('radialGradient', { id: 'stageGOrange', cx: '35%', cy: '30%', r: '75%' });
-  gOrange.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f2a878', 'stop-opacity': 1 }));
-  gOrange.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#e08a5f', 'stop-opacity': 0.95 }));
-  gOrange.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#cc785c', 'stop-opacity': 0.75 }));
-  const gBlue = svgEl('radialGradient', { id: 'stageGBlue', cx: '35%', cy: '30%', r: '75%' });
-  gBlue.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#9fd2f2', 'stop-opacity': 1 }));
-  gBlue.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#5fb8e0', 'stop-opacity': 0.95 }));
-  gBlue.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#3d8fb0', 'stop-opacity': 0.75 }));
-  defs.appendChild(gGray); defs.appendChild(gOrange); defs.appendChild(gBlue);
+  // Done = green (completed & handed off). Active = light red (currently
+  // sitting with a department, awaiting their hand-off). Not-yet-reached
+  // stages stay the neutral gray gradient above.
+  const gGreen = svgEl('radialGradient', { id: 'stageGGreen', cx: '35%', cy: '30%', r: '75%' });
+  gGreen.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#9fe0ae', 'stop-opacity': 1 }));
+  gGreen.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#4caf6a', 'stop-opacity': 0.95 }));
+  gGreen.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#3a8a54', 'stop-opacity': 0.75 }));
+  const gRed = svgEl('radialGradient', { id: 'stageGRed', cx: '35%', cy: '30%', r: '75%' });
+  gRed.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f5b3b3', 'stop-opacity': 1 }));
+  gRed.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#e06565', 'stop-opacity': 0.95 }));
+  gRed.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#c74a4a', 'stop-opacity': 0.75 }));
+  defs.appendChild(gGray); defs.appendChild(gGreen); defs.appendChild(gRed);
   const glow = svgEl('filter', { id: 'stageGlow', x: '-80%', y: '-80%', width: '260%', height: '260%' });
   glow.appendChild(svgEl('feGaussianBlur', { stdDeviation: 3.4, result: 'blur' }));
   const merge = svgEl('feMerge', {});
@@ -6295,14 +6298,25 @@ function drawStageLadder(container, templates, byKey, activeIdx) {
   svg.appendChild(svgEl('path', { d: curveD(pts), fill: 'none', stroke: '#403c37', 'stroke-width': 15, 'stroke-linecap': 'round' }));
   svg.appendChild(svgEl('path', { d: curveD(pts), fill: 'none', stroke: 'rgba(255,255,255,0.6)', 'stroke-width': 2.2, 'stroke-dasharray': '9 12', 'stroke-linecap': 'round' }));
 
-  // ---- glowing accent overlay for every stretch that's fully done ----
+  // ---- green glow overlay for every stretch that's fully done ----
   for (let i = 1; i < pts.length; i++) {
     if (byKey[pts[i - 1].key]?.completed && byKey[pts[i].key]?.completed) {
       svg.appendChild(svgEl('path', {
-        d: curveD([pts[i - 1], pts[i]]), fill: 'none', stroke: 'var(--accent, #e08a5f)',
+        d: curveD([pts[i - 1], pts[i]]), fill: 'none', stroke: '#4caf6a',
         'stroke-width': 7, 'stroke-linecap': 'round', filter: 'url(#stageGlow)', opacity: 0.95,
       }));
     }
+  }
+
+  // ---- pulsing "handed off to here" segment: the stretch of road leading
+  // into whichever stage is currently active. Draws the eye straight to the
+  // stage that JUST received the hand-off. ----
+  if (activeIdx > 0 && activeIdx < pts.length) {
+    svg.appendChild(svgEl('path', {
+      d: curveD([pts[activeIdx - 1], pts[activeIdx]]), fill: 'none', stroke: '#e06565',
+      class: 'stage-handoff-pulse',
+      'stroke-width': 7, 'stroke-linecap': 'round', filter: 'url(#stageGlow)',
+    }));
   }
 
   // ---- one milestone marker + callout box per stage (read-only — the
@@ -6317,9 +6331,24 @@ function drawStageLadder(container, templates, byKey, activeIdx) {
     const boxAbove = i % 2 === 0;
     const boxY = p.y + (boxAbove ? -BOX_OFFSET : BOX_OFFSET);
 
+    // Compute the callout box's real size FIRST so the connector line below
+    // can end exactly at the box's near edge — otherwise, whenever the box
+    // grows taller (a 2-line label, or a duration line), the line's old
+    // fixed-length end point falls short of or short-cuts through the box
+    // and visually overlaps the duration/label text.
+    const lines = splitStageLabel(label, 20);
+    const lineW = Math.max(...lines.map((l) => l.length));
+    const boxW = Math.min(206, Math.max(104, lineW * 6.7 + 26));
+    let boxH = lines.length > 1 ? 46 : 32;
+    const durationText = done && row.started_at && row.completed_at
+      ? formatStageDuration(new Date(row.completed_at) - new Date(row.started_at))
+      : (isActive && row?.started_at ? `${formatStageDuration(Date.now() - new Date(row.started_at))} so far` : '');
+    if (durationText) boxH += 14;
+
     svg.appendChild(svgEl('line', {
-      x1: p.x, y1: p.y, x2: p.x, y2: boxY + (boxAbove ? 16 : -16),
-      stroke: done ? 'var(--accent, #e08a5f)' : (isActive ? '#5fb8e0' : 'rgba(207,205,201,0.45)'), 'stroke-width': 2.2,
+      x1: p.x, y1: p.y, x2: p.x, y2: boxY + (boxAbove ? boxH / 2 : -boxH / 2),
+      stroke: done ? '#4caf6a' : (isActive ? '#e06565' : 'rgba(207,205,201,0.45)'), 'stroke-width': 2.2,
+      class: isActive ? 'stage-handoff-pulse' : '',
     }));
 
     const g = svgEl('g', { class: `stage-node${done ? ' done' : ''}${isActive ? ' active' : ''}` });
@@ -6340,14 +6369,6 @@ function drawStageLadder(container, templates, byKey, activeIdx) {
     // vanishing into whatever colorful/blurred content sits behind it.
     // Once a stage has real timing, its box also shows how long it took
     // (or, for the active stage, how long it's been active so far).
-    const lines = splitStageLabel(label, 20);
-    const lineW = Math.max(...lines.map((l) => l.length));
-    const boxW = Math.min(206, Math.max(104, lineW * 6.7 + 26));
-    let boxH = lines.length > 1 ? 46 : 32;
-    const durationText = done && row.started_at && row.completed_at
-      ? formatStageDuration(new Date(row.completed_at) - new Date(row.started_at))
-      : (isActive && row?.started_at ? `${formatStageDuration(Date.now() - new Date(row.started_at))} so far` : '');
-    if (durationText) boxH += 14;
     const box = svgEl('rect', {
       class: `stage-box${done ? ' done' : ''}${isActive ? ' active' : ''}`,
       x: p.x - boxW / 2, y: boxY - boxH / 2, width: boxW, height: boxH, rx: 9,
@@ -6440,7 +6461,7 @@ async function renderProjectStages(jobId) {
   activeArea.innerHTML = `
     <div class="stage-active-card">
       <div class="stage-active-top">
-        <span class="stage-active-label">🟦 Active now: ${escapeHtml(current.label)}</span>
+        <span class="stage-active-label">🟥 Active now: ${escapeHtml(current.label)}</span>
         <span class="stage-active-dept">${escapeHtml(dept?.name || 'No department assigned')}</span>
       </div>
       ${elapsed ? `<div class="stage-active-elapsed">${elapsed} so far</div>` : ''}

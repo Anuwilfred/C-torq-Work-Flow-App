@@ -333,8 +333,11 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 }
 .stage-body { stroke-width: 2.5; transition: fill 0.3s ease, stroke 0.3s ease; }
 .stage-node .stage-body { fill: url(#stageGGray); stroke: var(--accent-2); }
-.stage-node.done .stage-body { fill: url(#stageGOrange); stroke: var(--accent); }
-.stage-node.active .stage-body { fill: url(#stageGBlue); stroke: #5fb8e0; }
+/* Done/handed-off = green. Active (currently sitting with a department) =
+   light red, so it reads as "needs attention" at a glance. Not-yet-reached
+   stages stay the default gray above. */
+.stage-node.done .stage-body { fill: url(#stageGGreen); stroke: #4caf6a; }
+.stage-node.active .stage-body { fill: url(#stageGRed); stroke: #e06565; animation: stageHandoffPulse 1.6s ease-in-out infinite; }
 .stage-shine { fill: #fff; opacity: 0.4; pointer-events: none; }
 .stage-num { font-size: 12.5px; font-weight: 700; fill: rgba(245,244,240,0.85); pointer-events: none; }
 .stage-check { font-size: 15px; font-weight: 800; fill: #1a1310; pointer-events: none; }
@@ -346,15 +349,24 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
   stroke-width: 1.5;
   transition: fill 0.3s ease, stroke 0.3s ease;
 }
-.stage-box.done { fill: rgba(224, 138, 95, 0.24); stroke: var(--accent); }
-.stage-box.active { fill: rgba(95, 184, 224, 0.22); stroke: #5fb8e0; }
+.stage-box.done { fill: rgba(76, 175, 106, 0.24); stroke: #4caf6a; }
+.stage-box.active { fill: rgba(224, 101, 101, 0.22); stroke: #e06565; }
 .stage-lbl {
   font-size: 12px;
   font-weight: 700;
   fill: #f5f4f0;
 }
 .stage-duration { font-size: 10.5px; font-weight: 650; fill: rgba(245,244,240,0.65); }
-.stage-duration.done { fill: rgba(224, 138, 95, 0.95); }
+.stage-duration.done { fill: rgba(122, 214, 148, 0.95); }
+
+/* Pulsing "just handed off to here" road segment + connector line, drawn
+   for whichever stage is currently active — draws the eye straight to the
+   stage that just received the hand-off. */
+.stage-handoff-pulse { animation: stageHandoffPulse 1.6s ease-in-out infinite; }
+@keyframes stageHandoffPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.32; }
+}
 
 /* Active-stage summary card + hand-off action, rendered below the road. */
 .stage-active-card {
@@ -367,8 +379,11 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 .stage-active-label { font-weight: 700; font-size: 13.5px; color: var(--text); }
 .stage-active-dept {
   font-size: 12px;
-  color: var(--text-dim, rgba(245,244,240,0.75));
-  background: rgba(255,255,255,0.06);
+  font-weight: 650;
+  color: rgba(245,244,240,0.95);
+  background: rgba(10,10,10,0.55);
+  border: 1px solid rgba(255,255,255,0.12);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
   padding: 3px 9px;
   border-radius: 999px;
 }
