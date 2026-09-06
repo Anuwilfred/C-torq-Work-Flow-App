@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.28.0';
+const APP_VERSION = 'v3.28.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Analytics redesigned: the hard-to-read pie chart and 3D surface are gone, replaced with a clean category-share ring and a new hours-logged-over-time line graph — same glass look, but every label is now easy to read.';
+const APP_UPDATE_NOTES = 'Project Analytics now uses Apple Health/Activity-style nested rings for category share, plus a polished stat-card and trend-graph look throughout the card.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6834,15 +6834,16 @@ async function renderProjectTaskBreakdown(data) {
   renderProjectHoursTrend(data.dailyTrend || [], data.project?.totalAllocatedHours);
 }
 
-// "Category share" ring — a hand-drawn SVG donut (no charting library, no
-// canvas text) so every label lives in plain HTML with the app's normal
-// glass-contrast styling instead of library-rendered text that can end up
-// low-contrast or clipped. Sliced by broad CATEGORY (not individual task —
-// the task-level bar chart above already covers that), so this answers a
-// different question: which bucket of work ate the hours. Always draws
-// SOMETHING (the "environment") even before any hours are tagged — a dim
-// even ring across every category that exists — rather than hiding the
-// chart outright, so it's obvious the feature is there and waiting.
+// "Category share" — Apple Watch/Health-style concentric Activity rings:
+// up to 3 nested rings (like Move/Exercise/Stand), each a thick round-capped
+// arc sitting over a dim track of the SAME hue, sized by that category's
+// share of the job's total hours, with a bold total in the center. The
+// full category list (not just the 3 shown as rings) is always listed
+// below so nothing is hidden — the rings are the headline, the list is the
+// detail, exactly like Apple Health's summary-then-breakdown layout.
+// Always draws SOMETHING (the "environment") even before any hours are
+// tagged — three even, very dim rings — rather than hiding the card
+// outright, so it's obvious the feature is there and waiting.
 function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
   const section = $('projectRingSection');
   const area = $('projectRingArea');
@@ -6852,9 +6853,11 @@ function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
   if (!hasData && !categoryKeyOrder.length) { section.style.display = 'none'; return; }
   section.style.display = '';
 
-  const R = 72, CX = 100, CY = 100, SW = 26;
-  const circumference = 2 * Math.PI * R;
-  let segmentsHtml = '';
+  const CX = 110, CY = 110;
+  // Outermost ring first (biggest share reads as the most prominent ring,
+  // same visual hierarchy as Apple's Move ring being the outer one).
+  const RINGS = [{ r: 92, sw: 19 }, { r: 70, sw: 19 }, { r: 48, sw: 19 }];
+  let ringsHtml = '';
   let legendHtml = '';
   let totalHours = 0;
 
@@ -6866,28 +6869,44 @@ function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
     });
     totalHours = Math.round(Object.values(catTotals).reduce((s, v) => s + v, 0) * 100) / 100;
     const sortedCats = categoryKeyOrder.filter((c) => catTotals[c] > 0).sort((a, b) => catTotals[b] - catTotals[a]);
-    let offset = 0;
+
     sortedCats.forEach((cat, i) => {
       const hours = Math.round(catTotals[cat] * 100) / 100;
       const frac = totalHours > 0 ? hours / totalHours : 0;
-      const dash = frac * circumference;
       const color = paColor(i);
-      segmentsHtml += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="${SW}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" />`;
-      offset += dash;
       const pct = Math.round(frac * 100);
+      if (i < RINGS.length) {
+        const { r, sw } = RINGS[i];
+        const circumference = 2 * Math.PI * r;
+        const dash = Math.max(frac * circumference, frac > 0 ? sw * 0.6 : 0); // tiny nub stays visible even for a sliver of a share
+        ringsHtml += `
+          <circle cx="${CX}" cy="${CY}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" opacity="0.2" />
+          <circle cx="${CX}" cy="${CY}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round"
+            stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}"
+            transform="rotate(-90 ${CX} ${CY})" class="pa-ring-arc" />`;
+      }
       legendHtml += `
-        <div class="pa-ring-legend-row">
+        <div class="pa-ring-legend-row${i < RINGS.length ? ' pa-ring-legend-active' : ''}">
           <span class="pa-ring-dot" style="background:${color};"></span>
           <span class="pa-ring-legend-label">${escapeHtml(catMeta[cat]?.icon || '')} ${escapeHtml(catMeta[cat]?.label || cat)}</span>
           <span class="pa-ring-legend-value">${hours}h <span class="pa-ring-legend-pct">${pct}%</span></span>
         </div>`;
     });
+    if (sortedCats.length > RINGS.length) {
+      legendHtml += `<div class="pa-ring-legend-note">Rings above show the top ${RINGS.length} — every category is still listed here.</div>`;
+    }
   } else {
-    const n = categoryKeyOrder.length;
-    const dash = circumference / n;
+    RINGS.forEach(({ r, sw }, i) => {
+      const color = paColor(i);
+      const circumference = 2 * Math.PI * r;
+      const dash = circumference / 3;
+      ringsHtml += `
+        <circle cx="${CX}" cy="${CY}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" opacity="0.14" />
+        <circle cx="${CX}" cy="${CY}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" opacity="0.4"
+          stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" transform="rotate(-90 ${CX} ${CY})" />`;
+    });
     categoryKeyOrder.forEach((cat, i) => {
       const color = paColor(i);
-      segmentsHtml += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="${SW}" opacity="0.28" stroke-dasharray="${(dash - 2).toFixed(2)} ${(circumference - dash + 2).toFixed(2)}" stroke-dashoffset="${(-i * dash).toFixed(2)}" />`;
       legendHtml += `
         <div class="pa-ring-legend-row muted">
           <span class="pa-ring-dot" style="background:${color};"></span>
@@ -6900,10 +6919,7 @@ function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
   area.innerHTML = `
     <div class="pa-ring-wrap">
       <div class="pa-ring-svg-wrap">
-        <svg viewBox="0 0 200 200" class="pa-ring-svg">
-          <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgba(207,205,201,0.16)" stroke-width="${SW}" />
-          <g transform="rotate(-90 ${CX} ${CY})">${segmentsHtml}</g>
-        </svg>
+        <svg viewBox="0 0 220 220" class="pa-ring-svg">${ringsHtml}</svg>
         <div class="pa-ring-center">
           <div class="pa-ring-center-value">${hasData ? totalHours : 0}h</div>
           <div class="pa-ring-center-label">${hasData ? 'logged' : 'waiting for hours'}</div>
@@ -6974,9 +6990,11 @@ function renderProjectHoursTrend(dailyTrend, totalAllocatedHours) {
       ${budgetLineHtml}
       <path d="${areaPath}" fill="url(#paTrendFill)" stroke="none" />
       <path d="${linePath}" fill="none" stroke="var(--accent, #e08a5f)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" />
+      <circle cx="${xAt(points.length - 1).toFixed(1)}" cy="${yAt(lastCumulative).toFixed(1)}" r="5.5" fill="var(--accent, #e08a5f)" stroke="#141414" stroke-width="2" />
       <foreignObject x="${(PAD_L - 4).toFixed(1)}" y="${(H - PAD_B + 6).toFixed(1)}" width="130" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="pa-trend-xtick">${escapeHtml(firstDateLabel)}</div></foreignObject>
       <foreignObject x="${(W - PAD_R - 126).toFixed(1)}" y="${(H - PAD_B + 6).toFixed(1)}" width="130" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="pa-trend-xtick" style="text-align:right;">${escapeHtml(lastDateLabel)}</div></foreignObject>
     </svg>
+    <div class="pa-trend-total"><span class="pa-trend-total-value">${lastCumulative}h</span> logged to date${allocated > 0 ? ` <span class="pa-trend-total-sub">of ${allocated}h allocated</span>` : ''}</div>
     <div class="pa-trend-legend">
       <span class="pa-trend-legend-item"><span class="pa-trend-swatch"></span>Hours logged (cumulative)</span>
       ${allocated > 0 ? `<span class="pa-trend-legend-item"><span class="pa-trend-swatch dashed"></span>Allocated budget (${allocated}h)</span>` : ''}
