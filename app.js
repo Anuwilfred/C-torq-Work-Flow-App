@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.27.2';
+const APP_VERSION = 'v3.28.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Data Feed → Manage Project Stages: you can now type an exact position number to drop a stage anywhere in the roadmap order, both when adding a new stage and when reordering an existing one.';
+const APP_UPDATE_NOTES = 'Project Analytics redesigned: the hard-to-read pie chart and 3D surface are gone, replaced with a clean category-share ring and a new hours-logged-over-time line graph — same glass look, but every label is now easy to read.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4530,8 +4530,8 @@ async function renderProjectStageTemplateList() {
 
   box.innerHTML = templates.map((t, i) => `
     <div class="jobdesc-row" style="flex-wrap:wrap;">
-      <input type="number" min="1" max="${templates.length}" value="${i + 1}" data-stage-pos="${t.id}"
-        title="Type a position number to move this stage there" style="width:48px; flex:0 0 48px; text-align:center;" />
+      <input type="number" class="stage-pos-input" min="1" max="${templates.length}" value="${i + 1}" data-stage-pos="${t.id}"
+        title="Type a position number to move this stage there" />
       <span class="jobdesc-label" style="flex:1 1 170px;">${escapeHtml(t.label)}</span>
       <select data-stage-dept="${t.id}" style="flex:1 1 150px;">
         <option value="">No department</option>
@@ -4601,6 +4601,44 @@ async function renderProjectStageTemplateList() {
       if (delErr) { showToast(`Couldn't remove: ${delErr.message}`); return; }
       showToast('Stage removed.');
       renderProjectStageTemplateList();
+    });
+  });
+}
+
+// Lets an admin set/change each department's head right here in Data Feed —
+// the same head_id also shown/editable from Team → the department detail
+// view, and the same field advance-project-stage checks to decide who may
+// acknowledge/hand off that department's stage. Kept here so every
+// important roadmap setting lives in one place without a trip to Admin.
+async function renderDepartmentHeadsList() {
+  const box = $('departmentHeadsList');
+  if (!box) return;
+  const [{ data: depts, error }, { data: people }] = await Promise.all([
+    sb.from('departments').select('id, name, head_id').order('name', { ascending: true }),
+    sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true }),
+  ]);
+  if (error || !depts || !depts.length) {
+    box.innerHTML = '<div class="empty">No departments yet — add one in Team → Departments first.</div>';
+    return;
+  }
+  const activePeople = people || [];
+  const peopleOptions = activePeople.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+  box.innerHTML = depts.map((d) => `
+    <div class="jobdesc-row">
+      <span class="jobdesc-label" style="flex:1 1 140px;">${escapeHtml(d.name)}</span>
+      <select data-dept-head="${d.id}" style="flex:1 1 200px;">
+        <option value="">— No head assigned —</option>
+        ${peopleOptions}
+      </select>
+    </div>
+  `).join('');
+  box.querySelectorAll('[data-dept-head]').forEach((sel) => {
+    const dept = depts.find((d) => d.id === sel.dataset.deptHead);
+    sel.value = dept?.head_id || '';
+    sel.addEventListener('change', async () => {
+      const { error: updErr } = await sb.from('departments').update({ head_id: sel.value || null }).eq('id', sel.dataset.deptHead);
+      if (updErr) { showToast(`Couldn't save: ${updErr.message}`); return; }
+      showToast(`Saved — ${dept?.name || 'this department'}'s head can now acknowledge/hand off their stage.`);
     });
   });
 }
@@ -4975,6 +5013,7 @@ function openPanel(name, opts = {}) {
     renderJobDescCategoryList();
     populateStageDepartmentSelect();
     renderProjectStageTemplateList();
+    renderDepartmentHeadsList();
   }
 }
 function closePanel(name) {
@@ -6788,188 +6827,161 @@ async function renderProjectTaskBreakdown(data) {
 
   wrap.innerHTML = statsHtml + taskChartHtml + deptChartHtml + peopleChartHtml;
 
-  // The pie and 3D surface below live in their OWN persistent divs (outside
-  // wrap's innerHTML) since Plotly needs a stable DOM node it fully owns —
-  // re-rendering wrap above would otherwise destroy the chart's container
-  // out from under it and throw on the next Plotly call.
-  renderProjectCategoryPie(tasks, catMeta, categoryKeyOrder);
-  renderProjectSurfaceChart(data.taskMatrix || [], data.project?.departments || [], catMeta, categoryKeyOrder);
+  // The ring and trend graph below live in their OWN persistent divs
+  // (outside wrap's innerHTML) so they can show/hide their section
+  // independently of the bars above re-rendering.
+  renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder);
+  renderProjectHoursTrend(data.dailyTrend || [], data.project?.totalAllocatedHours);
 }
 
-// "Category share" pie — sliced by the actual TASK (Programming, IO mapping,
-// etc.), not just the parent category, so it's clear what specifically ate
-// the hours, not only which broad bucket it fell in. Each slice is still
-// colored per-task and its hover/label carries the parent category too. A
-// bold total-hours readout sits in the donut hole (gauge-style) instead of
-// a plain empty center. Always draws SOMETHING (the "environment") even
-// before any hours are tagged — an even placeholder ring across every
-// category that exists — rather than hiding the chart outright, so it's
-// obvious the feature is there and waiting, filling in for real the moment
-// tagged hours start coming in.
-function renderProjectCategoryPie(tasks, catMeta, categoryKeyOrder) {
-  const section = $('projectPieSection');
-  const el = $('projectCategoryPie');
-  if (!section || !el || typeof Plotly === 'undefined') { if (section) section.style.display = 'none'; return; }
+// "Category share" ring — a hand-drawn SVG donut (no charting library, no
+// canvas text) so every label lives in plain HTML with the app's normal
+// glass-contrast styling instead of library-rendered text that can end up
+// low-contrast or clipped. Sliced by broad CATEGORY (not individual task —
+// the task-level bar chart above already covers that), so this answers a
+// different question: which bucket of work ate the hours. Always draws
+// SOMETHING (the "environment") even before any hours are tagged — a dim
+// even ring across every category that exists — rather than hiding the
+// chart outright, so it's obvious the feature is there and waiting.
+function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
+  const section = $('projectRingSection');
+  const area = $('projectRingArea');
+  if (!section || !area) return;
   const realTasks = (tasks || []).filter((t) => t.hours > 0);
   const hasData = realTasks.length > 0;
   if (!hasData && !categoryKeyOrder.length) { section.style.display = 'none'; return; }
   section.style.display = '';
 
-  let labels; let values; let colors; let customdata;
-  if (hasData) {
-    const sorted = [...realTasks].sort((a, b) => b.hours - a.hours);
-    labels = sorted.map((t) => t.label);
-    values = sorted.map((t) => Math.round(t.hours * 100) / 100);
-    colors = sorted.map((_, i) => paColor(i));
-    customdata = sorted.map((t) => `${catMeta[t.category]?.icon || ''} ${catMeta[t.category]?.label || t.category}`.trim());
-  } else {
-    labels = categoryKeyOrder.map((cat) => `${catMeta[cat]?.icon || ''} ${catMeta[cat]?.label || cat}`.trim());
-    values = categoryKeyOrder.map(() => 1);
-    colors = categoryKeyOrder.map((_, i) => paColor(i));
-    customdata = labels.map(() => '');
-  }
-  const totalHours = hasData ? Math.round(values.reduce((s, v) => s + v, 0) * 100) / 100 : 0;
+  const R = 72, CX = 100, CY = 100, SW = 26;
+  const circumference = 2 * Math.PI * R;
+  let segmentsHtml = '';
+  let legendHtml = '';
+  let totalHours = 0;
 
-  Plotly.newPlot(el, [{
-    type: 'pie',
-    labels,
-    values,
-    customdata,
-    marker: { colors, line: { color: '#141414', width: 2 } },
-    opacity: hasData ? 1 : 0.32,
-    textinfo: hasData ? 'label+percent' : 'none',
-    textposition: 'outside',
-    automargin: true,
-    textfont: { color: '#f5f4f0', size: 11 },
-    hovertemplate: hasData ? '<b>%{label}</b><br>%{customdata}<br>%{value}h (%{percent})<extra></extra>' : '%{label}<br>No tagged hours yet<extra></extra>',
-    hole: 0.42,
-  }], {
-    paper_bgcolor: 'transparent',
-    plot_bgcolor: 'transparent',
-    showlegend: false,
-    margin: { t: 30, b: 30, l: 30, r: 30 },
-    font: { color: '#f5f4f0' },
-    annotations: [hasData ? {
-      text: `<b>${totalHours}h</b><br>logged`, showarrow: false, x: 0.5, y: 0.5,
-      font: { size: 16, color: '#f5f4f0' },
-    } : {
-      text: 'Waiting for<br>tagged hours', showarrow: false, x: 0.5, y: 0.5,
-      font: { size: 11.5, color: 'rgba(245,244,240,0.75)' },
-    }],
-  }, { displayModeBar: false, responsive: true });
+  if (hasData) {
+    const catTotals = {};
+    realTasks.forEach((t) => {
+      const cat = catMeta[t.category] ? t.category : 'other';
+      catTotals[cat] = (catTotals[cat] || 0) + t.hours;
+    });
+    totalHours = Math.round(Object.values(catTotals).reduce((s, v) => s + v, 0) * 100) / 100;
+    const sortedCats = categoryKeyOrder.filter((c) => catTotals[c] > 0).sort((a, b) => catTotals[b] - catTotals[a]);
+    let offset = 0;
+    sortedCats.forEach((cat, i) => {
+      const hours = Math.round(catTotals[cat] * 100) / 100;
+      const frac = totalHours > 0 ? hours / totalHours : 0;
+      const dash = frac * circumference;
+      const color = paColor(i);
+      segmentsHtml += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="${SW}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" />`;
+      offset += dash;
+      const pct = Math.round(frac * 100);
+      legendHtml += `
+        <div class="pa-ring-legend-row">
+          <span class="pa-ring-dot" style="background:${color};"></span>
+          <span class="pa-ring-legend-label">${escapeHtml(catMeta[cat]?.icon || '')} ${escapeHtml(catMeta[cat]?.label || cat)}</span>
+          <span class="pa-ring-legend-value">${hours}h <span class="pa-ring-legend-pct">${pct}%</span></span>
+        </div>`;
+    });
+  } else {
+    const n = categoryKeyOrder.length;
+    const dash = circumference / n;
+    categoryKeyOrder.forEach((cat, i) => {
+      const color = paColor(i);
+      segmentsHtml += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="${SW}" opacity="0.28" stroke-dasharray="${(dash - 2).toFixed(2)} ${(circumference - dash + 2).toFixed(2)}" stroke-dashoffset="${(-i * dash).toFixed(2)}" />`;
+      legendHtml += `
+        <div class="pa-ring-legend-row muted">
+          <span class="pa-ring-dot" style="background:${color};"></span>
+          <span class="pa-ring-legend-label">${escapeHtml(catMeta[cat]?.icon || '')} ${escapeHtml(catMeta[cat]?.label || cat)}</span>
+          <span class="pa-ring-legend-value">—</span>
+        </div>`;
+    });
+  }
+
+  area.innerHTML = `
+    <div class="pa-ring-wrap">
+      <div class="pa-ring-svg-wrap">
+        <svg viewBox="0 0 200 200" class="pa-ring-svg">
+          <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgba(207,205,201,0.16)" stroke-width="${SW}" />
+          <g transform="rotate(-90 ${CX} ${CY})">${segmentsHtml}</g>
+        </svg>
+        <div class="pa-ring-center">
+          <div class="pa-ring-center-value">${hasData ? totalHours : 0}h</div>
+          <div class="pa-ring-center-label">${hasData ? 'logged' : 'waiting for hours'}</div>
+        </div>
+      </div>
+      <div class="pa-ring-legend">${legendHtml}</div>
+    </div>
+  `;
 }
 
-// "Department × Task surface" — the 3D chart: rows = departments, columns
-// = task categories, height = hours logged. Color is driven by how
-// close/over that DEPARTMENT'S budget is (not raw height) so a whole
-// over-budget department's row reads hot even if any single cell on it
-// isn't the tallest thing on the chart — this is what makes "red = crossed
-// the allotted time" true. Uses a full blue -> green -> yellow -> red
-// spectrum (Plotly's "Jet" colorscale), the same look as a CFD/heat-map
-// plot, per what was asked for.
-//
-// The grid (departments x categories, and each row's budget color) is
-// drawn even before any hours are tagged to a specific task — the
-// "environment" should be visible from the start, with peaks rising into
-// it as tagged entries come in, rather than the whole chart appearing out
-// of nowhere the first time something matches. Real per-cell hours (and
-// the "who" in each cell's hover) still only show up once actually tagged.
-function renderProjectSurfaceChart(taskMatrix, departments, catMeta, categoryKeyOrder) {
-  const section = $('projectSurfaceSection');
-  const el = $('projectSurfaceChart');
-  if (!section || !el || typeof Plotly === 'undefined') { if (section) section.style.display = 'none'; return; }
-
-  // Rows: every department with either a budget or logged hours on this
-  // job, most-used first; falls back to whatever departments exist at all
-  // so the grid still has something to show on a brand-new project.
-  const deptsWithActivity = departments.filter((d) => (Number(d.usedHours) || 0) > 0 || (Number(d.allocatedHours) || 0) > 0);
-  const deptPool = deptsWithActivity.length ? deptsWithActivity : departments;
-  const sortedDepts = [...deptPool].sort((a, b) => (Number(b.usedHours) || 0) - (Number(a.usedHours) || 0)).slice(0, 10);
-  const deptIds = sortedDepts.map((d) => d.id);
-  if (!deptIds.length) { section.style.display = 'none'; return; }
-  const deptNameById = {};
-  departments.forEach((d) => { deptNameById[d.id] = d.name; });
-
-  // Columns: ALWAYS every category that exists, whether or not it has a
-  // tagged cell yet — not just the ones with data so far. A grid with only
-  // one real column/row is degenerate (Plotly can't shade a surface between
-  // a single point), which is what made this look like a bare, colorless
-  // wireframe when only one category had hours logged. Showing the full
-  // axis every time guarantees an actual multi-cell surface to shade.
-  const catsToShow = categoryKeyOrder;
-  if (!catsToShow.length) { section.style.display = 'none'; return; }
+// "Hours logged over time" — a hand-drawn SVG line/area chart (cumulative
+// hours logged on this job, day by day) instead of a 3D surface. Replaces
+// the old department×task surface: that chart's real value (spotting a
+// department running hot) is already covered by the rings/bars above it,
+// while this answers the one thing they couldn't — is the job's overall
+// pace on track to land inside its allocated hours. Every label is a
+// solid-background pill/box (foreignObject + normal HTML), never bare SVG
+// text over the glass card, so it stays legible regardless of what's
+// behind it.
+function renderProjectHoursTrend(dailyTrend, totalAllocatedHours) {
+  const section = $('projectTrendSection');
+  const area = $('projectTrendArea');
+  if (!section || !area) return;
+  const points = (dailyTrend || []).filter((d) => d && d.date);
+  if (!points.length) { section.style.display = 'none'; return; }
   section.style.display = '';
+  if (points.length < 2) {
+    area.innerHTML = '<div class="empty">Only one day logged so far — a trend line needs at least two.</div>';
+    return;
+  }
 
-  const budgetByDept = {};
-  departments.forEach((d) => { budgetByDept[d.id] = { allocated: Number(d.allocatedHours) || 0, used: Number(d.usedHours) || 0 }; });
+  const allocated = Number(totalAllocatedHours) || 0;
+  const lastCumulative = points[points.length - 1].cumulativeHours;
+  const maxY = Math.max(lastCumulative, allocated) * 1.12 || 1;
 
-  const cellByKey = {};
-  taskMatrix.forEach((c) => { cellByKey[`${c.departmentId}::${c.category}`] = c; });
+  const W = 600, H = 220, PAD_L = 46, PAD_R = 16, PAD_T = 16, PAD_B = 30;
+  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+  const xAt = (i) => PAD_L + (points.length === 1 ? 0 : (i / (points.length - 1)) * plotW);
+  const yAt = (v) => PAD_T + plotH - (Math.max(0, v) / maxY) * plotH;
 
-  const z = [];
-  const surfacecolor = [];
-  const text = [];
-  const maxAnyHours = Math.max(...taskMatrix.map((c) => c.hours), 0.01);
-  deptIds.forEach((deptId) => {
-    const zRow = []; const colorRow = []; const textRow = [];
-    const budget = budgetByDept[deptId];
-    // 0 = comfortably under budget, 1 = at/over budget (capped) — this is
-    // what actually drives the hot end of the color scale, not raw hours,
-    // so an over-budget department's whole row skews red/orange even
-    // before any of its hours are broken down by task.
-    const ratio = budget && budget.allocated > 0 ? Math.min(budget.used / budget.allocated, 1.3) / 1.3 : null;
-    const deptName = deptNameById[deptId] || 'Unknown department';
-    catsToShow.forEach((cat) => {
-      const cell = cellByKey[`${deptId}::${cat}`];
-      const hours = cell ? cell.hours : 0;
-      zRow.push(hours);
-      colorRow.push(ratio !== null ? ratio : Math.min(hours / maxAnyHours, 1));
-      const catLabel = catMeta[cat]?.label || cat;
-      const who = cell && cell.topPeople.length
-        ? cell.topPeople.map((p) => `${p.name} (${p.hours}h)`).join(', ')
-        : 'No one tagged to this task yet';
-      const budgetNote = budget && budget.allocated > 0
-        ? `${budget.used}h of ${budget.allocated}h department budget`
-        : 'No department budget set for this job';
-      textRow.push(`<b>${escapeHtml(deptName)}</b> — ${escapeHtml(catLabel)}<br>${hours}h logged<br>Who: ${escapeHtml(who)}<br>${escapeHtml(budgetNote)}`);
-    });
-    z.push(zRow);
-    surfacecolor.push(colorRow);
-    text.push(textRow);
-  });
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yAt(p.cumulativeHours).toFixed(1)}`).join(' ');
+  const floorY = (PAD_T + plotH).toFixed(1);
+  const areaPath = `${linePath} L ${xAt(points.length - 1).toFixed(1)} ${floorY} L ${xAt(0).toFixed(1)} ${floorY} Z`;
 
-  Plotly.newPlot(el, [{
-    type: 'surface',
-    z,
-    surfacecolor,
-    text,
-    hovertemplate: '%{text}<extra></extra>',
-    colorscale: 'Jet',
-    cmin: 0,
-    cmax: 1,
-    showscale: true,
-    colorbar: {
-      title: { text: 'Budget load', font: { color: '#cfcdc9', size: 10 } },
-      tickfont: { color: '#cfcdc9', size: 9 },
-      len: 0.7, thickness: 12, x: 1,
-    },
-    // Floor-projected color contour (a CFD/heat-map touch) plus a lit,
-    // glossy surface instead of a flat matte one — this is what actually
-    // makes the color read as vivid rather than a bare wireframe.
-    contours: { z: { show: true, usecolormap: true, project: { z: true }, highlightcolor: '#fff' } },
-    lighting: { ambient: 0.65, diffuse: 0.85, roughness: 0.4, specular: 0.55, fresnel: 0.2 },
-    lightposition: { x: 100, y: 150, z: 200 },
-  }], {
-    paper_bgcolor: 'transparent',
-    font: { color: '#cfcdc9', size: 10 },
-    margin: { t: 10, b: 10, l: 10, r: 10 },
-    scene: {
-      xaxis: { title: 'Task type', tickvals: catsToShow.map((_, i) => i), ticktext: catsToShow.map((c) => catMeta[c]?.label || c), color: '#cfcdc9', gridcolor: 'rgba(207,205,201,0.25)' },
-      yaxis: { title: 'Department', tickvals: deptIds.map((_, i) => i), ticktext: deptIds.map((id) => deptNameById[id] || 'Unknown'), color: '#cfcdc9', gridcolor: 'rgba(207,205,201,0.25)' },
-      zaxis: { title: 'Hours', color: '#cfcdc9', gridcolor: 'rgba(207,205,201,0.25)' },
-      bgcolor: 'transparent',
-    },
-  }, { displayModeBar: false, responsive: true });
+  const GRID_STEPS = 4;
+  let gridHtml = '';
+  for (let g = 0; g <= GRID_STEPS; g++) {
+    const val = (maxY / GRID_STEPS) * g;
+    const y = yAt(val);
+    gridHtml += `<line x1="${PAD_L}" y1="${y.toFixed(1)}" x2="${W - PAD_R}" y2="${y.toFixed(1)}" stroke="rgba(207,205,201,0.14)" stroke-width="1" />`;
+    gridHtml += `<foreignObject x="0" y="${(y - 9).toFixed(1)}" width="${PAD_L - 6}" height="18"><div xmlns="http://www.w3.org/1999/xhtml" class="pa-trend-ytick">${Math.round(val)}h</div></foreignObject>`;
+  }
+  const budgetLineHtml = allocated > 0 ? `<line x1="${PAD_L}" y1="${yAt(allocated).toFixed(1)}" x2="${W - PAD_R}" y2="${yAt(allocated).toFixed(1)}" stroke="#f2b755" stroke-width="1.6" stroke-dasharray="6 5" />` : '';
+
+  const fmtDate = (d) => { try { return new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return d; } };
+  const firstDateLabel = fmtDate(points[0].date);
+  const lastDateLabel = fmtDate(points[points.length - 1].date);
+
+  area.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" class="pa-trend-svg">
+      <defs>
+        <linearGradient id="paTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent, #e08a5f)" stop-opacity="0.45" />
+          <stop offset="100%" stop-color="var(--accent, #e08a5f)" stop-opacity="0.02" />
+        </linearGradient>
+      </defs>
+      ${gridHtml}
+      ${budgetLineHtml}
+      <path d="${areaPath}" fill="url(#paTrendFill)" stroke="none" />
+      <path d="${linePath}" fill="none" stroke="var(--accent, #e08a5f)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" />
+      <foreignObject x="${(PAD_L - 4).toFixed(1)}" y="${(H - PAD_B + 6).toFixed(1)}" width="130" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="pa-trend-xtick">${escapeHtml(firstDateLabel)}</div></foreignObject>
+      <foreignObject x="${(W - PAD_R - 126).toFixed(1)}" y="${(H - PAD_B + 6).toFixed(1)}" width="130" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="pa-trend-xtick" style="text-align:right;">${escapeHtml(lastDateLabel)}</div></foreignObject>
+    </svg>
+    <div class="pa-trend-legend">
+      <span class="pa-trend-legend-item"><span class="pa-trend-swatch"></span>Hours logged (cumulative)</span>
+      ${allocated > 0 ? `<span class="pa-trend-legend-item"><span class="pa-trend-swatch dashed"></span>Allocated budget (${allocated}h)</span>` : ''}
+    </div>
+  `;
 }
 
 // Admin-only cleanup tool for exactly the kind of mistake that started this

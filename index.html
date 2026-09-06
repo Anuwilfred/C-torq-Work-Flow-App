@@ -831,14 +831,13 @@
         <strong style="font-size:14px;">📊 Project Analytics</strong>
         <p class="hint" style="margin-top:4px;">Where the time on this job actually went — which task type took the most hours, which department used the most time, and who put in the most hours.</p>
         <div id="projectTaskBreakdownArea" style="margin-top:12px;"></div>
-        <div id="projectPieSection" class="pa-section" style="display:none;">
-          <div class="pa-section-title">🥧 Category share</div>
-          <div id="projectCategoryPie" style="height:260px;"></div>
+        <div id="projectRingSection" class="pa-section" style="display:none;">
+          <div class="pa-section-title">🍩 Category share</div>
+          <div id="projectRingArea"></div>
         </div>
-        <div id="projectSurfaceSection" class="pa-section" style="display:none;">
-          <div class="pa-section-title">🌄 Department × Task surface</div>
-          <p class="hint" style="margin-top:-4px; margin-bottom:8px;">Drag to rotate, scroll to zoom. Height = hours logged; color runs blue → green → yellow → red the closer (or further over) that department is to its allocated budget. Hover any point to see who worked on it.</p>
-          <div id="projectSurfaceChart" style="height:380px;"></div>
+        <div id="projectTrendSection" class="pa-section" style="display:none;">
+          <div class="pa-section-title">📈 Hours logged over time</div>
+          <div id="projectTrendArea"></div>
         </div>
       </div>
       <div class="card glass" style="margin-top:16px;">
@@ -1267,14 +1266,19 @@
            department snapshot from when it began. -->
       <div class="card glass">
         <strong style="font-size:14px;">🛣️ Manage Project Stages</strong>
-        <p class="hint" style="margin-top:2px;">The roadmap shown on every project's "Project timeline". Add, reorder, or remove a stage, and assign which department owns each one — only that department's head (set from Team → the department) can acknowledge and hand off their stage. Type a number in the # box below to drop a stage into that exact position.</p>
+        <p class="hint" style="margin-top:2px;">The roadmap shown on every project's "Project timeline". Add, reorder, or remove a stage, and assign which department owns each one — only that department's head (set below) can acknowledge and hand off their stage. Type a number in the # box below to drop a stage into that exact position.</p>
         <div class="location-row" style="margin-top:8px;">
           <input id="newStageLabel" type="text" placeholder="e.g. Site survey" style="flex:1 1 160px;" />
           <select id="newStageDepartment"><option value="">No department yet</option></select>
-          <input id="newStagePosition" type="number" min="1" placeholder="#" title="Position (optional — leave blank to add at the end)" style="width:60px; flex:0 0 60px;" />
+          <input id="newStagePosition" type="number" class="stage-pos-input" min="1" placeholder="#" title="Position (optional — leave blank to add at the end)" />
           <button type="button" id="addStageTemplateBtn" class="secondary">+ Add</button>
         </div>
         <div id="projectStageTemplateList" style="margin-top:10px;"></div>
+        <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--glass-border);">
+          <strong style="font-size:13px;">👤 Department heads</strong>
+          <p class="hint" style="margin-top:2px;">Whoever is set here is the person who can acknowledge and hand off that department's stage on the roadmap above.</p>
+          <div id="departmentHeadsList" style="margin-top:8px;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1640,8 +1644,6 @@
 <!-- Resumable/chunked uploads for larger chat attachments (photos/videos) -->
 <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-<!-- Project Analytics' 3D surface + pie charts (Project Detail) -->
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.34.0/plotly.min.js"></script>
 <script src="./config.js"></script>
 <script src="./app.js"></script>
 </body>
