@@ -334,6 +334,7 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 .stage-body { stroke-width: 2.5; transition: fill 0.3s ease, stroke 0.3s ease; }
 .stage-node .stage-body { fill: url(#stageGGray); stroke: var(--accent-2); }
 .stage-node.done .stage-body { fill: url(#stageGOrange); stroke: var(--accent); }
+.stage-node.active .stage-body { fill: url(#stageGBlue); stroke: #5fb8e0; }
 .stage-shine { fill: #fff; opacity: 0.4; pointer-events: none; }
 .stage-num { font-size: 12.5px; font-weight: 700; fill: rgba(245,244,240,0.85); pointer-events: none; }
 .stage-check { font-size: 15px; font-weight: 800; fill: #1a1310; pointer-events: none; }
@@ -346,11 +347,32 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
   transition: fill 0.3s ease, stroke 0.3s ease;
 }
 .stage-box.done { fill: rgba(224, 138, 95, 0.24); stroke: var(--accent); }
+.stage-box.active { fill: rgba(95, 184, 224, 0.22); stroke: #5fb8e0; }
 .stage-lbl {
   font-size: 12px;
   font-weight: 700;
   fill: #f5f4f0;
 }
+.stage-duration { font-size: 10.5px; font-weight: 650; fill: rgba(245,244,240,0.65); }
+.stage-duration.done { fill: rgba(224, 138, 95, 0.95); }
+
+/* Active-stage summary card + hand-off action, rendered below the road. */
+.stage-active-card {
+  background: rgba(10, 10, 10, 0.55);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md, 12px);
+  padding: 12px 14px;
+}
+.stage-active-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.stage-active-label { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.stage-active-dept {
+  font-size: 12px;
+  color: var(--text-dim, rgba(245,244,240,0.75));
+  background: rgba(255,255,255,0.06);
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.stage-active-elapsed { font-size: 12px; color: rgba(245,244,240,0.7); margin-top: 4px; }
 
 .card {
   padding: 20px;

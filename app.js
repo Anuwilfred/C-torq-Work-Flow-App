@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.26.4';
+const APP_VERSION = 'v3.27.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project timeline is now a horizontal winding road instead of a vertical ladder, with each stage label in its own solid, always-readable callout box and a glowing progress trail.';
+const APP_UPDATE_NOTES = 'Project timeline is now a real department hand-off workflow: admin starts it, each stage\'s department head acknowledges and hands off their stage, durations are tracked, and it\'s all admin-configurable in Data Feed → Manage Project Stages.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4502,6 +4502,107 @@ $('addJobDescCategoryBtn')?.addEventListener('click', async () => {
   refreshGeneralDescriptionChips();
 });
 
+// ---------------------------------------------------------------------
+// ADMIN: manage the shared Project Stage roadmap (project_stage_templates)
+// — the ordered list every project's "Project timeline" road is built
+// from, and which department is responsible for acknowledging/handing off
+// each stage. Add/reorder/remove here; a project's own progress
+// (project_stages) is untouched by later edits here since it snapshots
+// each stage's department at the moment that job's timeline was started.
+// ---------------------------------------------------------------------
+async function populateStageDepartmentSelect() {
+  const sel = $('newStageDepartment');
+  if (!sel) return;
+  const { data, error } = await sb.from('departments').select('id, name').order('name', { ascending: true });
+  const depts = error ? [] : (data || []);
+  sel.innerHTML = '<option value="">No department yet</option>' + depts.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+}
+
+async function renderProjectStageTemplateList() {
+  const box = $('projectStageTemplateList');
+  if (!box) return;
+  const [{ data: templates, error }, { data: deptRows }] = await Promise.all([
+    sb.from('project_stage_templates').select('id, stage_key, label, department_id, sort_order').order('sort_order', { ascending: true }),
+    sb.from('departments').select('id, name').order('name', { ascending: true }),
+  ]);
+  const depts = deptRows || [];
+  if (error || !templates || !templates.length) { box.innerHTML = '<div class="empty">No stages yet — add the first one above.</div>'; return; }
+
+  box.innerHTML = templates.map((t, i) => `
+    <div class="jobdesc-row" style="flex-wrap:wrap;">
+      <span class="jobdesc-label" style="flex:1 1 170px;">${i + 1}. ${escapeHtml(t.label)}</span>
+      <select data-stage-dept="${t.id}" style="flex:1 1 150px;">
+        <option value="">No department</option>
+        ${depts.map((d) => `<option value="${d.id}" ${t.department_id === d.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
+      </select>
+      <button type="button" class="secondary" data-stage-up="${t.id}" ${i === 0 ? 'disabled' : ''} title="Move earlier">↑</button>
+      <button type="button" class="secondary" data-stage-down="${t.id}" ${i === templates.length - 1 ? 'disabled' : ''} title="Move later">↓</button>
+      <button type="button" class="secondary" data-stage-delete="${t.id}" title="Remove stage">🗑️</button>
+    </div>
+  `).join('');
+
+  box.querySelectorAll('[data-stage-dept]').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const id = sel.dataset.stageDept;
+      const { error: updErr } = await sb.from('project_stage_templates').update({ department_id: sel.value || null }).eq('id', id);
+      if (updErr) { showToast(`Couldn't save: ${updErr.message}`); return; }
+      showToast('Saved — new projects (and any stage not started yet) will use this.');
+    });
+  });
+  box.querySelectorAll('[data-stage-up]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const idx = templates.findIndex((t) => t.id === btn.dataset.stageUp);
+      if (idx <= 0) return;
+      const a = templates[idx], b = templates[idx - 1];
+      await Promise.all([
+        sb.from('project_stage_templates').update({ sort_order: b.sort_order }).eq('id', a.id),
+        sb.from('project_stage_templates').update({ sort_order: a.sort_order }).eq('id', b.id),
+      ]);
+      renderProjectStageTemplateList();
+    });
+  });
+  box.querySelectorAll('[data-stage-down]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const idx = templates.findIndex((t) => t.id === btn.dataset.stageDown);
+      if (idx === -1 || idx >= templates.length - 1) return;
+      const a = templates[idx], b = templates[idx + 1];
+      await Promise.all([
+        sb.from('project_stage_templates').update({ sort_order: b.sort_order }).eq('id', a.id),
+        sb.from('project_stage_templates').update({ sort_order: a.sort_order }).eq('id', b.id),
+      ]);
+      renderProjectStageTemplateList();
+    });
+  });
+  box.querySelectorAll('[data-stage-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Remove this stage from the roadmap? Projects whose timeline already reached this stage keep their own record — this only affects new/not-yet-started stages going forward.')) return;
+      const { error: delErr } = await sb.from('project_stage_templates').delete().eq('id', btn.dataset.stageDelete);
+      if (delErr) { showToast(`Couldn't remove: ${delErr.message}`); return; }
+      showToast('Stage removed.');
+      renderProjectStageTemplateList();
+    });
+  });
+}
+
+$('addStageTemplateBtn')?.addEventListener('click', async () => {
+  const labelInput = $('newStageLabel');
+  const deptSelect = $('newStageDepartment');
+  const label = (labelInput?.value || '').trim();
+  if (!label) { showToast('Enter a stage name.'); return; }
+  const { data: existing } = await sb.from('project_stage_templates').select('stage_key, sort_order');
+  const rows = existing || [];
+  let key = slugifyCategoryKey(label);
+  if (rows.some((r) => r.stage_key === key)) key = `${key}_${Date.now().toString(36)}`;
+  const sortOrder = rows.length ? Math.max(...rows.map((r) => r.sort_order || 0)) + 1 : 1;
+  const { error } = await sb.from('project_stage_templates').insert({
+    stage_key: key, label, department_id: deptSelect?.value || null, sort_order: sortOrder,
+  });
+  if (error) { showToast(`Couldn't add stage: ${error.message}`); return; }
+  if (labelInput) labelInput.value = '';
+  showToast('Stage added.');
+  renderProjectStageTemplateList();
+});
+
 async function populateDriverSelects() {
   const { data, error } = await sb.from('profiles').select('id, email, full_name').eq('status', 'active').order('full_name', { ascending: true });
   const people = error ? [] : (data || []);
@@ -4836,6 +4937,8 @@ function openPanel(name, opts = {}) {
     populateJobDescCategorySelect();
     renderJobDescList();
     renderJobDescCategoryList();
+    populateStageDepartmentSelect();
+    renderProjectStageTemplateList();
   }
 }
 function closePanel(name) {
@@ -6024,43 +6127,89 @@ function renderProjectContributors(data) {
 }
 
 // =====================================================================
-// PROJECT STAGE TIMELINE — the twin-wire glass ladder shown right under
-// the allocated/used hours rings on the Project Detail screen. Progress
-// is stored per (job_id, stage_key) in the project_stages table; only
-// admins can tap a circle to mark it done/undone, everyone else just
-// views it. Requires the project_stages table + RLS policies (see the SQL
-// migration) to already be set up in Supabase.
+// PROJECT STAGE TIMELINE — a horizontal winding-road roadmap shown right
+// under the allocated/used hours rings on the Project Detail screen.
+//
+// The list of stages (and which department owns each one) is a single
+// shared, admin-managed template — project_stage_templates, see Data Feed
+// -> Manage Project Stages — not hardcoded here. A project's actual
+// progress lives in project_stages: one row per (job, stage), created the
+// moment an admin starts that job's timeline. The real workflow:
+//   1. Admin taps "Start project timeline" -> stage 1's clock starts.
+//   2. Only the CURRENT active stage's department HEAD (or an admin) can
+//      tap "Mark finished & hand off" -> that stage is stamped complete,
+//      the next stage's clock starts, and that department's head gets a
+//      push notification it's now their turn. Everyone else can only view.
+//   3. Repeat until the last stage is completed.
+// Every stage's real started_at/completed_at is kept, so a finished
+// stage's actual duration is shown, and this keeps working even if an
+// admin edits the shared template later — each project's rows keep their
+// own department snapshot from when its timeline started.
+// All the actual writes go through the advance-project-stage Edge
+// Function, which enforces admin-only "start" and department-head-only
+// "advance" — the direct-write RLS on project_stages is admin-only as a
+// break-glass fallback, not the real gate.
 // =====================================================================
 
-const STAGE_NODES = {
-  boq: { label: 'BOQ and IO confirmation' },
-  arch: { label: 'Architecture and description' },
-  drawing: { label: 'Drawing' },
-  programming: { label: 'Programming' },
-  electrical: { label: 'Electrical panel build' },
-  fat: { label: 'FAT with client' },
-  delivery: { label: 'Delivery and payment confirmation' },
-  commissioning: { label: 'Commissioning and SAT with client' },
-  closed: { label: 'Project closed' },
-};
-const STAGE_KEYS = Object.keys(STAGE_NODES);
-
-async function fetchStageState(jobId) {
-  const state = {};
-  STAGE_KEYS.forEach((k) => { state[k] = false; });
-  const { data, error } = await sb.from('project_stages').select('stage_key, completed').eq('job_id', jobId);
-  if (!error) (data || []).forEach((r) => { state[r.stage_key] = !!r.completed; });
-  return state;
+async function fetchStageTemplates() {
+  const { data, error } = await sb
+    .from('project_stage_templates')
+    .select('id, stage_key, label, department_id, sort_order')
+    .order('sort_order', { ascending: true });
+  if (error) return [];
+  return data || [];
 }
 
-async function toggleStage(jobId, stageKey, wasDone) {
-  await sb.from('project_stages').upsert({
-    job_id: jobId,
-    stage_key: stageKey,
-    completed: !wasDone,
-    completed_at: !wasDone ? new Date().toISOString() : null,
-    completed_by: currentUser?.id || null,
-  }, { onConflict: 'job_id,stage_key' });
+async function fetchDepartmentHeads() {
+  const { data, error } = await sb.from('departments').select('id, name, head_id');
+  if (error) return {};
+  const byId = {};
+  (data || []).forEach((d) => { byId[d.id] = d; });
+  return byId;
+}
+
+async function fetchStageState(jobId) {
+  const [{ data: project }, { data: rows }] = await Promise.all([
+    sb.from('projects').select('stages_started_at').eq('job_id', jobId).maybeSingle(),
+    sb.from('project_stages').select('*').eq('job_id', jobId),
+  ]);
+  const byKey = {};
+  (rows || []).forEach((r) => { byKey[r.stage_key] = r; });
+  return { stagesStartedAt: project?.stages_started_at || null, byKey };
+}
+
+// Wraps the advance-project-stage Edge Function call — shows the real
+// server-side error (e.g. "not your department's turn") via a toast rather
+// than swallowing it, and returns null on failure so callers can just
+// check the result.
+async function callAdvanceStage(jobId, action, stageKey) {
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { showToast('Please log in first.'); return null; }
+  try {
+    const { data, error } = await sb.functions.invoke('advance-project-stage', {
+      body: { jobId, action, stageKey },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error || data?.ok === false) throw new Error(data?.error || await readFunctionsError(error));
+    return data;
+  } catch (err) {
+    showToast(err.message || String(err));
+    return null;
+  }
+}
+
+// "6m" / "2h 15m" / "1d 4h" — however long a stage actually took, or has
+// been active so far.
+function formatStageDuration(ms) {
+  if (ms == null || ms < 0) return '';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${Math.max(mins, 1)}m`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours < 24) return remMins ? `${hours}h ${remMins}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 function svgEl(tag, attrs) {
@@ -6091,19 +6240,18 @@ function splitStageLabel(label, maxChars) {
 // glass background — that's what made earlier text hard to read). The road
 // itself glows the accent color for every stretch where both ends are
 // done, so overall progress reads at a glance without checking every node.
-function drawStageLadder(container, state, jobId, isAdmin) {
-  const keys = STAGE_KEYS;
+function drawStageLadder(container, templates, byKey, activeIdx) {
   const R = 18;
   const SEG = 150;
   const PAD_X = 90;
   const ROAD_Y = 160;
   const AMP = 44;
   const BOX_OFFSET = 68;
-  const width = PAD_X * 2 + SEG * (keys.length - 1);
+  const width = PAD_X * 2 + SEG * (templates.length - 1);
   const height = 320;
 
-  const pts = keys.map((k, i) => ({
-    key: k,
+  const pts = templates.map((t, i) => ({
+    key: t.stage_key,
     x: PAD_X + i * SEG,
     y: ROAD_Y + Math.sin(i * 1.15) * AMP,
   }));
@@ -6128,7 +6276,11 @@ function drawStageLadder(container, state, jobId, isAdmin) {
   gOrange.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f2a878', 'stop-opacity': 1 }));
   gOrange.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#e08a5f', 'stop-opacity': 0.95 }));
   gOrange.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#cc785c', 'stop-opacity': 0.75 }));
-  defs.appendChild(gGray); defs.appendChild(gOrange);
+  const gBlue = svgEl('radialGradient', { id: 'stageGBlue', cx: '35%', cy: '30%', r: '75%' });
+  gBlue.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#9fd2f2', 'stop-opacity': 1 }));
+  gBlue.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#5fb8e0', 'stop-opacity': 0.95 }));
+  gBlue.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#3d8fb0', 'stop-opacity': 0.75 }));
+  defs.appendChild(gGray); defs.appendChild(gOrange); defs.appendChild(gBlue);
   const glow = svgEl('filter', { id: 'stageGlow', x: '-80%', y: '-80%', width: '260%', height: '260%' });
   glow.appendChild(svgEl('feGaussianBlur', { stdDeviation: 3.4, result: 'blur' }));
   const merge = svgEl('feMerge', {});
@@ -6145,7 +6297,7 @@ function drawStageLadder(container, state, jobId, isAdmin) {
 
   // ---- glowing accent overlay for every stretch that's fully done ----
   for (let i = 1; i < pts.length; i++) {
-    if (state[pts[i - 1].key] && state[pts[i].key]) {
+    if (byKey[pts[i - 1].key]?.completed && byKey[pts[i].key]?.completed) {
       svg.appendChild(svgEl('path', {
         d: curveD([pts[i - 1], pts[i]]), fill: 'none', stroke: 'var(--accent, #e08a5f)',
         'stroke-width': 7, 'stroke-linecap': 'round', filter: 'url(#stageGlow)', opacity: 0.95,
@@ -6153,27 +6305,25 @@ function drawStageLadder(container, state, jobId, isAdmin) {
     }
   }
 
-  // ---- one milestone marker + callout box per stage ----
+  // ---- one milestone marker + callout box per stage (read-only — the
+  // actual hand-off action lives in the summary card rendered below this
+  // road, not on the road itself) ----
   pts.forEach((p, i) => {
     const key = p.key;
-    const done = !!state[key];
-    const label = STAGE_NODES[key].label;
+    const row = byKey[key];
+    const done = !!row?.completed;
+    const isActive = i === activeIdx;
+    const label = templates[i].label;
     const boxAbove = i % 2 === 0;
     const boxY = p.y + (boxAbove ? -BOX_OFFSET : BOX_OFFSET);
 
     svg.appendChild(svgEl('line', {
       x1: p.x, y1: p.y, x2: p.x, y2: boxY + (boxAbove ? 16 : -16),
-      stroke: done ? 'var(--accent, #e08a5f)' : 'rgba(207,205,201,0.45)', 'stroke-width': 2.2,
+      stroke: done ? 'var(--accent, #e08a5f)' : (isActive ? '#5fb8e0' : 'rgba(207,205,201,0.45)'), 'stroke-width': 2.2,
     }));
 
-    const onToggle = async () => {
-      await toggleStage(jobId, key, done);
-      const fresh = await fetchStageState(jobId);
-      drawStageLadder(container, fresh, jobId, isAdmin);
-    };
-
-    const g = svgEl('g', { class: `stage-node${done ? ' done' : ''}` });
-    g.appendChild(svgEl('circle', { class: 'stage-body', cx: p.x, cy: p.y, r: R, filter: done ? 'url(#stageGlow)' : '' }));
+    const g = svgEl('g', { class: `stage-node${done ? ' done' : ''}${isActive ? ' active' : ''}` });
+    g.appendChild(svgEl('circle', { class: 'stage-body', cx: p.x, cy: p.y, r: R, filter: (done || isActive) ? 'url(#stageGlow)' : '' }));
     g.appendChild(svgEl('ellipse', { class: 'stage-shine', cx: p.x - 6, cy: p.y - 7, rx: 5.5, ry: 3.2 }));
     if (done) {
       const check = svgEl('text', { class: 'stage-check', x: p.x, y: p.y + 4.5, 'text-anchor': 'middle' });
@@ -6184,29 +6334,43 @@ function drawStageLadder(container, state, jobId, isAdmin) {
       num.textContent = String(i + 1);
       g.appendChild(num);
     }
-    if (isAdmin) { g.style.cursor = 'pointer'; g.addEventListener('click', onToggle); }
     svg.appendChild(g);
 
     // Solid callout box for the label — this is the actual fix for text
     // vanishing into whatever colorful/blurred content sits behind it.
+    // Once a stage has real timing, its box also shows how long it took
+    // (or, for the active stage, how long it's been active so far).
     const lines = splitStageLabel(label, 20);
     const lineW = Math.max(...lines.map((l) => l.length));
     const boxW = Math.min(206, Math.max(104, lineW * 6.7 + 26));
-    const boxH = lines.length > 1 ? 46 : 32;
+    let boxH = lines.length > 1 ? 46 : 32;
+    const durationText = done && row.started_at && row.completed_at
+      ? formatStageDuration(new Date(row.completed_at) - new Date(row.started_at))
+      : (isActive && row?.started_at ? `${formatStageDuration(Date.now() - new Date(row.started_at))} so far` : '');
+    if (durationText) boxH += 14;
     const box = svgEl('rect', {
-      class: `stage-box${done ? ' done' : ''}`,
+      class: `stage-box${done ? ' done' : ''}${isActive ? ' active' : ''}`,
       x: p.x - boxW / 2, y: boxY - boxH / 2, width: boxW, height: boxH, rx: 9,
     });
-    if (isAdmin) { box.style.cursor = 'pointer'; box.addEventListener('click', onToggle); }
     svg.appendChild(box);
 
-    const t = svgEl('text', { class: 'stage-lbl', x: p.x, y: boxY - (lines.length > 1 ? 4 : -4.5), 'text-anchor': 'middle' });
+    const t = svgEl('text', {
+      class: 'stage-lbl', x: p.x,
+      y: boxY - boxH / 2 + (lines.length > 1 ? 16 : 18),
+      'text-anchor': 'middle',
+    });
     lines.forEach((line, li) => {
       const tspan = svgEl('tspan', { x: p.x, dy: li === 0 ? 0 : 15 });
       tspan.textContent = line;
       t.appendChild(tspan);
     });
     svg.appendChild(t);
+
+    if (durationText) {
+      const dur = svgEl('text', { class: `stage-duration${done ? ' done' : ''}`, x: p.x, y: boxY + boxH / 2 - 7, 'text-anchor': 'middle' });
+      dur.textContent = durationText;
+      svg.appendChild(dur);
+    }
   });
 
   container.appendChild(svg);
@@ -6216,15 +6380,82 @@ async function renderProjectStages(jobId) {
   const area = $('projectStageArea');
   if (!area) return;
   const isAdmin = currentProfile?.role === 'admin';
+
+  const templates = await fetchStageTemplates();
+  if (!templates.length) {
+    area.innerHTML = `
+      <div class="card glass">
+        <strong style="font-size:14px;">Project timeline</strong>
+        <p class="hint" style="margin-top:4px;">${isAdmin ? 'No roadmap stages are set up yet — add some in Data Feed → Manage Project Stages.' : 'No roadmap has been set up for this yet.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const [{ stagesStartedAt, byKey }, deptHeads] = await Promise.all([
+    fetchStageState(jobId),
+    fetchDepartmentHeads(),
+  ]);
+
+  if (!stagesStartedAt) {
+    area.innerHTML = `
+      <div class="card glass">
+        <strong style="font-size:14px;">Project timeline</strong>
+        <p class="hint" style="margin-top:4px;">${isAdmin ? "This job's timeline hasn't started yet. Starting it kicks off the clock on the first stage and notifies that department." : "This job's timeline hasn't started yet."}</p>
+        ${isAdmin ? '<button type="button" id="startStageTimelineBtn" class="secondary" style="margin-top:10px; width:auto; padding:9px 18px;">🚦 Start project timeline</button>' : ''}
+      </div>
+    `;
+    $('startStageTimelineBtn')?.addEventListener('click', async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Starting…';
+      const res = await callAdvanceStage(jobId, 'start');
+      if (res) { showToast('Timeline started.'); renderProjectStages(jobId); }
+      else { e.target.disabled = false; e.target.textContent = '🚦 Start project timeline'; }
+    });
+    return;
+  }
+
+  const activeIdx = templates.findIndex((t) => !byKey[t.stage_key]?.completed);
+  const roadmapComplete = activeIdx === -1;
+
   area.innerHTML = `
     <div class="card glass">
       <strong style="font-size:14px;">Project timeline</strong>
-      ${isAdmin ? '<p class="hint" style="margin-top:4px;">Tap a marker or its label to mark that stage done. Scroll sideways to see the whole road.</p>' : '<p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road.</p>'}
+      <p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road. ${roadmapComplete ? 'Every stage is complete.' : "The highlighted stage is what's active right now."}</p>
       <div id="stageSvgWrap" class="stage-road-scroll"></div>
+      <div id="stageActiveArea" style="margin-top:12px;"></div>
     </div>
   `;
-  const state = await fetchStageState(jobId);
-  drawStageLadder($('stageSvgWrap'), state, jobId, isAdmin);
+  drawStageLadder($('stageSvgWrap'), templates, byKey, activeIdx);
+
+  const activeArea = $('stageActiveArea');
+  if (!activeArea || roadmapComplete) return;
+
+  const current = templates[activeIdx];
+  const currentRow = byKey[current.stage_key];
+  const deptId = currentRow?.department_id ?? current.department_id;
+  const dept = deptId ? deptHeads[deptId] : null;
+  const canAct = isAdmin || (dept && dept.head_id === currentUser?.id);
+  const elapsed = currentRow?.started_at ? formatStageDuration(Date.now() - new Date(currentRow.started_at)) : '';
+
+  activeArea.innerHTML = `
+    <div class="stage-active-card">
+      <div class="stage-active-top">
+        <span class="stage-active-label">🟦 Active now: ${escapeHtml(current.label)}</span>
+        <span class="stage-active-dept">${escapeHtml(dept?.name || 'No department assigned')}</span>
+      </div>
+      ${elapsed ? `<div class="stage-active-elapsed">${elapsed} so far</div>` : ''}
+      ${canAct
+        ? '<button type="button" id="advanceStageBtn" class="secondary" style="margin-top:8px; width:auto; padding:9px 18px;">✅ Mark finished &amp; hand off</button>'
+        : `<div class="hint" style="margin-top:6px;">Only ${escapeHtml(dept?.name || 'the assigned department')}'s head (or an admin) can acknowledge this stage.</div>`}
+    </div>
+  `;
+  $('advanceStageBtn')?.addEventListener('click', async (e) => {
+    if (!confirm(`Mark "${current.label}" finished and hand off to the next stage?`)) return;
+    e.target.disabled = true; e.target.textContent = 'Handing off…';
+    const res = await callAdvanceStage(jobId, 'advance', current.stage_key);
+    if (res) { showToast(res.roadmapComplete ? 'Roadmap complete!' : 'Handed off to the next stage.'); renderProjectStages(jobId); }
+    else { e.target.disabled = false; e.target.textContent = '✅ Mark finished & hand off'; }
+  });
 }
 
 let currentProjectReport = null;
