@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.29.0';
+const APP_VERSION = 'v3.30.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Projects list now shows which department currently has each job and exactly when it landed with them. Also fixed the department-breakdown cut-off for real this time — it was the department name text refusing to shrink, not the column layout.';
+const APP_UPDATE_NOTES = 'New Appearance settings (Home → Appearance): a daily rotating quote on positivity/respect/teamwork, Day/Night mode, curated color themes or real rotating sports-photo backgrounds, and an in-app logo picker. All personal to this device.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -247,7 +247,7 @@ function setActiveTab(name) {
   if (name === 'admin') { renderLocationList(); renderRecalledEntriesList(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
-  if (name === 'home') renderJobBoard();
+  if (name === 'home') { renderJobBoard(); renderQuoteOfDay(); }
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
@@ -4953,6 +4953,7 @@ const PANEL_IDS = {
   specialRequest: ['specialRequestOverlay', 'specialRequestOverlayBackdrop'],
   weather: ['weatherOverlay', 'weatherOverlayBackdrop'],
   about: ['aboutOverlay', 'aboutOverlayBackdrop'],
+  appearance: ['appearanceOverlay', 'appearanceOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -5005,6 +5006,7 @@ function openPanel(name, opts = {}) {
   if (name === 'learning') renderLearningPanel();
   if (name === 'weather') renderWeatherDetail();
   if (name === 'about') renderAboutPanel();
+  if (name === 'appearance') renderAppearancePanel();
   if (name === 'datafeed') {
     // Manage Job Types & Categories lives right here now — refresh both
     // lists (and the add-new category dropdown) every time the panel opens
@@ -5053,7 +5055,295 @@ if ($('quotationDetailBackBtn')) {
 function renderAboutPanel() {
   if ($('aboutVersionText')) $('aboutVersionText').textContent = `Version ${APP_VERSION}`;
   if ($('aboutUpdateNotes')) $('aboutUpdateNotes').textContent = APP_UPDATE_NOTES || 'No release notes for this version.';
+  const heroMark = $('aboutHeroLogoMark');
+  if (heroMark) heroMark.innerHTML = LOGO_PRESETS.find((l) => l.id === getAppearancePrefs().logo)?.svg || LOGO_PRESETS[0].svg;
 }
+
+// =====================================================================
+// APPEARANCE — personal, per-device preferences (localStorage only, never
+// synced to any other person or device): Quote of the Day, Day/Night
+// scheme, background (curated gradient themes or rotating real sports
+// photos), and an in-app logo/header-mark picker.
+// =====================================================================
+
+// ~30 general positive/respect/teamwork/growth quotes (safe, commonly-known
+// attributions) + ~10 Thirukkural-inspired lines. The Thirukkural entries
+// are deliberately phrased as a paraphrase of well-established themes
+// (courtesy, gratitude, learning, patience, friendship) rather than a
+// verbatim translation of one specific numbered couplet, since asserting an
+// exact couplet number from memory risks misattribution.
+const QUOTES = [
+  { text: "The way to get started is to quit talking and begin doing.", author: "Walt Disney" },
+  { text: "It always seems impossible until it's done.", author: "Nelson Mandela" },
+  { text: "Alone we can do so little; together we can do so much.", author: "Helen Keller" },
+  { text: "Great things are done by a series of small things brought together.", author: "Vincent van Gogh" },
+  { text: "Teamwork makes the dream work.", author: "John C. Maxwell" },
+  { text: "The best way to find yourself is to lose yourself in the service of others.", author: "Mahatma Gandhi" },
+  { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
+  { text: "Kind words can be short and easy to speak, but their echoes are truly endless.", author: "Mother Teresa" },
+  { text: "We rise by lifting others.", author: "Robert Ingersoll" },
+  { text: "The strength of the team is each individual member.", author: "Phil Jackson" },
+  { text: "If you want to go fast, go alone. If you want to go far, go together.", author: "African Proverb" },
+  { text: "Respect for ourselves guides our morals; respect for others guides our manners.", author: "Laurence Sterne" },
+  { text: "Honesty is the first chapter in the book of wisdom.", author: "Thomas Jefferson" },
+  { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+  { text: "A leader is best when people barely know he exists.", author: "Lao Tzu" },
+  { text: "Trust is built with consistency.", author: "Lincoln Chafee" },
+  { text: "Gratitude turns what we have into enough.", author: "Anonymous" },
+  { text: "Small daily improvements are the key to staggering long-term results.", author: "Anonymous" },
+  { text: "None of us is as smart as all of us.", author: "Ken Blanchard" },
+  { text: "Patience, persistence and perspiration make an unbeatable combination for success.", author: "Napoleon Hill" },
+  { text: "A calm mind brings inner strength and self-confidence.", author: "Dalai Lama" },
+  { text: "Discipline is the bridge between goals and accomplishment.", author: "Jim Rohn" },
+  { text: "Every accomplishment starts with the decision to try.", author: "John F. Kennedy" },
+  { text: "Well done is better than well said.", author: "Benjamin Franklin" },
+  { text: "The customer's perception is your reality.", author: "Kate Zabriskie" },
+  { text: "Punctuality is the soul of business.", author: "Thomas Chandler Haliburton" },
+  { text: "Courtesy costs nothing, but buys everything.", author: "Anonymous" },
+  { text: "A company's culture is the foundation for future innovation.", author: "Anonymous" },
+  { text: "Progress is impossible without change.", author: "George Bernard Shaw" },
+  { text: "A team that trusts each other wins together.", author: "Anonymous" },
+  { text: "Kindness offered without expectation is the truest form of wealth.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Even a small act of courtesy leaves a lasting impression.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "A gracious word costs nothing yet earns lasting goodwill.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Learning is the one wealth that no one can ever take away from you.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Patience under provocation is the mark of true strength.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Friendship is tested not in comfort, but in times of difficulty.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "A grateful heart never forgets a kindness done to it.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Speak only what is truthful, and speak it with care for others.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Hard work done with sincerity always finds its reward.", author: "Thirukkural (Thiruvalluvar)" },
+  { text: "Respect given to others returns multiplied to oneself.", author: "Thirukkural (Thiruvalluvar)" },
+];
+
+// Curated gradient color-mood themes — each just overrides the three
+// --bg-grad-* variables the body background (styles.css) already reads.
+const THEME_PRESETS = [
+  { id: 'classic', label: 'Classic', swatch: 'linear-gradient(135deg,#e08a5f,#5e8094)' },
+  { id: 'sunset', label: 'Sunset', swatch: 'linear-gradient(135deg,#e86e59,#db5078)' },
+  { id: 'ocean', label: 'Ocean', swatch: 'linear-gradient(135deg,#388ec4,#2ec4b6)' },
+  { id: 'forest', label: 'Forest', swatch: 'linear-gradient(135deg,#5aa866,#3c785a)' },
+  { id: 'dusk', label: 'Dusk', swatch: 'linear-gradient(135deg,#8264c8,#5a289c)' },
+];
+
+// Real CC0 sports photos (Pexels — free to use, no attribution required),
+// verified as currently-live photo IDs before being hard-coded here. One is
+// picked per day (deterministic, same for this person's every device/session
+// on a given calendar day), rotating automatically at local midnight, with a
+// manual "Shuffle" that only overrides today's pick.
+const SPORTS_PHOTOS = {
+  soccer: [274422, 6800039, 38558648, 11221499],
+  basketball: [13179883, 6076497, 965622, 34345752],
+  running: [37718409, 936094, 14346273, 8455978],
+  cycling: [21588830, 5735768, 30316476, 32917702],
+  tennis: [31589110, 8224677, 2996260, 34247999],
+};
+const SPORTS_PHOTO_CATEGORY_LABELS = { mixed: 'Mixed (all sports)', soccer: 'Soccer', basketball: 'Basketball', running: 'Running', cycling: 'Cycling', tennis: 'Tennis' };
+function sportsPhotoUrl(id) { return `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=1920`; }
+function sportsPhotoIdsForCategory(cat) {
+  if (cat && SPORTS_PHOTOS[cat]) return SPORTS_PHOTOS[cat];
+  return Object.values(SPORTS_PHOTOS).flat();
+}
+
+// 3 in-app logo/header-mark variants (NOT the home-screen PWA icon — that
+// needs new icon files + a redeploy, out of scope here). "ring" mirrors the
+// actual icon.svg design so it matches the real app icon by default.
+const LOGO_PRESETS = [
+  {
+    id: 'ring', label: 'Ring',
+    svg: '<svg viewBox="0 0 128 128" width="100%" height="100%"><rect width="128" height="128" rx="24" fill="#1a1a19"/><circle cx="64" cy="64" r="38" fill="none" stroke="url(#ctorqRingGrad)" stroke-width="20" stroke-linecap="round" stroke-dasharray="185 60"/><defs><linearGradient id="ctorqRingGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cbdb9"/><stop offset="1" stop-color="#00706d"/></linearGradient></defs></svg>',
+  },
+  {
+    id: 'badge', label: 'Badge',
+    svg: '<svg viewBox="0 0 128 128" width="100%" height="100%"><rect width="128" height="128" rx="28" fill="url(#ctorqBadgeGrad)"/><text x="64" y="86" font-family="Arial, sans-serif" font-size="72" font-weight="800" fill="#1a1a19" text-anchor="middle">C</text><defs><linearGradient id="ctorqBadgeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e08a5f"/><stop offset="1" stop-color="#cc785c"/></linearGradient></defs></svg>',
+  },
+  {
+    id: 'spark', label: 'Spark',
+    svg: '<svg viewBox="0 0 128 128" width="100%" height="100%"><rect width="128" height="128" rx="24" fill="#1a1a19"/><path d="M70 20 L40 68 H60 L54 108 L92 56 H70 Z" fill="url(#ctorqSparkGrad)"/><defs><linearGradient id="ctorqSparkGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cbdb9"/><stop offset="1" stop-color="#e08a5f"/></linearGradient></defs></svg>',
+  },
+];
+
+const APPEARANCE_KEY = 'ctorqAppearance';
+function getAppearancePrefs() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) || 'null'); } catch { saved = null; }
+  return {
+    scheme: 'dark', bgMode: 'gradient', bgTheme: 'classic', bgPhotoCategory: 'mixed',
+    logo: 'ring',
+    ...(saved || {}),
+  };
+}
+function saveAppearancePrefs(patch) {
+  const next = { ...getAppearancePrefs(), ...patch };
+  try { localStorage.setItem(APPEARANCE_KEY, JSON.stringify(next)); } catch { /* private browsing etc — just won't persist */ }
+  applyAppearance(next);
+  return next;
+}
+
+// Deterministic "one pick per day" index — same calendar day always yields
+// the same index (so every device/session for this person matches, and it
+// naturally advances at local midnight), until a manual shuffle overrides it.
+function todayDayOfYear() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  return Math.floor((now - start) / 86400000);
+}
+function dayOfYearIndex(len, salt = 0) {
+  if (!len) return 0;
+  return (todayDayOfYear() + salt) % len;
+}
+// A manual "shuffle" only overrides TODAY's automatic pick — stamped with
+// the day it was made so it naturally expires and resumes rotating once a
+// new calendar day begins, without needing any cleanup elsewhere.
+function activeManualPhotoIdx(prefs) {
+  if (typeof prefs.bgPhotoManualIdx !== 'number') return null;
+  if (prefs.bgPhotoManualDay !== todayDayOfYear()) return null;
+  return prefs.bgPhotoManualIdx;
+}
+
+function applyAppearance(prefs) {
+  const p = prefs || getAppearancePrefs();
+  const root = document.documentElement;
+  root.setAttribute('data-scheme', p.scheme);
+  root.setAttribute('data-bg-theme', p.bgTheme);
+  root.setAttribute('data-bg-mode', p.bgMode);
+
+  const logoSvg = (LOGO_PRESETS.find((l) => l.id === p.logo) || LOGO_PRESETS[0]).svg;
+  ['appLogoMark', 'authBrandLogoMark', 'aboutHeroLogoMark'].forEach((id) => {
+    const el = $(id);
+    if (el) el.innerHTML = logoSvg;
+  });
+
+  const layer = $('bgPhotoLayer');
+  if (layer && p.bgMode === 'photo') {
+    const ids = sportsPhotoIdsForCategory(p.bgPhotoCategory);
+    const manualIdx = activeManualPhotoIdx(p);
+    const idx = (manualIdx !== null) ? manualIdx : dayOfYearIndex(ids.length);
+    const photoId = ids[idx % ids.length];
+    layer.style.backgroundImage = `url("${sportsPhotoUrl(photoId)}")`;
+  }
+}
+
+function renderQuoteOfDay() {
+  const idx = dayOfYearIndex(QUOTES.length);
+  const q = QUOTES[idx];
+  if ($('quoteOfDayText')) $('quoteOfDayText').textContent = q.text;
+  if ($('quoteOfDayAuthor')) $('quoteOfDayAuthor').textContent = `— ${q.author}`;
+  if ($('appearanceQuoteText')) $('appearanceQuoteText').textContent = q.text;
+  if ($('appearanceQuoteAuthor')) $('appearanceQuoteAuthor').textContent = `— ${q.author}`;
+}
+
+let appearancePanelWired = false;
+function renderAppearancePanel() {
+  const prefs = getAppearancePrefs();
+
+  // Scheme buttons
+  document.querySelectorAll('#schemePickerRow [data-scheme-choice]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.schemeChoice === prefs.scheme);
+  });
+  // Background-mode buttons
+  document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.bgmodeChoice === prefs.bgMode);
+  });
+  if ($('bgThemeSwatchArea')) $('bgThemeSwatchArea').style.display = prefs.bgMode === 'gradient' ? 'block' : 'none';
+  if ($('bgPhotoOptionsArea')) $('bgPhotoOptionsArea').style.display = prefs.bgMode === 'photo' ? 'block' : 'none';
+
+  // Theme swatches (rebuild once, otherwise just refresh 'active')
+  const swatchRow = $('bgThemeSwatchRow');
+  if (swatchRow && !swatchRow.dataset.built) {
+    swatchRow.innerHTML = THEME_PRESETS.map((t) =>
+      `<button type="button" class="theme-swatch-btn" data-theme-choice="${t.id}" title="${escapeHtml(t.label)}" style="background:${t.swatch}"></button>`
+    ).join('');
+    swatchRow.dataset.built = '1';
+  }
+  if (swatchRow) {
+    swatchRow.querySelectorAll('[data-theme-choice]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.themeChoice === prefs.bgTheme);
+    });
+  }
+
+  // Photo category dropdown
+  const catSelect = $('bgPhotoCategorySelect');
+  if (catSelect && !catSelect.dataset.built) {
+    catSelect.innerHTML = Object.entries(SPORTS_PHOTO_CATEGORY_LABELS).map(([id, label]) =>
+      `<option value="${id}">${escapeHtml(label)}</option>`
+    ).join('');
+    catSelect.dataset.built = '1';
+  }
+  if (catSelect) catSelect.value = prefs.bgPhotoCategory;
+  const previewImg = $('bgPhotoPreviewImg');
+  if (previewImg) {
+    const ids = sportsPhotoIdsForCategory(prefs.bgPhotoCategory);
+    const manualIdx = activeManualPhotoIdx(prefs);
+    const idx = (manualIdx !== null) ? manualIdx : dayOfYearIndex(ids.length);
+    previewImg.src = sportsPhotoUrl(ids[idx % ids.length]);
+  }
+
+  // Logo swatches
+  const logoRow = $('logoPickerRow');
+  if (logoRow && !logoRow.dataset.built) {
+    logoRow.innerHTML = LOGO_PRESETS.map((l) =>
+      `<button type="button" class="logo-swatch-btn" data-logo-choice="${l.id}" title="${escapeHtml(l.label)}"><span class="logo-swatch-icon">${l.svg}</span></button>`
+    ).join('');
+    logoRow.dataset.built = '1';
+  }
+  if (logoRow) {
+    logoRow.querySelectorAll('[data-logo-choice]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.logoChoice === prefs.logo);
+    });
+  }
+
+  renderQuoteOfDay();
+
+  if (appearancePanelWired) return;
+  appearancePanelWired = true;
+
+  document.querySelectorAll('#schemePickerRow [data-scheme-choice]').forEach((btn) => {
+    btn.addEventListener('click', () => { saveAppearancePrefs({ scheme: btn.dataset.schemeChoice }); renderAppearancePanel(); });
+  });
+  document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
+    btn.addEventListener('click', () => { saveAppearancePrefs({ bgMode: btn.dataset.bgmodeChoice }); renderAppearancePanel(); });
+  });
+  if (swatchRow) {
+    swatchRow.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-theme-choice]');
+      if (!btn) return;
+      saveAppearancePrefs({ bgTheme: btn.dataset.themeChoice });
+      renderAppearancePanel();
+    });
+  }
+  if (catSelect) {
+    catSelect.addEventListener('change', () => {
+      saveAppearancePrefs({ bgPhotoCategory: catSelect.value, bgPhotoManualIdx: null, bgPhotoManualDay: null });
+      renderAppearancePanel();
+    });
+  }
+  if ($('bgPhotoShuffleBtn')) {
+    $('bgPhotoShuffleBtn').addEventListener('click', () => {
+      const ids = sportsPhotoIdsForCategory(getAppearancePrefs().bgPhotoCategory);
+      const rand = Math.floor(Math.random() * ids.length);
+      saveAppearancePrefs({ bgPhotoManualIdx: rand, bgPhotoManualDay: todayDayOfYear() });
+      renderAppearancePanel();
+    });
+  }
+  if (logoRow) {
+    logoRow.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-logo-choice]');
+      if (!btn) return;
+      saveAppearancePrefs({ logo: btn.dataset.logoChoice });
+      renderAppearancePanel();
+    });
+  }
+}
+
+// Apply saved appearance immediately on load — before/independent of sign-in
+// (background/logo/scheme are personal-device prefs, not account data), and
+// re-picks the daily quote/photo automatically once a new calendar day is
+// reached without needing the tab to be closed and reopened.
+applyAppearance();
+setInterval(() => {
+  applyAppearance(getAppearancePrefs());
+  if ($('home')?.classList.contains('active')) renderQuoteOfDay();
+}, 15 * 60 * 1000);
 
 // Each step points at one element already on the Home screen (a home tile,
 // a nav tab, or a header icon). `optional` steps are silently skipped if

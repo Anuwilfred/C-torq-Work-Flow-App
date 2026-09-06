@@ -4,6 +4,22 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>C-TORQ Digital Organization</title>
+<!-- APPEARANCE no-flash init: reads the saved personal appearance prefs
+     (day/night scheme, background theme/mode) synchronously and stamps them
+     onto <html> BEFORE the stylesheet resolves, so returning visitors never
+     see a flash of the wrong scheme/theme. Mirrors what applyAppearance()
+     in app.js does on every subsequent change. -->
+<script>
+(function () {
+  try {
+    var raw = localStorage.getItem('ctorqAppearance');
+    var prefs = raw ? JSON.parse(raw) : null;
+    document.documentElement.setAttribute('data-scheme', (prefs && prefs.scheme) || 'dark');
+    document.documentElement.setAttribute('data-bg-theme', (prefs && prefs.bgTheme) || 'classic');
+    document.documentElement.setAttribute('data-bg-mode', (prefs && prefs.bgMode) || 'gradient');
+  } catch (e) { /* localStorage unavailable (private browsing, etc.) — defaults apply */ }
+})();
+</script>
 <link rel="manifest" href="./manifest.json" />
 <link rel="icon" href="./icon.svg" />
 <meta name="theme-color" content="#cc785c" />
@@ -27,11 +43,18 @@
 </head>
 <body>
 
+<!-- APPEARANCE — rotating high-quality sports photo background (fixed,
+     behind everything). Only visible when data-bg-mode="photo" on <html>;
+     otherwise the plain gradient (styles.css body background) shows as
+     before. A dark scrim (::after in CSS) keeps text readable over any
+     photo. -->
+<div id="bgPhotoLayer" class="bg-photo-layer" aria-hidden="true"></div>
+
 <!-- ============== AUTH SCREEN (shown until signed in) ============== -->
 <div id="authScreen" class="auth-wrap">
   <div class="card glass auth-card">
     <div class="auth-brand">
-      <img src="./icon.svg" width="40" height="40" alt="" />
+      <span id="authBrandLogoMark" class="app-logo-mark app-logo-mark-lg" aria-hidden="true"></span>
       <h2>C-TORQ Digital Organization</h2>
     </div>
 
@@ -72,6 +95,7 @@
       <span id="weatherBadgeIcon" class="weather-badge-icon">🌤️</span>
       <span id="weatherBadgeTemp" class="weather-badge-temp">--°</span>
     </button>
+    <span id="appLogoMark" class="app-logo-mark" aria-hidden="true"></span>
     <h1>C-TORQ Digital Organization</h1>
     <div style="display:flex; align-items:center; gap:10px;">
       <span id="statusBadge">checking…</span>
@@ -177,10 +201,24 @@
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
         </button>
+        <button type="button" class="home-tile" data-open="appearance" data-feature="appearance">
+          <span class="home-tile-icon">🎨</span>
+          <span class="home-tile-label">Appearance</span>
+        </button>
         <button type="button" class="home-tile" data-open="about">
           <span class="home-tile-icon">ℹ️</span>
           <span class="home-tile-label">About</span>
         </button>
+      </div>
+
+      <!-- QUOTE OF THE DAY — one curated quote (positivity, respect, growth,
+           teamwork, some Thirukkural-inspired lines), same for everyone on a
+           given calendar day, rotating automatically at local midnight.
+           Content + rotation logic lives in app.js (QUOTES, renderQuoteOfDay). -->
+      <div class="card glass quote-of-day-card" id="quoteOfDayCard">
+        <div class="quote-of-day-mark">❝</div>
+        <p id="quoteOfDayText" class="quote-of-day-text">Loading today's quote…</p>
+        <p id="quoteOfDayAuthor" class="quote-of-day-author"></p>
       </div>
 
       <!-- TODAY'S JOB BOARD — a message-board style broadcast, visible to
@@ -1609,7 +1647,7 @@
     </div>
     <div class="panel-body">
       <div class="about-hero">
-        <div class="about-hero-icon">🧭</div>
+        <div class="about-hero-icon" id="aboutHeroLogoMark">🧭</div>
         <div class="about-hero-name">C-TORQ Digital Organization</div>
         <div id="aboutVersionText" class="about-hero-version">Version —</div>
       </div>
@@ -1622,6 +1660,70 @@
         <p class="hint" style="margin-top:6px;">Take a quick guided tour — it'll point out where everything is, one step at a time.</p>
         <button type="button" id="startTutorialBtn" class="primary" style="width:100%; margin-top:12px;">▶ Start Tutorial</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- APPEARANCE — personal, per-device preferences: Quote of the Day
+     (read-only preview here, main content is the dashboard card), Day/Night
+     scheme, background (curated gradient themes OR rotating real sports
+     photos), and an in-app logo/header-mark picker. Everything here is
+     saved to localStorage only (this device/this person) — nothing here is
+     org-wide or admin-controlled. All rendering + persistence logic lives
+     in app.js (renderAppearancePanel, applyAppearance, ctorqAppearance). -->
+<div id="appearanceOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="appearanceOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>Appearance</strong>
+      <button type="button" class="ghost" data-close="appearance">✕</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="card glass">
+        <strong style="font-size:14px;">🌤️ Day / Night</strong>
+        <p class="hint" style="margin-top:2px;">Just for you, this device — doesn't change anyone else's app.</p>
+        <div id="schemePickerRow" class="appearance-choice-row" style="margin-top:10px;">
+          <button type="button" class="appearance-choice-btn" data-scheme-choice="dark">🌙 Dark</button>
+          <button type="button" class="appearance-choice-btn" data-scheme-choice="light">☀️ Light</button>
+        </div>
+      </div>
+
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">🎨 Background</strong>
+        <p class="hint" style="margin-top:2px;">Pick a color theme, or switch to real rotating sports photos.</p>
+        <div id="bgModePickerRow" class="appearance-choice-row" style="margin-top:10px;">
+          <button type="button" class="appearance-choice-btn" data-bgmode-choice="gradient">🎨 Color theme</button>
+          <button type="button" class="appearance-choice-btn" data-bgmode-choice="photo">📷 Sports photos</button>
+        </div>
+
+        <div id="bgThemeSwatchArea" style="margin-top:12px;">
+          <div id="bgThemeSwatchRow" class="theme-swatch-row"></div>
+        </div>
+
+        <div id="bgPhotoOptionsArea" style="margin-top:12px; display:none;">
+          <label for="bgPhotoCategorySelect">Category</label>
+          <select id="bgPhotoCategorySelect"></select>
+          <div class="bg-photo-preview-wrap" style="margin-top:10px;">
+            <img id="bgPhotoPreviewImg" class="bg-photo-preview-img" alt="Current background photo preview" />
+          </div>
+          <button type="button" id="bgPhotoShuffleBtn" class="ghost" style="width:100%; margin-top:10px;">🔀 Shuffle this photo</button>
+          <p class="hint" style="margin-top:8px;">Rotates automatically every day. Shuffle just swaps today's pick — tomorrow it rotates again on its own.</p>
+        </div>
+      </div>
+
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">🔖 App Logo</strong>
+        <p class="hint" style="margin-top:2px;">Changes the small mark in the header, login screen, and About — not your home-screen app icon.</p>
+        <div id="logoPickerRow" class="logo-swatch-row" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card glass" style="margin-top:14px;">
+        <strong style="font-size:14px;">❝ Today's quote</strong>
+        <p id="appearanceQuoteText" class="quote-of-day-text" style="margin-top:8px;"></p>
+        <p id="appearanceQuoteAuthor" class="quote-of-day-author"></p>
+      </div>
+
     </div>
   </div>
 </div>
