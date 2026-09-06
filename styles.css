@@ -2474,6 +2474,13 @@ input.stage-pos-input::-webkit-outer-spin-button {
    on wide screens, per explicit request, and stack full-width on mobile —
    reuses the app's existing .row-2 responsive grid. */
 .pa-trend-split { align-items: start; }
+/* CSS Grid gotcha: a "1fr" track still won't shrink below its content's
+   intrinsic min-width unless the item itself allows it — and an <svg>
+   sized by a viewBox (our trend chart is 600 wide) reports THAT as its
+   min-content width. Without this, the grid refused to shrink the trend
+   column below ~600px, shoving the department-breakdown column half off
+   the edge of the card instead of splitting the row 50/50. */
+.pa-trend-split > div { min-width: 0; }
 @media (max-width: 640px) {
   .pa-trend-split { grid-template-columns: 1fr; }
 }

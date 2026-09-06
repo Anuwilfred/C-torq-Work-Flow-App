@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.28.2';
+const APP_VERSION = 'v3.28.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Analytics: the share ring now falls back to department data when tasks aren\'t tagged (it was showing empty before), the trend graph sits alongside a new department-by-person breakdown chart, and the shareable project report is now grouped by department too.';
+const APP_UPDATE_NOTES = 'Fixed the Project Analytics layout bug where the department-breakdown chart was getting shoved off the edge of the card next to the trend graph instead of splitting the row evenly.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
