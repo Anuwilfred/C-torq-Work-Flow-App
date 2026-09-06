@@ -321,23 +321,36 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
 }
 .admin-corner-btn:hover { transform: translateY(-1px); }
 
-/* ---------- Project stage timeline (twin-wire glass ladder) ---------- */
+/* ---------- Project stage timeline (horizontal winding road) ---------- */
+.stage-road-scroll {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
 .stage-body { stroke-width: 2.5; transition: fill 0.3s ease, stroke 0.3s ease; }
 .stage-node .stage-body { fill: url(#stageGGray); stroke: var(--accent-2); }
 .stage-node.done .stage-body { fill: url(#stageGOrange); stroke: var(--accent); }
-.stage-shine { fill: #fff; opacity: 0.35; pointer-events: none; }
-.stage-lbl {
-  font-size: 12.5px;
-  font-weight: 650;
-  fill: #ffffff;
-  stroke: rgba(0, 0, 0, 0.75);
-  stroke-width: 3px;
-  paint-order: stroke fill;
-  stroke-linejoin: round;
+.stage-shine { fill: #fff; opacity: 0.4; pointer-events: none; }
+.stage-num { font-size: 12.5px; font-weight: 700; fill: rgba(245,244,240,0.85); pointer-events: none; }
+.stage-check { font-size: 15px; font-weight: 800; fill: #1a1310; pointer-events: none; }
+/* Solid callout box behind every label — the actual fix for text
+   disappearing into whatever colorful/blurred content sits behind it. */
+.stage-box {
+  fill: rgba(10, 10, 10, 0.72);
+  stroke: rgba(207, 205, 201, 0.4);
+  stroke-width: 1.5;
+  transition: fill 0.3s ease, stroke 0.3s ease;
 }
-.stage-node.done .stage-lbl { fill: var(--accent); }
-.stage-conn line { stroke: rgba(95, 94, 90, 0.45); stroke-width: 2; transition: stroke 0.3s ease; }
-.stage-conn.done line { stroke: var(--accent); }
+.stage-box.done { fill: rgba(224, 138, 95, 0.24); stroke: var(--accent); }
+.stage-lbl {
+  font-size: 12px;
+  font-weight: 700;
+  fill: #f5f4f0;
+}
 
 .card {
   padding: 20px;

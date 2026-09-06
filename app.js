@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.26.3';
+const APP_VERSION = 'v3.26.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Category share now breaks down by actual task (not just the broad category) with a total-hours readout in the middle, and the 3D surface always shows its full department/category grid with richer, more vivid shading.';
+const APP_UPDATE_NOTES = 'Project timeline is now a horizontal winding road instead of a vertical ladder, with each stage label in its own solid, always-readable callout box and a glowing progress trail.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6033,20 +6033,16 @@ function renderProjectContributors(data) {
 // =====================================================================
 
 const STAGE_NODES = {
-  boq: { x: 150, y: 36, label: 'BOQ and IO confirmation', side: 'r' },
-  arch: { x: 150, y: 120, label: 'Architecture and description', side: 'r' },
-  drawing: { x: 150, y: 204, label: 'Drawing', side: 'r' },
-  programming: { x: 90, y: 300, label: 'Programming', side: 'b' },
-  electrical: { x: 210, y: 300, label: 'Electrical panel build', side: 'b' },
-  fat: { x: 150, y: 396, label: 'FAT with client', side: 'r' },
-  delivery: { x: 150, y: 480, label: 'Delivery and payment confirmation', side: 'r' },
-  commissioning: { x: 150, y: 564, label: 'Commissioning and SAT with client', side: 'r' },
-  closed: { x: 150, y: 648, label: 'Project closed', side: 'r' },
+  boq: { label: 'BOQ and IO confirmation' },
+  arch: { label: 'Architecture and description' },
+  drawing: { label: 'Drawing' },
+  programming: { label: 'Programming' },
+  electrical: { label: 'Electrical panel build' },
+  fat: { label: 'FAT with client' },
+  delivery: { label: 'Delivery and payment confirmation' },
+  commissioning: { label: 'Commissioning and SAT with client' },
+  closed: { label: 'Project closed' },
 };
-const STAGE_CONNS = [
-  ['boq', 'arch'], ['arch', 'drawing'], ['drawing', 'programming'], ['drawing', 'electrical'],
-  ['programming', 'fat'], ['electrical', 'fat'], ['fat', 'delivery'], ['delivery', 'commissioning'], ['commissioning', 'closed'],
-];
 const STAGE_KEYS = Object.keys(STAGE_NODES);
 
 async function fetchStageState(jobId) {
@@ -6073,68 +6069,144 @@ function svgEl(tag, attrs) {
   return el;
 }
 
+// A label longer than a line or two gets split near its middle space so it
+// fits inside a fixed-width callout box instead of overflowing it.
+function splitStageLabel(label, maxChars) {
+  if (label.length <= maxChars) return [label];
+  const mid = Math.floor(label.length / 2);
+  let bestIdx = -1, bestDist = Infinity;
+  for (let i = 0; i < label.length; i++) {
+    if (label[i] === ' ') {
+      const d = Math.abs(i - mid);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+  }
+  if (bestIdx === -1) return [label];
+  return [label.slice(0, bestIdx), label.slice(bestIdx + 1)];
+}
+
+// Horizontal winding-road timeline: one milestone marker per stage sitting
+// on a curving "road", with its label in its OWN solid callout box
+// alternating above/below (never plain floating text over the blurred
+// glass background — that's what made earlier text hard to read). The road
+// itself glows the accent color for every stretch where both ends are
+// done, so overall progress reads at a glance without checking every node.
 function drawStageLadder(container, state, jobId, isAdmin) {
-  const R = 15, STUB = 13, GAP = 5, WIRE_OFFSET = 2.5;
+  const keys = STAGE_KEYS;
+  const R = 18;
+  const SEG = 150;
+  const PAD_X = 90;
+  const ROAD_Y = 160;
+  const AMP = 44;
+  const BOX_OFFSET = 68;
+  const width = PAD_X * 2 + SEG * (keys.length - 1);
+  const height = 320;
+
+  const pts = keys.map((k, i) => ({
+    key: k,
+    x: PAD_X + i * SEG,
+    y: ROAD_Y + Math.sin(i * 1.15) * AMP,
+  }));
+  const curveD = (arr) => {
+    let d = `M ${arr[0].x} ${arr[0].y}`;
+    for (let i = 1; i < arr.length; i++) {
+      const p0 = arr[i - 1], p1 = arr[i];
+      const midX = (p0.x + p1.x) / 2;
+      d += ` C ${midX} ${p0.y}, ${midX} ${p1.y}, ${p1.x} ${p1.y}`;
+    }
+    return d;
+  };
+
   container.innerHTML = '';
-  const svg = svgEl('svg', { width: 300, height: 680, viewBox: '0 0 300 680', style: 'overflow:visible' });
+  const svg = svgEl('svg', { width, height, viewBox: `0 0 ${width} ${height}`, style: 'overflow:visible; display:block;' });
   const defs = svgEl('defs', {});
   const gGray = svgEl('radialGradient', { id: 'stageGGray', cx: '35%', cy: '30%', r: '75%' });
   gGray.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#8a8985', 'stop-opacity': 0.55 }));
   gGray.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#5f5e5a', 'stop-opacity': 0.4 }));
   gGray.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#5f5e5a', 'stop-opacity': 0.25 }));
   const gOrange = svgEl('radialGradient', { id: 'stageGOrange', cx: '35%', cy: '30%', r: '75%' });
-  gOrange.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#e08a5f', 'stop-opacity': 0.9 }));
-  gOrange.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#cc785c', 'stop-opacity': 0.6 }));
-  gOrange.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#cc785c', 'stop-opacity': 0.35 }));
+  gOrange.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f2a878', 'stop-opacity': 1 }));
+  gOrange.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#e08a5f', 'stop-opacity': 0.95 }));
+  gOrange.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#cc785c', 'stop-opacity': 0.75 }));
   defs.appendChild(gGray); defs.appendChild(gOrange);
+  const glow = svgEl('filter', { id: 'stageGlow', x: '-80%', y: '-80%', width: '260%', height: '260%' });
+  glow.appendChild(svgEl('feGaussianBlur', { stdDeviation: 3.4, result: 'blur' }));
+  const merge = svgEl('feMerge', {});
+  merge.appendChild(svgEl('feMergeNode', { in: 'blur' }));
+  merge.appendChild(svgEl('feMergeNode', { in: 'SourceGraphic' }));
+  glow.appendChild(merge);
+  defs.appendChild(glow);
   svg.appendChild(defs);
 
-  STAGE_CONNS.forEach(([a, b], i) => {
-    const A = STAGE_NODES[a], B = STAGE_NODES[b];
-    const dx = B.x - A.x, dy = B.y - A.y, len = Math.sqrt(dx * dx + dy * dy), ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
-    const pA = { x: A.x + ux * R, y: A.y + uy * R };
-    const stubAend = { x: A.x + ux * (R + STUB), y: A.y + uy * (R + STUB) };
-    const gapAend = { x: A.x + ux * (R + STUB + GAP), y: A.y + uy * (R + STUB + GAP) };
-    const pB = { x: B.x - ux * R, y: B.y - uy * R };
-    const stubBstart = { x: B.x - ux * (R + STUB), y: B.y - uy * (R + STUB) };
-    const gapBstart = { x: B.x - ux * (R + STUB + GAP), y: B.y - uy * (R + STUB + GAP) };
-    const done = state[a] && state[b];
-    const g = svgEl('g', { class: `stage-conn${done ? ' done' : ''}`, id: `stageConn${i}` });
-    const pts = [[pA, stubAend], [gapAend, gapBstart], [stubBstart, pB]];
-    [-1, 1].forEach((side) => {
-      const ox = nx * WIRE_OFFSET * side, oy = ny * WIRE_OFFSET * side;
-      pts.forEach(([p1, p2]) => {
-        g.appendChild(svgEl('line', { x1: p1.x + ox, y1: p1.y + oy, x2: p2.x + ox, y2: p2.y + oy }));
-      });
-    });
-    svg.appendChild(g);
-  });
+  // ---- the road itself: dark asphalt base + a dashed centerline ----
+  svg.appendChild(svgEl('path', { d: curveD(pts), fill: 'none', stroke: '#1c1b19', 'stroke-width': 21, 'stroke-linecap': 'round' }));
+  svg.appendChild(svgEl('path', { d: curveD(pts), fill: 'none', stroke: '#403c37', 'stroke-width': 15, 'stroke-linecap': 'round' }));
+  svg.appendChild(svgEl('path', { d: curveD(pts), fill: 'none', stroke: 'rgba(255,255,255,0.6)', 'stroke-width': 2.2, 'stroke-dasharray': '9 12', 'stroke-linecap': 'round' }));
 
-  STAGE_KEYS.forEach((id) => {
-    const n = STAGE_NODES[id];
-    const done = !!state[id];
-    const g = svgEl('g', { class: `stage-node${done ? ' done' : ''}` });
-    const c = svgEl('circle', { class: 'stage-body', cx: n.x, cy: n.y, r: R });
-    g.appendChild(c);
-    const sh = svgEl('ellipse', { class: 'stage-shine', cx: n.x - 5, cy: n.y - 6, rx: 5, ry: 3 });
-    g.appendChild(sh);
-    const t = svgEl('text', {
-      class: 'stage-lbl',
-      x: n.side === 'r' ? n.x + 22 : n.x,
-      y: n.side === 'r' ? n.y + 4 : n.y + 30,
-      'text-anchor': n.side === 'r' ? 'start' : 'middle',
-    });
-    t.textContent = n.label;
-    g.appendChild(t);
-    if (isAdmin) {
-      g.style.cursor = 'pointer';
-      g.addEventListener('click', async () => {
-        await toggleStage(jobId, id, done);
-        const fresh = await fetchStageState(jobId);
-        drawStageLadder(container, fresh, jobId, isAdmin);
-      });
+  // ---- glowing accent overlay for every stretch that's fully done ----
+  for (let i = 1; i < pts.length; i++) {
+    if (state[pts[i - 1].key] && state[pts[i].key]) {
+      svg.appendChild(svgEl('path', {
+        d: curveD([pts[i - 1], pts[i]]), fill: 'none', stroke: 'var(--accent, #e08a5f)',
+        'stroke-width': 7, 'stroke-linecap': 'round', filter: 'url(#stageGlow)', opacity: 0.95,
+      }));
     }
+  }
+
+  // ---- one milestone marker + callout box per stage ----
+  pts.forEach((p, i) => {
+    const key = p.key;
+    const done = !!state[key];
+    const label = STAGE_NODES[key].label;
+    const boxAbove = i % 2 === 0;
+    const boxY = p.y + (boxAbove ? -BOX_OFFSET : BOX_OFFSET);
+
+    svg.appendChild(svgEl('line', {
+      x1: p.x, y1: p.y, x2: p.x, y2: boxY + (boxAbove ? 16 : -16),
+      stroke: done ? 'var(--accent, #e08a5f)' : 'rgba(207,205,201,0.45)', 'stroke-width': 2.2,
+    }));
+
+    const onToggle = async () => {
+      await toggleStage(jobId, key, done);
+      const fresh = await fetchStageState(jobId);
+      drawStageLadder(container, fresh, jobId, isAdmin);
+    };
+
+    const g = svgEl('g', { class: `stage-node${done ? ' done' : ''}` });
+    g.appendChild(svgEl('circle', { class: 'stage-body', cx: p.x, cy: p.y, r: R, filter: done ? 'url(#stageGlow)' : '' }));
+    g.appendChild(svgEl('ellipse', { class: 'stage-shine', cx: p.x - 6, cy: p.y - 7, rx: 5.5, ry: 3.2 }));
+    if (done) {
+      const check = svgEl('text', { class: 'stage-check', x: p.x, y: p.y + 4.5, 'text-anchor': 'middle' });
+      check.textContent = '✓';
+      g.appendChild(check);
+    } else {
+      const num = svgEl('text', { class: 'stage-num', x: p.x, y: p.y + 4.5, 'text-anchor': 'middle' });
+      num.textContent = String(i + 1);
+      g.appendChild(num);
+    }
+    if (isAdmin) { g.style.cursor = 'pointer'; g.addEventListener('click', onToggle); }
     svg.appendChild(g);
+
+    // Solid callout box for the label — this is the actual fix for text
+    // vanishing into whatever colorful/blurred content sits behind it.
+    const lines = splitStageLabel(label, 20);
+    const lineW = Math.max(...lines.map((l) => l.length));
+    const boxW = Math.min(206, Math.max(104, lineW * 6.7 + 26));
+    const boxH = lines.length > 1 ? 46 : 32;
+    const box = svgEl('rect', {
+      class: `stage-box${done ? ' done' : ''}`,
+      x: p.x - boxW / 2, y: boxY - boxH / 2, width: boxW, height: boxH, rx: 9,
+    });
+    if (isAdmin) { box.style.cursor = 'pointer'; box.addEventListener('click', onToggle); }
+    svg.appendChild(box);
+
+    const t = svgEl('text', { class: 'stage-lbl', x: p.x, y: boxY - (lines.length > 1 ? 4 : -4.5), 'text-anchor': 'middle' });
+    lines.forEach((line, li) => {
+      const tspan = svgEl('tspan', { x: p.x, dy: li === 0 ? 0 : 15 });
+      tspan.textContent = line;
+      t.appendChild(tspan);
+    });
+    svg.appendChild(t);
   });
 
   container.appendChild(svg);
@@ -6147,8 +6219,8 @@ async function renderProjectStages(jobId) {
   area.innerHTML = `
     <div class="card glass">
       <strong style="font-size:14px;">Project timeline</strong>
-      ${isAdmin ? '<p class="hint" style="margin-top:4px;">Tap a circle to mark that stage done.</p>' : ''}
-      <div id="stageSvgWrap" style="display:flex; justify-content:center; margin-top:12px;"></div>
+      ${isAdmin ? '<p class="hint" style="margin-top:4px;">Tap a marker or its label to mark that stage done. Scroll sideways to see the whole road.</p>' : '<p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road.</p>'}
+      <div id="stageSvgWrap" class="stage-road-scroll"></div>
     </div>
   `;
   const state = await fetchStageState(jobId);
