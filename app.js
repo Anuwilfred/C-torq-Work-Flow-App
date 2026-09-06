@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.28.3';
+const APP_VERSION = 'v3.28.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed the Project Analytics layout bug where the department-breakdown chart was getting shoved off the edge of the card next to the trend graph instead of splitting the row evenly.';
+const APP_UPDATE_NOTES = 'Actually fixed the department-breakdown cut-off: the department name text itself was refusing to shrink and was spilling past the card edge, not the column layout. It now truncates cleanly instead.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
