@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.30.0';
+const APP_VERSION = 'v3.33.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New Appearance settings (Home → Appearance): a daily rotating quote on positivity/respect/teamwork, Day/Night mode, curated color themes or real rotating sports-photo backgrounds, and an in-app logo picker. All personal to this device.';
+const APP_UPDATE_NOTES = 'Background theme/photos and the app logo are now org-wide — an admin sets them once (Appearance panel) and everyone sees the change live. Admins can also upload their own logo image. Day/Night mode and the quote toggle stay personal to each device.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1638,6 +1638,7 @@ $('logoutBtn').addEventListener('click', async () => {
   closePanel('health');
   closePanel('weather');
   stopPresence();
+  if (appAppearanceChannel) { sb.removeChannel(appAppearanceChannel); appAppearanceChannel = null; }
   stopLastSeenHeartbeat();
   stopGlobalMessageWatch();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
@@ -1774,6 +1775,7 @@ async function enterApp(knownUser) {
   checkForUnreadNews();
   applyFeatureAccess();
   startPresence();
+  initGlobalAppearance();
   startLastSeenHeartbeat();
   startGlobalMessageWatch();
   loadWeather();
@@ -2740,6 +2742,7 @@ const FEATURE_LIST = [
   { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
   { key: 'datafeed', label: 'Data Feed (add/remove people & jobs, manage job types)' },
   { key: 'liveDrivers', label: 'Live Drivers (see driver locations)' },
+  { key: 'appearance', label: 'Appearance (theme, background, daily quote)' },
   { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
 ];
 
@@ -5055,8 +5058,9 @@ if ($('quotationDetailBackBtn')) {
 function renderAboutPanel() {
   if ($('aboutVersionText')) $('aboutVersionText').textContent = `Version ${APP_VERSION}`;
   if ($('aboutUpdateNotes')) $('aboutUpdateNotes').textContent = APP_UPDATE_NOTES || 'No release notes for this version.';
-  const heroMark = $('aboutHeroLogoMark');
-  if (heroMark) heroMark.innerHTML = LOGO_PRESETS.find((l) => l.id === getAppearancePrefs().logo)?.svg || LOGO_PRESETS[0].svg;
+  // aboutHeroLogoMark itself is kept in sync by applyAppearance() (called on
+  // load, on every global-appearance fetch/save/realtime push, and every
+  // 15 min) — nothing extra to do for the logo here.
 }
 
 // =====================================================================
@@ -5136,47 +5140,126 @@ const SPORTS_PHOTOS = {
   running: [37718409, 936094, 14346273, 8455978],
   cycling: [21588830, 5735768, 30316476, 32917702],
   tennis: [31589110, 8224677, 2996260, 34247999],
+  motogp: [38374472, 12735081, 142828, 11735218],
+  f1: [28680795, 29252129, 28832062, 35210800],
+  cars: [34243843, 36683301, 39081071, 12505996],
+  boats: [19750411, 296236, 38755472, 296237],
+  ships: [33315751, 37828492, 36195494, 262353],
+  rockets: [7327336, 586054, 5420670, 23788],
+  flights: [37589299, 28500925, 14482714, 32037884],
 };
-const SPORTS_PHOTO_CATEGORY_LABELS = { mixed: 'Mixed (all sports)', soccer: 'Soccer', basketball: 'Basketball', running: 'Running', cycling: 'Cycling', tennis: 'Tennis' };
+const SPORTS_PHOTO_CATEGORY_LABELS = {
+  mixed: 'Mixed (all)', soccer: 'Soccer', basketball: 'Basketball', running: 'Running', cycling: 'Cycling', tennis: 'Tennis',
+  motogp: 'MotoGP', f1: 'Formula 1', cars: 'Cars', boats: 'Boats', ships: 'Ships', rockets: 'Rockets', flights: 'Flights',
+};
 function sportsPhotoUrl(id) { return `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=1920`; }
 function sportsPhotoIdsForCategory(cat) {
   if (cat && SPORTS_PHOTOS[cat]) return SPORTS_PHOTOS[cat];
   return Object.values(SPORTS_PHOTOS).flat();
 }
 
-// 3 in-app logo/header-mark variants (NOT the home-screen PWA icon — that
-// needs new icon files + a redeploy, out of scope here). "ring" mirrors the
-// actual icon.svg design so it matches the real app icon by default.
+// In-app logo/header-mark (NOT the home-screen PWA icon — that needs new
+// icon files + a redeploy, out of scope here). Just the one design, mirroring
+// the actual icon.svg so it always matches the real app icon — the Badge/
+// Spark alternates from an earlier pass were removed per feedback.
 const LOGO_PRESETS = [
   {
     id: 'ring', label: 'Ring',
     svg: '<svg viewBox="0 0 128 128" width="100%" height="100%"><rect width="128" height="128" rx="24" fill="#1a1a19"/><circle cx="64" cy="64" r="38" fill="none" stroke="url(#ctorqRingGrad)" stroke-width="20" stroke-linecap="round" stroke-dasharray="185 60"/><defs><linearGradient id="ctorqRingGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cbdb9"/><stop offset="1" stop-color="#00706d"/></linearGradient></defs></svg>',
   },
-  {
-    id: 'badge', label: 'Badge',
-    svg: '<svg viewBox="0 0 128 128" width="100%" height="100%"><rect width="128" height="128" rx="28" fill="url(#ctorqBadgeGrad)"/><text x="64" y="86" font-family="Arial, sans-serif" font-size="72" font-weight="800" fill="#1a1a19" text-anchor="middle">C</text><defs><linearGradient id="ctorqBadgeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e08a5f"/><stop offset="1" stop-color="#cc785c"/></linearGradient></defs></svg>',
-  },
-  {
-    id: 'spark', label: 'Spark',
-    svg: '<svg viewBox="0 0 128 128" width="100%" height="100%"><rect width="128" height="128" rx="24" fill="#1a1a19"/><path d="M70 20 L40 68 H60 L54 108 L92 56 H70 Z" fill="url(#ctorqSparkGrad)"/><defs><linearGradient id="ctorqSparkGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cbdb9"/><stop offset="1" stop-color="#e08a5f"/></linearGradient></defs></svg>',
-  },
 ];
 
+// LOCAL, personal-per-device preferences only: Day/Night scheme and whether
+// the Quote of the Day card shows on this person's own dashboard. Everything
+// else (background theme/photo, logo) is org-wide and lives in Supabase —
+// see the GLOBAL appearance block just below.
 const APPEARANCE_KEY = 'ctorqAppearance';
 function getAppearancePrefs() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) || 'null'); } catch { saved = null; }
   return {
-    scheme: 'dark', bgMode: 'gradient', bgTheme: 'classic', bgPhotoCategory: 'mixed',
-    logo: 'ring',
+    scheme: 'dark', showQuote: true,
     ...(saved || {}),
   };
 }
 function saveAppearancePrefs(patch) {
   const next = { ...getAppearancePrefs(), ...patch };
   try { localStorage.setItem(APPEARANCE_KEY, JSON.stringify(next)); } catch { /* private browsing etc — just won't persist */ }
-  applyAppearance(next);
+  applyAppearance();
   return next;
+}
+
+// GLOBAL, org-wide appearance (background theme/photo mode + the app logo)
+// — admin-controlled, stored in the `app_appearance` singleton table, and
+// pushed live to every signed-in person via Supabase Realtime so a change
+// shows up immediately without anyone needing to reload.
+const GLOBAL_APPEARANCE_CACHE_KEY = 'ctorqGlobalAppearanceCache';
+const GLOBAL_APPEARANCE_DEFAULTS = {
+  bgMode: 'gradient', bgTheme: 'classic', bgPhotoCategory: 'mixed',
+  bgPhotoManualIdx: null, bgPhotoManualDay: null, customLogo: null,
+};
+let globalAppearance = null;
+function dbRowToGlobalAppearance(row) {
+  if (!row) return null;
+  return {
+    bgMode: row.bg_mode, bgTheme: row.bg_theme, bgPhotoCategory: row.bg_photo_category,
+    bgPhotoManualIdx: row.bg_photo_manual_idx, bgPhotoManualDay: row.bg_photo_manual_day,
+    customLogo: row.custom_logo,
+  };
+}
+function getGlobalAppearance() {
+  return globalAppearance || GLOBAL_APPEARANCE_DEFAULTS;
+}
+// A fast local mirror of the last-known org settings, so the no-flash
+// <head> init script (index.html) can stamp the right background/scheme
+// attributes before the real Supabase fetch below even resolves.
+function cacheGlobalAppearanceLocally(g) {
+  try { localStorage.setItem(GLOBAL_APPEARANCE_CACHE_KEY, JSON.stringify(g)); } catch { /* ignore */ }
+}
+async function fetchGlobalAppearance() {
+  try {
+    const { data, error } = await sb.from('app_appearance').select('*').eq('id', true).maybeSingle();
+    if (error) throw error;
+    globalAppearance = dbRowToGlobalAppearance(data) || GLOBAL_APPEARANCE_DEFAULTS;
+    cacheGlobalAppearanceLocally(globalAppearance);
+  } catch (err) {
+    console.warn('fetchGlobalAppearance failed (using last-known/local defaults):', err);
+  }
+  applyAppearance();
+  if ($('appearanceOverlay')?.classList.contains('show')) renderAppearancePanel();
+}
+// Admin-only write — RLS on app_appearance only allows role='admin' to
+// UPDATE, so this quietly fails (with a toast) if called by anyone else.
+async function saveGlobalAppearance(patch) {
+  const dbPatch = { updated_at: new Date().toISOString(), updated_by: currentUser?.id || null };
+  if ('bgMode' in patch) dbPatch.bg_mode = patch.bgMode;
+  if ('bgTheme' in patch) dbPatch.bg_theme = patch.bgTheme;
+  if ('bgPhotoCategory' in patch) dbPatch.bg_photo_category = patch.bgPhotoCategory;
+  if ('bgPhotoManualIdx' in patch) dbPatch.bg_photo_manual_idx = patch.bgPhotoManualIdx;
+  if ('bgPhotoManualDay' in patch) dbPatch.bg_photo_manual_day = patch.bgPhotoManualDay;
+  if ('customLogo' in patch) dbPatch.custom_logo = patch.customLogo;
+  const { data, error } = await sb.from('app_appearance').update(dbPatch).eq('id', true).select().single();
+  if (error) { showToast('Could not save — ' + error.message); return; }
+  globalAppearance = dbRowToGlobalAppearance(data);
+  cacheGlobalAppearanceLocally(globalAppearance);
+  applyAppearance();
+}
+let appAppearanceChannel = null;
+function startAppAppearanceWatch() {
+  if (appAppearanceChannel || !currentUser) return;
+  appAppearanceChannel = sb
+    .channel('app-appearance-watch')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_appearance' }, (payload) => {
+      globalAppearance = dbRowToGlobalAppearance(payload.new);
+      cacheGlobalAppearanceLocally(globalAppearance);
+      applyAppearance();
+      if ($('appearanceOverlay')?.classList.contains('show')) renderAppearancePanel();
+    })
+    .subscribe();
+}
+function initGlobalAppearance() {
+  fetchGlobalAppearance();
+  startAppAppearanceWatch();
 }
 
 // Deterministic "one pick per day" index — same calendar day always yields
@@ -5200,27 +5283,43 @@ function activeManualPhotoIdx(prefs) {
   return prefs.bgPhotoManualIdx;
 }
 
-function applyAppearance(prefs) {
-  const p = prefs || getAppearancePrefs();
+// Applies BOTH the local personal prefs (scheme, quote visibility) and the
+// current global org-wide appearance (background, logo) — always reads
+// fresh from getAppearancePrefs()/getGlobalAppearance() rather than taking
+// params, so any caller (a save, a realtime push, the 15-min tick) can just
+// call applyAppearance() with no arguments and get the right result.
+function applyAppearance() {
+  const local = getAppearancePrefs();
+  const g = getGlobalAppearance();
   const root = document.documentElement;
-  root.setAttribute('data-scheme', p.scheme);
-  root.setAttribute('data-bg-theme', p.bgTheme);
-  root.setAttribute('data-bg-mode', p.bgMode);
+  root.setAttribute('data-scheme', local.scheme);
+  root.setAttribute('data-bg-theme', g.bgTheme);
+  root.setAttribute('data-bg-mode', g.bgMode);
 
-  const logoSvg = (LOGO_PRESETS.find((l) => l.id === p.logo) || LOGO_PRESETS[0]).svg;
+  const logoContent = g.customLogo
+    ? `<img src="${g.customLogo}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:inherit; display:block;" />`
+    : LOGO_PRESETS[0].svg;
   ['appLogoMark', 'authBrandLogoMark', 'aboutHeroLogoMark'].forEach((id) => {
     const el = $(id);
-    if (el) el.innerHTML = logoSvg;
+    if (el) el.innerHTML = logoContent;
   });
 
   const layer = $('bgPhotoLayer');
-  if (layer && p.bgMode === 'photo') {
-    const ids = sportsPhotoIdsForCategory(p.bgPhotoCategory);
-    const manualIdx = activeManualPhotoIdx(p);
+  if (layer && g.bgMode === 'photo') {
+    const ids = sportsPhotoIdsForCategory(g.bgPhotoCategory);
+    const manualIdx = activeManualPhotoIdx(g);
     const idx = (manualIdx !== null) ? manualIdx : dayOfYearIndex(ids.length);
     const photoId = ids[idx % ids.length];
     layer.style.backgroundImage = `url("${sportsPhotoUrl(photoId)}")`;
   }
+
+  // Quote of the Day can be turned off entirely (Appearance → Today's
+  // quote → Hide) — this only hides the dashboard card on this person's own
+  // device; the daily rotation itself keeps running underneath so it's back
+  // instantly if re-enabled.
+  const quoteCard = $('quoteOfDayCard');
+  if (quoteCard) quoteCard.style.display = (local.showQuote === false) ? 'none' : '';
+  renderQuoteOfDay();
 }
 
 function renderQuoteOfDay() {
@@ -5235,17 +5334,31 @@ function renderQuoteOfDay() {
 let appearancePanelWired = false;
 function renderAppearancePanel() {
   const prefs = getAppearancePrefs();
+  const g = getGlobalAppearance();
+  const isAdmin = currentProfile?.role === 'admin';
 
-  // Scheme buttons
+  // Scheme buttons (local, personal)
   document.querySelectorAll('#schemePickerRow [data-scheme-choice]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.schemeChoice === prefs.scheme);
   });
+  // Quote of the Day show/hide buttons (local, personal)
+  document.querySelectorAll('#quoteTogglePickerRow [data-quote-choice]').forEach((btn) => {
+    const wantsShow = btn.dataset.quoteChoice === 'show';
+    btn.classList.toggle('active', wantsShow === (prefs.showQuote !== false));
+  });
+
+  // Background + Logo are org-wide and admin-only to edit — everyone else
+  // never sees these two cards at all (they still just see whatever the
+  // admin picked, applied by applyAppearance()).
+  if ($('bgAdminCard')) $('bgAdminCard').style.display = isAdmin ? 'block' : 'none';
+  if ($('logoAdminCard')) $('logoAdminCard').style.display = isAdmin ? 'block' : 'none';
+
   // Background-mode buttons
   document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.bgmodeChoice === prefs.bgMode);
+    btn.classList.toggle('active', btn.dataset.bgmodeChoice === g.bgMode);
   });
-  if ($('bgThemeSwatchArea')) $('bgThemeSwatchArea').style.display = prefs.bgMode === 'gradient' ? 'block' : 'none';
-  if ($('bgPhotoOptionsArea')) $('bgPhotoOptionsArea').style.display = prefs.bgMode === 'photo' ? 'block' : 'none';
+  if ($('bgThemeSwatchArea')) $('bgThemeSwatchArea').style.display = g.bgMode === 'gradient' ? 'block' : 'none';
+  if ($('bgPhotoOptionsArea')) $('bgPhotoOptionsArea').style.display = g.bgMode === 'photo' ? 'block' : 'none';
 
   // Theme swatches (rebuild once, otherwise just refresh 'active')
   const swatchRow = $('bgThemeSwatchRow');
@@ -5257,7 +5370,7 @@ function renderAppearancePanel() {
   }
   if (swatchRow) {
     swatchRow.querySelectorAll('[data-theme-choice]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.themeChoice === prefs.bgTheme);
+      btn.classList.toggle('active', btn.dataset.themeChoice === g.bgTheme);
     });
   }
 
@@ -5269,27 +5382,21 @@ function renderAppearancePanel() {
     ).join('');
     catSelect.dataset.built = '1';
   }
-  if (catSelect) catSelect.value = prefs.bgPhotoCategory;
+  if (catSelect) catSelect.value = g.bgPhotoCategory;
   const previewImg = $('bgPhotoPreviewImg');
   if (previewImg) {
-    const ids = sportsPhotoIdsForCategory(prefs.bgPhotoCategory);
-    const manualIdx = activeManualPhotoIdx(prefs);
+    const ids = sportsPhotoIdsForCategory(g.bgPhotoCategory);
+    const manualIdx = activeManualPhotoIdx(g);
     const idx = (manualIdx !== null) ? manualIdx : dayOfYearIndex(ids.length);
     previewImg.src = sportsPhotoUrl(ids[idx % ids.length]);
   }
 
-  // Logo swatches
-  const logoRow = $('logoPickerRow');
-  if (logoRow && !logoRow.dataset.built) {
-    logoRow.innerHTML = LOGO_PRESETS.map((l) =>
-      `<button type="button" class="logo-swatch-btn" data-logo-choice="${l.id}" title="${escapeHtml(l.label)}"><span class="logo-swatch-icon">${l.svg}</span></button>`
-    ).join('');
-    logoRow.dataset.built = '1';
-  }
-  if (logoRow) {
-    logoRow.querySelectorAll('[data-logo-choice]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.logoChoice === prefs.logo);
-    });
+  // Logo upload preview
+  const logoPreview = $('logoUploadPreview');
+  if (logoPreview) {
+    logoPreview.innerHTML = g.customLogo
+      ? `<img src="${g.customLogo}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:inherit; display:block;" />`
+      : LOGO_PRESETS[0].svg;
   }
 
   renderQuoteOfDay();
@@ -5300,48 +5407,75 @@ function renderAppearancePanel() {
   document.querySelectorAll('#schemePickerRow [data-scheme-choice]').forEach((btn) => {
     btn.addEventListener('click', () => { saveAppearancePrefs({ scheme: btn.dataset.schemeChoice }); renderAppearancePanel(); });
   });
+  document.querySelectorAll('#quoteTogglePickerRow [data-quote-choice]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      saveAppearancePrefs({ showQuote: btn.dataset.quoteChoice === 'show' });
+      renderAppearancePanel();
+    });
+  });
   document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
-    btn.addEventListener('click', () => { saveAppearancePrefs({ bgMode: btn.dataset.bgmodeChoice }); renderAppearancePanel(); });
+    btn.addEventListener('click', () => { saveGlobalAppearance({ bgMode: btn.dataset.bgmodeChoice }).then(renderAppearancePanel); });
   });
   if (swatchRow) {
     swatchRow.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-theme-choice]');
       if (!btn) return;
-      saveAppearancePrefs({ bgTheme: btn.dataset.themeChoice });
-      renderAppearancePanel();
+      saveGlobalAppearance({ bgTheme: btn.dataset.themeChoice }).then(renderAppearancePanel);
     });
   }
   if (catSelect) {
     catSelect.addEventListener('change', () => {
-      saveAppearancePrefs({ bgPhotoCategory: catSelect.value, bgPhotoManualIdx: null, bgPhotoManualDay: null });
-      renderAppearancePanel();
+      saveGlobalAppearance({ bgPhotoCategory: catSelect.value, bgPhotoManualIdx: null, bgPhotoManualDay: null }).then(renderAppearancePanel);
     });
   }
   if ($('bgPhotoShuffleBtn')) {
     $('bgPhotoShuffleBtn').addEventListener('click', () => {
-      const ids = sportsPhotoIdsForCategory(getAppearancePrefs().bgPhotoCategory);
+      const ids = sportsPhotoIdsForCategory(getGlobalAppearance().bgPhotoCategory);
       const rand = Math.floor(Math.random() * ids.length);
-      saveAppearancePrefs({ bgPhotoManualIdx: rand, bgPhotoManualDay: todayDayOfYear() });
-      renderAppearancePanel();
+      saveGlobalAppearance({ bgPhotoManualIdx: rand, bgPhotoManualDay: todayDayOfYear() }).then(renderAppearancePanel);
     });
   }
-  if (logoRow) {
-    logoRow.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-logo-choice]');
-      if (!btn) return;
-      saveAppearancePrefs({ logo: btn.dataset.logoChoice });
-      renderAppearancePanel();
+  const logoInput = $('logoUploadInput');
+  if (logoInput) {
+    logoInput.addEventListener('change', () => {
+      const file = logoInput.files && logoInput.files[0];
+      if (!file) return;
+      if (file.size > 1.5 * 1024 * 1024) {
+        showToast('That image is too large — please use something under 1.5MB.');
+        logoInput.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        saveGlobalAppearance({ customLogo: reader.result }).then(() => {
+          renderAppearancePanel();
+          showToast('Logo updated for everyone.');
+        });
+      };
+      reader.onerror = () => showToast('Could not read that image — please try another file.');
+      reader.readAsDataURL(file);
+    });
+  }
+  if ($('logoResetBtn')) {
+    $('logoResetBtn').addEventListener('click', () => {
+      saveGlobalAppearance({ customLogo: null }).then(() => {
+        if (logoInput) logoInput.value = '';
+        renderAppearancePanel();
+        showToast('Reverted to the default logo for everyone.');
+      });
     });
   }
 }
 
-// Apply saved appearance immediately on load — before/independent of sign-in
-// (background/logo/scheme are personal-device prefs, not account data), and
-// re-picks the daily quote/photo automatically once a new calendar day is
-// reached without needing the tab to be closed and reopened.
+// Apply saved appearance immediately on load (local scheme/quote prefs are
+// available synchronously; global background/logo fall back to defaults —
+// or the last-known cache the no-flash <head> script already applied —
+// until initGlobalAppearance()'s fetch resolves after sign-in). Re-picks the
+// daily quote/photo automatically once a new calendar day is reached
+// without needing the tab to be closed and reopened.
 applyAppearance();
 setInterval(() => {
-  applyAppearance(getAppearancePrefs());
+  applyAppearance();
   if ($('home')?.classList.contains('active')) renderQuoteOfDay();
 }, 15 * 60 * 1000);
 

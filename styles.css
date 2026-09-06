@@ -240,11 +240,17 @@ html[data-scheme="light"] .bg-photo-layer::after {
 .app-logo-mark svg { display: block; width: 100%; height: 100%; }
 .app-logo-mark-lg { width: 40px; height: 40px; border-radius: 11px; }
 
-/* QUOTE OF THE DAY — dashboard card + the read-only copy inside Appearance. */
+/* QUOTE OF THE DAY — dashboard card (sits inline inside .home-grid, full
+   width, between rows of tiles — grid-column:1/-1 spans all 3 columns
+   regardless of how many tiles come before/after it) + the read-only copy
+   inside Appearance. Hidden entirely (display:none, set from app.js) when
+   the "Hide" toggle in Appearance → Today's quote is chosen; the grid
+   simply closes the gap since a display:none item isn't part of grid flow. */
 .quote-of-day-card {
-  margin-top: 14px;
+  grid-column: 1 / -1;
   text-align: center;
   padding: 18px 20px;
+  margin: 2px 0;
 }
 .quote-of-day-mark {
   font-size: 26px;
@@ -295,19 +301,6 @@ html[data-scheme="light"] .bg-photo-layer::after {
   padding: 0;
 }
 .theme-swatch-btn.active { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent); }
-.logo-swatch-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.logo-swatch-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--r-sm);
-  border: 2px solid var(--glass-border);
-  background: var(--glass-2);
-  cursor: pointer;
-  padding: 8px;
-}
-.logo-swatch-btn.active { border-color: var(--accent); }
-.logo-swatch-icon { display: block; width: 100%; height: 100%; }
-.logo-swatch-icon svg { display: block; width: 100%; height: 100%; }
 .bg-photo-preview-wrap {
   width: 100%;
   aspect-ratio: 16 / 7;
@@ -1360,62 +1353,112 @@ input.stage-pos-input::-webkit-outer-spin-button {
 
 /* ---------- AI chat widget ---------- */
 
-/* Siri-style orb, bottom-right: soft blurred color slowly swirling inside a
-   circle, a glassy highlight on top, and a gentle breathing glow — tuned to
-   Petronas' signature teal-green (#00A19C) instead of Apple's rainbow. */
+/* AEON orb — a translucent glass sphere with a swirling blue/violet energy
+   core drifting inside it, a bright glassy rim, and a couple of soft
+   specular glints, like light catching the surface of a glowing bubble
+   (ref: floating glass-orb "AI" design). Three independently-rotating
+   flame layers (different gradients/speeds/directions) is what gives the
+   inner glow its organic, never-quite-repeating churn instead of looking
+   like a single spinning image. */
 .ai-orb {
   position: fixed;
   right: 20px;
   bottom: 26px;
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   border: none;
   padding: 0;
   cursor: pointer;
   z-index: 60;
-  background: #0b0b10;
+  background: radial-gradient(circle at 50% 58%, #0c0a18 0%, #050308 72%);
   overflow: hidden;
   isolation: isolate;
-  box-shadow: 0 0 22px 6px rgba(0, 161, 156, 0.6), 0 0 50px 16px rgba(0, 161, 156, 0.4), 0 0 80px 26px rgba(0, 161, 156, 0.22);
+  box-shadow:
+    0 0 16px 3px rgba(150, 120, 255, 0.55),
+    0 0 40px 12px rgba(90, 70, 220, 0.38),
+    0 0 74px 22px rgba(70, 130, 255, 0.2);
   transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-  animation: siriPulse 3.2s ease-in-out infinite;
+  animation: auroraPulse 4.5s ease-in-out infinite;
 }
 .ai-orb:hover { transform: scale(1.08); }
 
-.ai-orb-core {
+/* Inner energy core — three overlapping, independently-animated blobs
+   (screen blend so overlaps brighten like real light) sitting well inside
+   the glass edge, leaving a darker "interior" ring before the rim — same
+   proportions as the reference image. */
+.ai-orb-flame {
   position: absolute;
-  inset: -30%;
-  display: block;
   border-radius: 50%;
-  background: conic-gradient(from 0deg, #00a19c, #4cbdb9, #99d9d7, #00706d, #00a19c);
-  filter: blur(9px) saturate(160%);
-  animation: siriSpin 6s linear infinite;
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
-/* Soft glass highlight sitting on top of the color swirl */
-.ai-orb::after {
-  content: "";
+.ai-orb-flame-1 {
+  inset: 20%;
+  background: conic-gradient(from 120deg at 45% 55%, #6a4bff 0deg, #3d7bff 90deg, #8a3cff 180deg, #4b2ee0 270deg, #6a4bff 360deg);
+  filter: blur(6px) saturate(170%);
+  animation: auroraSwirl1 7s linear infinite;
+}
+.ai-orb-flame-2 {
+  inset: 26%;
+  background:
+    radial-gradient(circle at 62% 32%, rgba(150, 120, 255, 0.95), transparent 55%),
+    radial-gradient(circle at 32% 68%, rgba(60, 150, 255, 0.9), transparent 60%);
+  filter: blur(5px);
+  animation: auroraSwirl2 5.5s ease-in-out infinite;
+}
+.ai-orb-flame-3 {
+  inset: 30%;
+  background: radial-gradient(circle at 50% 45%, rgba(210, 200, 255, 0.9), transparent 50%);
+  filter: blur(4px);
+  animation: auroraSwirl3 3.6s ease-in-out infinite;
+}
+/* Glass rim + soft specular glints — the bright thin edge and the couple of
+   light-catch highlights near the top of the sphere in the reference. */
+.ai-orb-core {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.55), transparent 45%);
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.4),
+    inset 0 0 14px rgba(150, 130, 255, 0.3);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.6), transparent 28%),
+    radial-gradient(circle at 78% 32%, rgba(255, 255, 255, 0.28), transparent 20%),
+    radial-gradient(circle at 60% 82%, rgba(255, 255, 255, 0.14), transparent 26%);
 }
-@keyframes siriSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes siriPulse {
-  0%, 100% { box-shadow: 0 0 22px 6px rgba(0,161,156,0.6), 0 0 50px 16px rgba(0,161,156,0.4), 0 0 80px 26px rgba(0,161,156,0.22); transform: scale(1); }
-  50% { box-shadow: 0 0 30px 9px rgba(0,161,156,0.8), 0 0 66px 22px rgba(0,161,156,0.55), 0 0 100px 34px rgba(0,161,156,0.32); transform: scale(1.06); }
+@keyframes auroraSwirl1 {
+  from { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(190deg) scale(1.1); }
+  to { transform: rotate(360deg) scale(1); }
+}
+@keyframes auroraSwirl2 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  50% { transform: translate(-4%, 5%) rotate(-50deg) scale(1.12); }
+}
+@keyframes auroraSwirl3 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.85; }
+  50% { transform: translate(3%, -4%) scale(1.2); opacity: 1; }
+}
+@keyframes auroraPulse {
+  0%, 100% { box-shadow: 0 0 16px 3px rgba(150,120,255,0.55), 0 0 40px 12px rgba(90,70,220,0.38), 0 0 74px 22px rgba(70,130,255,0.2); transform: scale(1); }
+  50% { box-shadow: 0 0 24px 5px rgba(150,120,255,0.7), 0 0 54px 16px rgba(90,70,220,0.5), 0 0 92px 28px rgba(70,130,255,0.28); transform: scale(1.05); }
 }
 
-/* Brighter, faster glow while AEON Ai is actually speaking a reply out loud —
-   like the orb is "lit up" by its own voice. */
+/* Brighter, faster glow while AEON Ai is actually speaking a reply out loud
+   — like the orb is "lit up" by its own voice, and its inner core churns
+   noticeably faster. */
 .ai-orb.speaking {
   animation: aiTalkGlow 0.55s ease-in-out infinite;
 }
+.ai-orb.speaking .ai-orb-flame-1 { animation-duration: 2.2s; }
+.ai-orb.speaking .ai-orb-flame-2 { animation-duration: 1.6s; }
+.ai-orb.speaking .ai-orb-flame-3 { animation-duration: 1s; }
 @keyframes aiTalkGlow {
-  0%, 100% { box-shadow: 0 0 24px 7px rgba(0,161,156,0.75), 0 0 55px 18px rgba(0,161,156,0.5), 0 0 90px 30px rgba(0,161,156,0.3); transform: scale(1.02); }
-  50% { box-shadow: 0 0 38px 12px rgba(0,161,156,1), 0 0 80px 26px rgba(0,161,156,0.7), 0 0 130px 42px rgba(0,161,156,0.45); transform: scale(1.12); }
+  0%, 100% { box-shadow: 0 0 20px 4px rgba(150,120,255,0.7), 0 0 46px 14px rgba(90,70,220,0.5), 0 0 82px 26px rgba(70,130,255,0.3); transform: scale(1.02); }
+  50% { box-shadow: 0 0 32px 9px rgba(150,120,255,0.95), 0 0 68px 22px rgba(90,70,220,0.68), 0 0 120px 38px rgba(70,130,255,0.42); transform: scale(1.12); }
 }
 
 /* Mesh reveal: a soft, water-like fade/drift instead of a hard clip-path
@@ -1573,7 +1616,7 @@ input.stage-pos-input::-webkit-outer-spin-button {
   border: 1px solid var(--glass-border);
   padding: 7px 14px;
   border-radius: 999px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 161, 156, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), 0 0 12px rgba(120, 100, 255, 0.22);
   white-space: nowrap;
   z-index: 59;
   pointer-events: none;
