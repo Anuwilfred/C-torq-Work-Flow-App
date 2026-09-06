@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.28.1';
+const APP_VERSION = 'v3.28.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Analytics now uses Apple Health/Activity-style nested rings for category share, plus a polished stat-card and trend-graph look throughout the card.';
+const APP_UPDATE_NOTES = 'Project Analytics: the share ring now falls back to department data when tasks aren\'t tagged (it was showing empty before), the trend graph sits alongside a new department-by-person breakdown chart, and the shareable project report is now grouped by department too.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6827,31 +6827,42 @@ async function renderProjectTaskBreakdown(data) {
 
   wrap.innerHTML = statsHtml + taskChartHtml + deptChartHtml + peopleChartHtml;
 
-  // The ring and trend graph below live in their OWN persistent divs
-  // (outside wrap's innerHTML) so they can show/hide their section
-  // independently of the bars above re-rendering.
-  renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder);
+  // The ring, trend graph, and department/people chart below live in their
+  // OWN persistent divs (outside wrap's innerHTML) so they can show/hide
+  // their section independently of the bars above re-rendering.
+  renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder, departments);
   renderProjectHoursTrend(data.dailyTrend || [], data.project?.totalAllocatedHours);
+  renderProjectDeptPeopleChart(data.project?.departments || [], contributors);
 }
 
 // "Category share" — Apple Watch/Health-style concentric Activity rings:
 // up to 3 nested rings (like Move/Exercise/Stand), each a thick round-capped
-// arc sitting over a dim track of the SAME hue, sized by that category's
-// share of the job's total hours, with a bold total in the center. The
-// full category list (not just the 3 shown as rings) is always listed
-// below so nothing is hidden — the rings are the headline, the list is the
-// detail, exactly like Apple Health's summary-then-breakdown layout.
-// Always draws SOMETHING (the "environment") even before any hours are
-// tagged — three even, very dim rings — rather than hiding the card
-// outright, so it's obvious the feature is there and waiting.
-function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
+// arc sitting over a dim track of the SAME hue, sized by that slice's share
+// of the job's total hours, with a bold total in the center. The full list
+// (not just the 3 shown as rings) is always listed below so nothing is
+// hidden — the rings are the headline, the list is the detail, exactly
+// like Apple Health's summary-then-breakdown layout.
+//
+// Sliced by tagged TASK CATEGORY when that data exists. Tagging a task is
+// optional though (free-typed notes skip it entirely), and on a project
+// where nobody's used the tap-to-select list yet that meant this ring had
+// nothing to show even though the job clearly has real hours logged —
+// reading as broken rather than "no data yet". So when there's no tagged
+// category data, it falls back to a DEPARTMENT share instead (which every
+// logged hour always has), using the same colors as the "Time by
+// department" bars above for consistency. Only shows the empty
+// "environment" placeholder when there's truly nothing logged at all.
+function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder, departments) {
   const section = $('projectRingSection');
   const area = $('projectRingArea');
+  const titleEl = $('projectRingTitle');
   if (!section || !area) return;
   const realTasks = (tasks || []).filter((t) => t.hours > 0);
-  const hasData = realTasks.length > 0;
-  if (!hasData && !categoryKeyOrder.length) { section.style.display = 'none'; return; }
+  const deptsWithHours = (departments || []).filter((d) => (Number(d.usedHours) || 0) > 0);
+  const mode = realTasks.length > 0 ? 'category' : (deptsWithHours.length > 0 ? 'department' : 'empty');
+  if (mode === 'empty' && !categoryKeyOrder.length) { section.style.display = 'none'; return; }
   section.style.display = '';
+  if (titleEl) titleEl.textContent = mode === 'department' ? '🍩 Department share' : '🍩 Category share';
 
   const CX = 110, CY = 110;
   // Outermost ring first (biggest share reads as the most prominent ring,
@@ -6861,19 +6872,34 @@ function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
   let legendHtml = '';
   let totalHours = 0;
 
-  if (hasData) {
-    const catTotals = {};
-    realTasks.forEach((t) => {
-      const cat = catMeta[t.category] ? t.category : 'other';
-      catTotals[cat] = (catTotals[cat] || 0) + t.hours;
-    });
-    totalHours = Math.round(Object.values(catTotals).reduce((s, v) => s + v, 0) * 100) / 100;
-    const sortedCats = categoryKeyOrder.filter((c) => catTotals[c] > 0).sort((a, b) => catTotals[b] - catTotals[a]);
+  if (mode === 'category' || mode === 'department') {
+    // Build one common "slices" shape regardless of which data source is
+    // driving the ring, so the drawing logic below never has to care.
+    let slices;
+    if (mode === 'category') {
+      const catTotals = {};
+      realTasks.forEach((t) => {
+        const cat = catMeta[t.category] ? t.category : 'other';
+        catTotals[cat] = (catTotals[cat] || 0) + t.hours;
+      });
+      slices = categoryKeyOrder
+        .filter((c) => catTotals[c] > 0)
+        .map((cat, i) => ({ key: cat, label: `${catMeta[cat]?.icon || ''} ${catMeta[cat]?.label || cat}`.trim(), hours: catTotals[cat], colorIdx: i }))
+        .sort((a, b) => b.hours - a.hours);
+    } else {
+      // Same sort + color-index convention as the "Time by department" bar
+      // chart above (paColor(i + 4)) so a department reads the same color
+      // in both places on this card.
+      slices = [...deptsWithHours]
+        .sort((a, b) => b.usedHours - a.usedHours)
+        .map((d, i) => ({ key: d.id, label: d.name, hours: Number(d.usedHours) || 0, colorIdx: i + 4 }));
+    }
 
-    sortedCats.forEach((cat, i) => {
-      const hours = Math.round(catTotals[cat] * 100) / 100;
+    totalHours = Math.round(slices.reduce((s, sl) => s + sl.hours, 0) * 100) / 100;
+    slices.forEach((sl, i) => {
+      const hours = Math.round(sl.hours * 100) / 100;
       const frac = totalHours > 0 ? hours / totalHours : 0;
-      const color = paColor(i);
+      const color = paColor(sl.colorIdx);
       const pct = Math.round(frac * 100);
       if (i < RINGS.length) {
         const { r, sw } = RINGS[i];
@@ -6888,12 +6914,12 @@ function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
       legendHtml += `
         <div class="pa-ring-legend-row${i < RINGS.length ? ' pa-ring-legend-active' : ''}">
           <span class="pa-ring-dot" style="background:${color};"></span>
-          <span class="pa-ring-legend-label">${escapeHtml(catMeta[cat]?.icon || '')} ${escapeHtml(catMeta[cat]?.label || cat)}</span>
+          <span class="pa-ring-legend-label">${escapeHtml(sl.label)}</span>
           <span class="pa-ring-legend-value">${hours}h <span class="pa-ring-legend-pct">${pct}%</span></span>
         </div>`;
     });
-    if (sortedCats.length > RINGS.length) {
-      legendHtml += `<div class="pa-ring-legend-note">Rings above show the top ${RINGS.length} — every category is still listed here.</div>`;
+    if (slices.length > RINGS.length) {
+      legendHtml += `<div class="pa-ring-legend-note">Rings above show the top ${RINGS.length} — every ${mode} is still listed here.</div>`;
     }
   } else {
     RINGS.forEach(({ r, sw }, i) => {
@@ -6916,6 +6942,7 @@ function renderProjectCategoryRing(tasks, catMeta, categoryKeyOrder) {
     });
   }
 
+  const hasData = mode !== 'empty';
   area.innerHTML = `
     <div class="pa-ring-wrap">
       <div class="pa-ring-svg-wrap">
@@ -7000,6 +7027,55 @@ function renderProjectHoursTrend(dailyTrend, totalAllocatedHours) {
       ${allocated > 0 ? `<span class="pa-trend-legend-item"><span class="pa-trend-swatch dashed"></span>Allocated budget (${allocated}h)</span>` : ''}
     </div>
   `;
+}
+
+// "Department breakdown" — one stacked bar per department, each bar split
+// into a colored segment per person who logged hours in it (self-scaled to
+// that department's own total, so it directly answers "inside THIS
+// department, who used the time" — the department-to-department comparison
+// is already covered by the "Time by department" bars above this card).
+function renderProjectDeptPeopleChart(departments, contributors) {
+  const section = $('projectDeptPeopleSection');
+  const area = $('projectDeptPeopleArea');
+  if (!section || !area) return;
+
+  const byDept = {};
+  (contributors || []).forEach((c) => {
+    const key = c.departmentId || 'unassigned';
+    if (!byDept[key]) byDept[key] = { name: c.departmentName || 'No department set', people: [] };
+    byDept[key].people.push(c);
+  });
+  const deptRows = Object.values(byDept)
+    .map((d) => ({ ...d, total: Math.round(d.people.reduce((s, p) => s + (Number(p.hours) || 0), 0) * 100) / 100 }))
+    .filter((d) => d.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
+
+  if (!deptRows.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  area.innerHTML = deptRows.map((d) => {
+    const sortedPeople = [...d.people].sort((a, b) => b.hours - a.hours);
+    const segmentsHtml = sortedPeople.map((p, i) => {
+      const pct = d.total > 0 ? (p.hours / d.total) * 100 : 0;
+      return `<div class="pa-stack-seg" style="width:${Math.max(pct, 1.5).toFixed(2)}%; background:${paColor(i)};" title="${escapeHtml(p.name)} — ${p.hours}h"></div>`;
+    }).join('');
+    const legendHtml = sortedPeople.map((p, i) => `
+      <span class="pa-stack-legend-item">
+        <span class="pa-stack-dot" style="background:${paColor(i)};"></span>${escapeHtml(p.name)} <span class="pa-stack-legend-hours">${p.hours}h</span>
+      </span>
+    `).join('');
+    return `
+      <div class="pa-stack-row">
+        <div class="pa-stack-top">
+          <span class="pa-stack-dept-name">${escapeHtml(d.name)}</span>
+          <span class="pa-stack-dept-hours">${d.total}h</span>
+        </div>
+        <div class="pa-stack-track">${segmentsHtml}</div>
+        <div class="pa-stack-legend">${legendHtml}</div>
+      </div>
+    `;
+  }).join('');
 }
 
 // Admin-only cleanup tool for exactly the kind of mistake that started this
@@ -7285,17 +7361,37 @@ async function buildProjectShareImage(data) {
   // department, and people) instead of just department rings + contributors.
   const shareTasks = [...(data.taskBreakdown || [])].sort((a, b) => b.hours - a.hours).slice(0, 8);
   const shareUntagged = Number(data.untaggedHours) || 0;
+
+  // "Who worked on this" is grouped BY DEPARTMENT (a header row per
+  // department, its people listed underneath) so the shared/group-chat
+  // report shows the same "inside each department, who used the time"
+  // breakdown as the on-screen Department breakdown chart, not just a
+  // flat contributor list.
+  const byDeptForShare = {};
+  contributors.forEach((c) => {
+    const key = c.departmentId || 'unassigned';
+    if (!byDeptForShare[key]) byDeptForShare[key] = { name: c.departmentName || 'No department set', people: [] };
+    byDeptForShare[key].people.push(c);
+  });
+  const shareDeptGroups = Object.values(byDeptForShare)
+    .map((d) => ({ ...d, total: Math.round(d.people.reduce((s, p) => s + (Number(p.hours) || 0), 0) * 100) / 100 }))
+    .sort((a, b) => b.total - a.total);
+
   const W = 720;
   const RING_ROW_H = 210;
   const ringCols = Math.min(Math.max(departments.length, 1), 3);
   const ringRows = Math.max(1, Math.ceil(departments.length / ringCols));
   const HEADER_H = 90 + ringRows * RING_ROW_H;
   const ROW_H = 56;
+  const DEPT_GROUP_HEADER_H = 34;
   const TASK_ROW_H = 44;
   const taskSectionH = shareTasks.length
     ? (54 + shareTasks.length * TASK_ROW_H + (shareUntagged > 0 ? 22 : 0))
     : (shareUntagged > 0 ? 90 : 0);
-  const H = HEADER_H + Math.max(contributors.length, 1) * ROW_H + taskSectionH + 90;
+  const peopleSectionH = contributors.length
+    ? (shareDeptGroups.length * DEPT_GROUP_HEADER_H + contributors.length * ROW_H)
+    : ROW_H;
+  const H = HEADER_H + peopleSectionH + taskSectionH + 90;
 
   const canvas = document.createElement('canvas');
   const scale = 2;
@@ -7349,7 +7445,6 @@ async function buildProjectShareImage(data) {
 
   const allocatedByDept = {};
   departments.forEach((d) => { allocatedByDept[d.id] = Number(d.allocatedHours) || 0; });
-  const maxHours = Math.max(...contributors.map((c) => c.hours), 1);
 
   let y = HEADER_H + 40;
   if (!contributors.length) {
@@ -7357,39 +7452,52 @@ async function buildProjectShareImage(data) {
     ctx.font = '13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     ctx.fillText('No one has logged hours on this project yet.', 40, y);
   } else {
-    for (const c of contributors) {
-      const barX = 40, barW = W - 80, barY = y + 12, barH = 8;
+    // Grouped BY DEPARTMENT — a bold header row (name + total) then that
+    // department's people underneath, each person's bar scaled against
+    // their OWN department's busiest contributor so it reads as "who used
+    // the time inside this department" rather than competing on an
+    // absolute scale against people in entirely different departments.
+    for (const group of shareDeptGroups) {
+      const sortedPeople = [...group.people].sort((a, b) => b.hours - a.hours);
+      const maxInDept = Math.max(...sortedPeople.map((p) => p.hours), 1);
+      const allocated = allocatedByDept[sortedPeople[0]?.departmentId] || 0;
 
-      ctx.font = '700 14px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
-      ctx.fillStyle = '#f5f4f0';
-      ctx.fillText(c.name, barX, y);
-      const nameW = ctx.measureText(c.name).width;
-
-      ctx.font = '11px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
-      ctx.fillStyle = '#a8a6a2';
-      ctx.fillText(c.departmentName || 'No department set', barX + nameW + 10, y);
-
-      ctx.textAlign = 'right';
       ctx.font = '800 13.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
       ctx.fillStyle = '#f5f4f0';
-      ctx.fillText(`${c.hours}h`, W - 40, y);
+      ctx.fillText(group.name, 40, y);
+      ctx.textAlign = 'right';
+      ctx.font = '700 12.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+      ctx.fillStyle = '#a8a6a2';
+      ctx.fillText(`${group.total}h`, W - 40, y);
       ctx.textAlign = 'left';
+      y += DEPT_GROUP_HEADER_H;
 
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      roundRectPath(ctx, barX, barY, barW, barH, barH / 2);
-      ctx.fill();
+      sortedPeople.forEach((p, i) => {
+        const barX = 56, barW = W - 96, barY = y + 12, barH = 8;
+        const color = PA_PALETTE[i % PA_PALETTE.length];
 
-      const allocated = allocatedByDept[c.departmentId] || 0;
-      const pct = allocated > 0 ? Math.min(c.hours / allocated, 1) : (c.hours / maxHours);
-      const fillW = Math.max(barH, barW * pct);
-      const grad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
-      grad.addColorStop(0, '#e08a5f');
-      grad.addColorStop(1, '#cc785c');
-      ctx.fillStyle = grad;
-      roundRectPath(ctx, barX, barY, fillW, barH, barH / 2);
-      ctx.fill();
+        ctx.font = '650 13.5px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+        ctx.fillStyle = '#f5f4f0';
+        ctx.fillText(p.name, barX, y);
 
-      y += ROW_H;
+        ctx.textAlign = 'right';
+        ctx.font = '800 13px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+        ctx.fillStyle = '#f5f4f0';
+        ctx.fillText(`${p.hours}h`, W - 40, y);
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        roundRectPath(ctx, barX, barY, barW, barH, barH / 2);
+        ctx.fill();
+
+        const pct = allocated > 0 ? Math.min(p.hours / allocated, 1) : (p.hours / maxInDept);
+        const fillW = Math.max(barH, barW * pct);
+        ctx.fillStyle = color;
+        roundRectPath(ctx, barX, barY, fillW, barH, barH / 2);
+        ctx.fill();
+
+        y += ROW_H;
+      });
     }
   }
 

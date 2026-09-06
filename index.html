@@ -832,12 +832,20 @@
         <p class="hint" style="margin-top:4px;">Where the time on this job actually went — which task type took the most hours, which department used the most time, and who put in the most hours.</p>
         <div id="projectTaskBreakdownArea" style="margin-top:12px;"></div>
         <div id="projectRingSection" class="pa-section" style="display:none;">
-          <div class="pa-section-title">🍩 Category share</div>
+          <div class="pa-section-title" id="projectRingTitle">🍩 Category share</div>
           <div id="projectRingArea"></div>
         </div>
-        <div id="projectTrendSection" class="pa-section" style="display:none;">
-          <div class="pa-section-title">📈 Hours logged over time</div>
-          <div id="projectTrendArea"></div>
+        <div class="pa-section">
+          <div class="row-2 pa-trend-split">
+            <div id="projectTrendSection" style="display:none;">
+              <div class="pa-section-title">📈 Hours logged over time</div>
+              <div id="projectTrendArea"></div>
+            </div>
+            <div id="projectDeptPeopleSection" style="display:none;">
+              <div class="pa-section-title">🧑‍🤝‍🧑 Department breakdown</div>
+              <div id="projectDeptPeopleArea"></div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="card glass" style="margin-top:16px;">
