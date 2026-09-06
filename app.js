@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.28.4';
+const APP_VERSION = 'v3.29.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Actually fixed the department-breakdown cut-off: the department name text itself was refusing to shrink and was spilling past the card edge, not the column layout. It now truncates cleanly instead.';
+const APP_UPDATE_NOTES = 'Projects list now shows which department currently has each job and exactly when it landed with them. Also fixed the department-breakdown cut-off for real this time — it was the department name text refusing to shrink, not the column layout.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1628,6 +1628,7 @@ $('logoutBtn').addEventListener('click', async () => {
   if ($('weatherBadge')) $('weatherBadge').style.display = 'none';
   weatherData = null;
   projectsHoursCache = {};
+  projectsStageCache = {};
   if ($('adminMoreRow')) $('adminMoreRow').style.display = 'none';
   closeAiChat();
   closeChatOverlay();
@@ -5812,6 +5813,53 @@ function cssEscapeAttr(v) {
   return window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&');
 }
 
+// Small "who's got it right now" chip shown right on each Projects list row —
+// same batching approach as the hours rings above (get-projects-stage-summary
+// answers for the whole visible list in one call instead of one per row).
+// Shows the department currently sitting with the job, the current stage's
+// label, and exactly when it landed with them — which is also the moment the
+// PREVIOUS department marked their part finished and handed off, since
+// advance-project-stage stamps both sides of a hand-off with the same
+// timestamp (see fetchStageState/renderProjectStages above).
+let projectsStageCache = {}; // jobId -> { status, stageLabel, departmentName, since }
+async function refreshProjectsStageCache(jobIds) {
+  if (!jobIds || !jobIds.length) return;
+  try {
+    const { data, error } = await sb.functions.invoke('get-projects-stage-summary', { body: { jobIds } });
+    if (error) throw error;
+    projectsStageCache = { ...projectsStageCache, ...(data?.stages || {}) };
+  } catch (err) {
+    console.warn('refreshProjectsStageCache failed (row status chips will just stay blank):', err);
+  }
+}
+// "Sep 5, 2:14 PM" — compact enough for a list-row chip.
+function formatStageSince(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' +
+    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+function miniProjectStageChip(jobId) {
+  const s = projectsStageCache[jobId];
+  if (!s) return `<div class="mini-stage-chip dim">Loading…</div>`;
+  if (s.status === 'no_template' || s.status === 'not_started') return '';
+  if (s.status === 'complete') return `<div class="mini-stage-chip done">✅ All stages complete</div>`;
+  const since = formatStageSince(s.since);
+  return `
+    <div class="mini-stage-chip active" title="${escapeHtml(s.stageLabel || '')}">
+      <div class="mini-stage-dept">🟥 On: ${escapeHtml(s.departmentName || 'Unassigned department')}</div>
+      <div class="mini-stage-meta">${escapeHtml(s.stageLabel || '')}${since ? ` • since ${since}` : ''}</div>
+    </div>
+  `;
+}
+function updateProjectStageChipsInPlace(jobIds) {
+  jobIds.forEach((jobId) => {
+    const cell = document.querySelector(`[data-mini-stage-for="${cssEscapeAttr(jobId)}"]`);
+    if (cell) cell.innerHTML = miniProjectStageChip(jobId);
+  });
+}
+
 async function renderProjectsList(isRetry = false) {
   const wrap = $('projectsListArea');
   if (!wrap) return;
@@ -5843,6 +5891,7 @@ async function renderProjectsList(isRetry = false) {
         <div class="entry-desc">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}${isClosed ? ' <span style="opacity:0.6; font-weight:400;">(Closed)</span>' : ''}</div>
         ${r.client ? `<div class="entry-meta">${escapeHtml(r.client)}</div>` : ''}
         ${r.received_date ? `<div class="entry-meta">${escapeHtml(r.received_date)}</div>` : ''}
+        <div class="mini-stage-cell" data-mini-stage-for="${escapeHtml(r.job_id)}">${miniProjectStageChip(r.job_id)}</div>
       </div>
       <div class="mini-rings-cell" data-mini-rings-for="${escapeHtml(r.job_id)}">${miniProjectHoursRings(r.job_id)}</div>
       ${isAdmin ? `<button type="button" class="ghost" data-toggle-status="${escapeHtml(r.job_id)}" data-status="${escapeHtml(r.status || 'active')}" style="font-size:11px;">${isClosed ? 'Reopen' : 'Close'}</button>` : ''}
@@ -5881,6 +5930,12 @@ async function renderProjectsList(isRetry = false) {
   if (missingIds.length) {
     refreshProjectsHoursCache(missingIds).then(() => {
       if ($('projectsOverlay')?.classList.contains('show')) updateProjectRingsInPlace(visibleIds);
+    });
+  }
+  const missingStageIds = visibleIds.filter((id) => !projectsStageCache[id]);
+  if (missingStageIds.length) {
+    refreshProjectsStageCache(missingStageIds).then(() => {
+      if ($('projectsOverlay')?.classList.contains('show')) updateProjectStageChipsInPlace(visibleIds);
     });
   }
 }
@@ -6504,7 +6559,7 @@ async function renderProjectStages(jobId) {
     $('startStageTimelineBtn')?.addEventListener('click', async (e) => {
       e.target.disabled = true; e.target.textContent = 'Starting…';
       const res = await callAdvanceStage(jobId, 'start');
-      if (res) { showToast('Timeline started.'); renderProjectStages(jobId); }
+      if (res) { showToast('Timeline started.'); delete projectsStageCache[jobId]; renderProjectStages(jobId); }
       else { e.target.disabled = false; e.target.textContent = '🚦 Start project timeline'; }
     });
     return;
@@ -6549,7 +6604,7 @@ async function renderProjectStages(jobId) {
     if (!confirm(`Mark "${current.label}" finished and hand off to the next stage?`)) return;
     e.target.disabled = true; e.target.textContent = 'Handing off…';
     const res = await callAdvanceStage(jobId, 'advance', current.stage_key);
-    if (res) { showToast(res.roadmapComplete ? 'Roadmap complete!' : 'Handed off to the next stage.'); renderProjectStages(jobId); }
+    if (res) { showToast(res.roadmapComplete ? 'Roadmap complete!' : 'Handed off to the next stage.'); delete projectsStageCache[jobId]; renderProjectStages(jobId); }
     else { e.target.disabled = false; e.target.textContent = '✅ Mark finished & hand off'; }
   });
 }

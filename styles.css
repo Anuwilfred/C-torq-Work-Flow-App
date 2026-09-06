@@ -2351,6 +2351,28 @@ input.stage-pos-input::-webkit-outer-spin-button {
   .mini-ring-pair { gap: 10px; }
 }
 
+/* Projects list row — "who's got it right now" chip, sitting under the
+   client/received-date lines inside .entry-body. Same overflow lesson as
+   the Project Analytics department chart above: max-width/min-width:0 +
+   ellipsis on BOTH lines so a long department or stage name truncates
+   cleanly instead of pushing the row wider than the card. */
+.mini-stage-cell { margin-top: 6px; max-width: 100%; }
+.mini-stage-chip {
+  display: inline-flex; flex-direction: column; gap: 2px; max-width: 100%; min-width: 0;
+  background: rgba(10,10,10,0.45); border: 1px solid var(--glass-border);
+  border-radius: 10px; padding: 5px 10px;
+}
+.mini-stage-chip.dim { color: var(--text-dim); font-size: 11px; font-weight: 600; }
+.mini-stage-chip.done { color: var(--ok); font-size: 11.5px; font-weight: 700; }
+.mini-stage-dept {
+  font-size: 12px; font-weight: 750; color: var(--text); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mini-stage-meta {
+  font-size: 10.5px; font-weight: 600; color: var(--text-dim); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 .contrib-row {
   margin-bottom: 14px;
   padding: 10px 12px;
