@@ -1267,10 +1267,11 @@
            department snapshot from when it began. -->
       <div class="card glass">
         <strong style="font-size:14px;">🛣️ Manage Project Stages</strong>
-        <p class="hint" style="margin-top:2px;">The roadmap shown on every project's "Project timeline". Add, reorder, or remove a stage, and assign which department owns each one — only that department's head (set from Team → the department) can acknowledge and hand off their stage.</p>
+        <p class="hint" style="margin-top:2px;">The roadmap shown on every project's "Project timeline". Add, reorder, or remove a stage, and assign which department owns each one — only that department's head (set from Team → the department) can acknowledge and hand off their stage. Type a number in the # box below to drop a stage into that exact position.</p>
         <div class="location-row" style="margin-top:8px;">
-          <input id="newStageLabel" type="text" placeholder="e.g. Site survey" />
+          <input id="newStageLabel" type="text" placeholder="e.g. Site survey" style="flex:1 1 160px;" />
           <select id="newStageDepartment"><option value="">No department yet</option></select>
+          <input id="newStagePosition" type="number" min="1" placeholder="#" title="Position (optional — leave blank to add at the end)" style="width:60px; flex:0 0 60px;" />
           <button type="button" id="addStageTemplateBtn" class="secondary">+ Add</button>
         </div>
         <div id="projectStageTemplateList" style="margin-top:10px;"></div>

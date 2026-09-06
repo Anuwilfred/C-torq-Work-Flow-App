@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.27.1';
+const APP_VERSION = 'v3.27.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project timeline polish: active stage is now light red and done stages are green, the hand-off point pulses so it stands out, the duration text no longer overlaps the connector line, and the department chip is easier to read.';
+const APP_UPDATE_NOTES = 'Data Feed → Manage Project Stages: you can now type an exact position number to drop a stage anywhere in the roadmap order, both when adding a new stage and when reordering an existing one.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4530,7 +4530,9 @@ async function renderProjectStageTemplateList() {
 
   box.innerHTML = templates.map((t, i) => `
     <div class="jobdesc-row" style="flex-wrap:wrap;">
-      <span class="jobdesc-label" style="flex:1 1 170px;">${i + 1}. ${escapeHtml(t.label)}</span>
+      <input type="number" min="1" max="${templates.length}" value="${i + 1}" data-stage-pos="${t.id}"
+        title="Type a position number to move this stage there" style="width:48px; flex:0 0 48px; text-align:center;" />
+      <span class="jobdesc-label" style="flex:1 1 170px;">${escapeHtml(t.label)}</span>
       <select data-stage-dept="${t.id}" style="flex:1 1 150px;">
         <option value="">No department</option>
         ${depts.map((d) => `<option value="${d.id}" ${t.department_id === d.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
@@ -4547,6 +4549,25 @@ async function renderProjectStageTemplateList() {
       const { error: updErr } = await sb.from('project_stage_templates').update({ department_id: sel.value || null }).eq('id', id);
       if (updErr) { showToast(`Couldn't save: ${updErr.message}`); return; }
       showToast('Saved — new projects (and any stage not started yet) will use this.');
+    });
+  });
+  box.querySelectorAll('[data-stage-pos]').forEach((inp) => {
+    inp.addEventListener('change', async () => {
+      const id = inp.dataset.stagePos;
+      const idx = templates.findIndex((t) => t.id === id);
+      if (idx === -1) return;
+      let newPos = parseInt(inp.value, 10);
+      if (!newPos || newPos < 1) newPos = 1;
+      if (newPos > templates.length) newPos = templates.length;
+      if (newPos === idx + 1) { renderProjectStageTemplateList(); return; }
+      const reordered = templates.filter((t) => t.id !== id);
+      reordered.splice(newPos - 1, 0, templates[idx]);
+      const updates = reordered
+        .map((t, i) => ({ id: t.id, oldOrder: t.sort_order, newOrder: i + 1 }))
+        .filter((u) => u.oldOrder !== u.newOrder);
+      await Promise.all(updates.map((u) => sb.from('project_stage_templates').update({ sort_order: u.newOrder }).eq('id', u.id)));
+      showToast(`Moved to position ${newPos}.`);
+      renderProjectStageTemplateList();
     });
   });
   box.querySelectorAll('[data-stage-up]').forEach((btn) => {
@@ -4587,19 +4608,34 @@ async function renderProjectStageTemplateList() {
 $('addStageTemplateBtn')?.addEventListener('click', async () => {
   const labelInput = $('newStageLabel');
   const deptSelect = $('newStageDepartment');
+  const posInput = $('newStagePosition');
   const label = (labelInput?.value || '').trim();
   if (!label) { showToast('Enter a stage name.'); return; }
-  const { data: existing } = await sb.from('project_stage_templates').select('stage_key, sort_order');
+  const { data: existing } = await sb.from('project_stage_templates').select('id, stage_key, sort_order').order('sort_order', { ascending: true });
   const rows = existing || [];
   let key = slugifyCategoryKey(label);
   if (rows.some((r) => r.stage_key === key)) key = `${key}_${Date.now().toString(36)}`;
-  const sortOrder = rows.length ? Math.max(...rows.map((r) => r.sort_order || 0)) + 1 : 1;
+
+  // Optional typed position: where in the list (1-based) the new stage
+  // should land. Anything left blank (or out of range) just appends to the
+  // end, same as before.
+  let pos = parseInt(posInput?.value, 10);
+  const insertAt = (pos && pos >= 1) ? Math.min(pos, rows.length + 1) : rows.length + 1;
+
+  // Renumber every existing stage from/after that spot down by one so the
+  // new stage can take that exact position number.
+  const toShift = rows
+    .map((r, i) => ({ id: r.id, oldOrder: r.sort_order, newOrder: (i + 1) >= insertAt ? i + 2 : i + 1 }))
+    .filter((u) => u.oldOrder !== u.newOrder);
+  await Promise.all(toShift.map((u) => sb.from('project_stage_templates').update({ sort_order: u.newOrder }).eq('id', u.id)));
+
   const { error } = await sb.from('project_stage_templates').insert({
-    stage_key: key, label, department_id: deptSelect?.value || null, sort_order: sortOrder,
+    stage_key: key, label, department_id: deptSelect?.value || null, sort_order: insertAt,
   });
   if (error) { showToast(`Couldn't add stage: ${error.message}`); return; }
   if (labelInput) labelInput.value = '';
-  showToast('Stage added.');
+  if (posInput) posInput.value = '';
+  showToast(insertAt <= rows.length ? `Stage added at position ${insertAt}.` : 'Stage added.');
   renderProjectStageTemplateList();
 });
 
