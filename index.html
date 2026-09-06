@@ -1709,21 +1709,28 @@
         </div>
       </div>
 
-      <!-- Background — admin-only, and ORG-WIDE: whatever the admin picks
-           here shows on every signed-in person's dashboard, live (synced via
-           the app_appearance Supabase table + a realtime subscription), not
-           just the admin's own device. Hidden entirely for non-admins in
-           renderAppearancePanel(); non-admins still see whatever's set. -->
+      <!-- Color Theme — personal, per-device, open to anyone with
+           Appearance access (not admin-only). Only visibly matters when
+           your admin has Background set to "Color theme" mode rather than
+           "Action photos" — hidden/noted otherwise in renderAppearancePanel(). -->
+      <div class="card glass" id="colorThemeCard" style="margin-top:14px;">
+        <strong style="font-size:14px;">🎨 Color Theme</strong>
+        <p class="hint" style="margin-top:2px;">Just for you, this device. Only shows while your admin has the background set to a color theme (not rotating photos).</p>
+        <div id="bgThemeSwatchRow" class="theme-swatch-row" style="margin-top:10px;"></div>
+      </div>
+      <p id="colorThemeUnavailableNote" class="hint card glass" style="margin-top:14px; display:none; text-align:center;">🎨 Color theme is off right now — your admin has the background set to rotating action photos instead.</p>
+
+      <!-- Background mode + Action photos — admin-only, and ORG-WIDE:
+           whatever the admin picks here shows on every signed-in person's
+           dashboard, live (synced via the app_appearance Supabase table +
+           a realtime subscription), not just the admin's own device. Hidden
+           entirely for non-admins in renderAppearancePanel(). -->
       <div class="card glass" id="bgAdminCard" style="margin-top:14px;">
-        <strong style="font-size:14px;">🎨 Background</strong>
-        <p class="hint" style="margin-top:2px;">Admin only — this applies to everyone's app, live. Pick a color theme, or switch to real rotating action photos — motorsport, cars, boats, ships, rockets, flights and more.</p>
+        <strong style="font-size:14px;">🎨 Background mode</strong>
+        <p class="hint" style="margin-top:2px;">Admin only — this applies to everyone's app, live. Switch between everyone using their own Color Theme, or real rotating action photos for everyone — motorsport, cars, boats, ships, rockets, flights and more.</p>
         <div id="bgModePickerRow" class="appearance-choice-row" style="margin-top:10px;">
           <button type="button" class="appearance-choice-btn" data-bgmode-choice="gradient">🎨 Color theme</button>
           <button type="button" class="appearance-choice-btn" data-bgmode-choice="photo">📷 Action photos</button>
-        </div>
-
-        <div id="bgThemeSwatchArea" style="margin-top:12px;">
-          <div id="bgThemeSwatchRow" class="theme-swatch-row"></div>
         </div>
 
         <div id="bgPhotoOptionsArea" style="margin-top:12px; display:none;">
@@ -1733,18 +1740,15 @@
             <img id="bgPhotoPreviewImg" class="bg-photo-preview-img" alt="Current background photo preview" />
           </div>
           <button type="button" id="bgPhotoShuffleBtn" class="ghost" style="width:100%; margin-top:10px;">🔀 Shuffle this photo</button>
-          <p class="hint" style="margin-top:8px;">Rotates automatically every day. Shuffle just swaps today's pick — tomorrow it rotates again on its own.</p>
+          <p class="hint" style="margin-top:8px;">Rotates automatically every day for everyone. Shuffle just swaps today's pick — tomorrow it rotates again on its own.</p>
         </div>
       </div>
 
-      <!-- App Logo — admin-only, upload-your-own. Hidden entirely for
-           non-admins in renderAppearancePanel(). Stored as a data URL in
-           the same localStorage appearance-prefs blob as everything else
-           here (personal per-device), so there's no backend/storage
-           bucket involved — just a straight file picker. -->
+      <!-- App Logo — admin-only, upload-your-own, org-wide. Hidden entirely
+           for non-admins in renderAppearancePanel(). -->
       <div class="card glass" id="logoAdminCard" style="margin-top:14px;">
         <strong style="font-size:14px;">🔖 App Logo</strong>
-        <p class="hint" style="margin-top:2px;">Admin only. Upload your own image to replace the small mark in the header, login screen, and About — not the home-screen app icon. PNG, JPG, WEBP or SVG, under 1.5MB.</p>
+        <p class="hint" style="margin-top:2px;">Admin only. Upload your own image to replace the small mark in the header, login screen, and About for everyone — not the home-screen app icon. PNG, JPG, WEBP or SVG, under 1.5MB.</p>
         <div style="display:flex; justify-content:center; margin-top:10px;">
           <span id="logoUploadPreview" class="app-logo-mark app-logo-mark-lg"></span>
         </div>
@@ -1752,12 +1756,27 @@
         <button type="button" id="logoResetBtn" class="ghost" style="width:100%; margin-top:10px;">↺ Reset to default logo</button>
       </div>
 
-      <div class="card glass" style="margin-top:14px;">
+      <!-- AEON Ai icon — admin-only, upload-your-own GIF/image, org-wide.
+           Hidden entirely for non-admins in renderAppearancePanel(). -->
+      <div class="card glass" id="aiIconAdminCard" style="margin-top:14px;">
+        <strong style="font-size:14px;">🤖 AI Icon</strong>
+        <p class="hint" style="margin-top:2px;">Admin only. Upload a GIF or image to replace the floating AEON Ai orb for everyone. Square images work best, under 3MB.</p>
+        <div style="display:flex; justify-content:center; margin-top:10px;">
+          <span id="aiIconUploadPreview" style="display:flex; align-items:center; justify-content:center; width:64px; height:64px; border-radius:50%; overflow:hidden; background:rgba(255,255,255,0.06);"></span>
+        </div>
+        <input type="file" id="aiIconUploadInput" accept="image/gif,image/png,image/jpeg,image/webp" style="margin-top:12px; width:100%;" />
+        <button type="button" id="aiIconResetBtn" class="ghost" style="width:100%; margin-top:10px;">↺ Reset to default AI icon</button>
+      </div>
+
+      <div class="card glass" id="quoteAdminCard" style="margin-top:14px;">
         <strong style="font-size:14px;">❝ Today's quote</strong>
-        <p class="hint" style="margin-top:2px;">One curated quote per day, shown right in the middle of your Home tiles. Turn it off here any time — this only hides it from your dashboard, it doesn't stop the daily rotation underneath.</p>
+        <p class="hint" style="margin-top:2px;">One curated quote per day, shown right in the middle of the Home tiles.</p>
+        <!-- Admin-only: whether the quote shows on Home for everyone at all.
+             Hidden for non-admins in renderAppearancePanel(); they just see
+             whatever's currently set (usually on). -->
         <div id="quoteTogglePickerRow" class="appearance-choice-row" style="margin-top:10px;">
-          <button type="button" class="appearance-choice-btn" data-quote-choice="show">👁️ Show on dashboard</button>
-          <button type="button" class="appearance-choice-btn" data-quote-choice="hide">🚫 Hide</button>
+          <button type="button" class="appearance-choice-btn" data-quote-choice="show">👁️ Show for everyone</button>
+          <button type="button" class="appearance-choice-btn" data-quote-choice="hide">🚫 Hide for everyone</button>
         </div>
         <p id="appearanceQuoteText" class="quote-of-day-text" style="margin-top:12px;"></p>
         <p id="appearanceQuoteAuthor" class="quote-of-day-author"></p>

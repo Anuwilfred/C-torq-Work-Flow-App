@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.33.0';
+const APP_VERSION = 'v3.34.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Background theme/photos and the app logo are now org-wide — an admin sets them once (Appearance panel) and everyone sees the change live. Admins can also upload their own logo image. Day/Night mode and the quote toggle stay personal to each device.';
+const APP_UPDATE_NOTES = 'Appearance refinements: the Quote of the Day toggle, background mode/photos, app logo, and the AEON Ai icon are now org-wide admin controls (with a new option to upload your own AI icon GIF). Day/Night mode and Color Theme stay personal to each device.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5169,16 +5169,17 @@ const LOGO_PRESETS = [
   },
 ];
 
-// LOCAL, personal-per-device preferences only: Day/Night scheme and whether
-// the Quote of the Day card shows on this person's own dashboard. Everything
-// else (background theme/photo, logo) is org-wide and lives in Supabase —
-// see the GLOBAL appearance block just below.
+// LOCAL, personal-per-device preferences only: Day/Night scheme and which
+// color-theme swatch shows (only relevant when the admin has Background mode
+// set to "Color theme" rather than "Action photos"). Everything else
+// (background mode/photos, logo, whether the quote shows at all) is org-wide
+// and lives in Supabase — see the GLOBAL appearance block just below.
 const APPEARANCE_KEY = 'ctorqAppearance';
 function getAppearancePrefs() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) || 'null'); } catch { saved = null; }
   return {
-    scheme: 'dark', showQuote: true,
+    scheme: 'dark', bgTheme: 'classic',
     ...(saved || {}),
   };
 }
@@ -5195,16 +5196,18 @@ function saveAppearancePrefs(patch) {
 // shows up immediately without anyone needing to reload.
 const GLOBAL_APPEARANCE_CACHE_KEY = 'ctorqGlobalAppearanceCache';
 const GLOBAL_APPEARANCE_DEFAULTS = {
-  bgMode: 'gradient', bgTheme: 'classic', bgPhotoCategory: 'mixed',
-  bgPhotoManualIdx: null, bgPhotoManualDay: null, customLogo: null,
+  bgMode: 'gradient', bgPhotoCategory: 'mixed',
+  bgPhotoManualIdx: null, bgPhotoManualDay: null, customLogo: null, showQuote: true,
+  aiIconGif: null,
 };
 let globalAppearance = null;
 function dbRowToGlobalAppearance(row) {
   if (!row) return null;
   return {
-    bgMode: row.bg_mode, bgTheme: row.bg_theme, bgPhotoCategory: row.bg_photo_category,
+    bgMode: row.bg_mode, bgPhotoCategory: row.bg_photo_category,
     bgPhotoManualIdx: row.bg_photo_manual_idx, bgPhotoManualDay: row.bg_photo_manual_day,
-    customLogo: row.custom_logo,
+    customLogo: row.custom_logo, showQuote: row.show_quote,
+    aiIconGif: row.ai_icon_gif,
   };
 }
 function getGlobalAppearance() {
@@ -5233,11 +5236,12 @@ async function fetchGlobalAppearance() {
 async function saveGlobalAppearance(patch) {
   const dbPatch = { updated_at: new Date().toISOString(), updated_by: currentUser?.id || null };
   if ('bgMode' in patch) dbPatch.bg_mode = patch.bgMode;
-  if ('bgTheme' in patch) dbPatch.bg_theme = patch.bgTheme;
   if ('bgPhotoCategory' in patch) dbPatch.bg_photo_category = patch.bgPhotoCategory;
   if ('bgPhotoManualIdx' in patch) dbPatch.bg_photo_manual_idx = patch.bgPhotoManualIdx;
   if ('bgPhotoManualDay' in patch) dbPatch.bg_photo_manual_day = patch.bgPhotoManualDay;
   if ('customLogo' in patch) dbPatch.custom_logo = patch.customLogo;
+  if ('showQuote' in patch) dbPatch.show_quote = patch.showQuote;
+  if ('aiIconGif' in patch) dbPatch.ai_icon_gif = patch.aiIconGif;
   const { data, error } = await sb.from('app_appearance').update(dbPatch).eq('id', true).select().single();
   if (error) { showToast('Could not save — ' + error.message); return; }
   globalAppearance = dbRowToGlobalAppearance(data);
@@ -5283,17 +5287,18 @@ function activeManualPhotoIdx(prefs) {
   return prefs.bgPhotoManualIdx;
 }
 
-// Applies BOTH the local personal prefs (scheme, quote visibility) and the
-// current global org-wide appearance (background, logo) — always reads
-// fresh from getAppearancePrefs()/getGlobalAppearance() rather than taking
-// params, so any caller (a save, a realtime push, the 15-min tick) can just
-// call applyAppearance() with no arguments and get the right result.
+// Applies BOTH the local personal prefs (scheme, color theme) and the
+// current global org-wide appearance (background mode/photos, logo, AI icon,
+// quote visibility) — always reads fresh from
+// getAppearancePrefs()/getGlobalAppearance() rather than taking params, so
+// any caller (a save, a realtime push, the 15-min tick) can just call
+// applyAppearance() with no arguments and get the right result.
 function applyAppearance() {
   const local = getAppearancePrefs();
   const g = getGlobalAppearance();
   const root = document.documentElement;
   root.setAttribute('data-scheme', local.scheme);
-  root.setAttribute('data-bg-theme', g.bgTheme);
+  root.setAttribute('data-bg-theme', local.bgTheme);
   root.setAttribute('data-bg-mode', g.bgMode);
 
   const logoContent = g.customLogo
@@ -5303,6 +5308,20 @@ function applyAppearance() {
     const el = $(id);
     if (el) el.innerHTML = logoContent;
   });
+
+  // AEON Ai orb icon — admin can replace the default CSS orb with an
+  // uploaded GIF/image, org-wide. When set, swap in a plain <img> that fills
+  // the button; when cleared, restore the default animated CSS flame layers.
+  const orb = $('aiOrb');
+  if (orb) {
+    if (g.aiIconGif) {
+      orb.classList.add('ai-orb-custom');
+      orb.style.backgroundImage = `url("${g.aiIconGif}")`;
+    } else {
+      orb.classList.remove('ai-orb-custom');
+      orb.style.backgroundImage = '';
+    }
+  }
 
   const layer = $('bgPhotoLayer');
   if (layer && g.bgMode === 'photo') {
@@ -5318,7 +5337,7 @@ function applyAppearance() {
   // device; the daily rotation itself keeps running underneath so it's back
   // instantly if re-enabled.
   const quoteCard = $('quoteOfDayCard');
-  if (quoteCard) quoteCard.style.display = (local.showQuote === false) ? 'none' : '';
+  if (quoteCard) quoteCard.style.display = (g.showQuote === false) ? 'none' : '';
   renderQuoteOfDay();
 }
 
@@ -5341,24 +5360,32 @@ function renderAppearancePanel() {
   document.querySelectorAll('#schemePickerRow [data-scheme-choice]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.schemeChoice === prefs.scheme);
   });
-  // Quote of the Day show/hide buttons (local, personal)
+  // Quote of the Day show/hide buttons — org-wide, admin-only (everyone else
+  // never sees this card at all; they just see whatever's currently set).
+  if ($('quoteAdminCard')) $('quoteAdminCard').style.display = isAdmin ? 'block' : 'none';
   document.querySelectorAll('#quoteTogglePickerRow [data-quote-choice]').forEach((btn) => {
     const wantsShow = btn.dataset.quoteChoice === 'show';
-    btn.classList.toggle('active', wantsShow === (prefs.showQuote !== false));
+    btn.classList.toggle('active', wantsShow === (g.showQuote !== false));
   });
 
-  // Background + Logo are org-wide and admin-only to edit — everyone else
-  // never sees these two cards at all (they still just see whatever the
-  // admin picked, applied by applyAppearance()).
+  // Background mode, Logo, and AI icon are org-wide and admin-only to edit —
+  // everyone else never sees these cards at all (they still just see
+  // whatever the admin picked, applied by applyAppearance()).
   if ($('bgAdminCard')) $('bgAdminCard').style.display = isAdmin ? 'block' : 'none';
   if ($('logoAdminCard')) $('logoAdminCard').style.display = isAdmin ? 'block' : 'none';
+  if ($('aiIconAdminCard')) $('aiIconAdminCard').style.display = isAdmin ? 'block' : 'none';
 
   // Background-mode buttons
   document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.bgmodeChoice === g.bgMode);
   });
-  if ($('bgThemeSwatchArea')) $('bgThemeSwatchArea').style.display = g.bgMode === 'gradient' ? 'block' : 'none';
   if ($('bgPhotoOptionsArea')) $('bgPhotoOptionsArea').style.display = g.bgMode === 'photo' ? 'block' : 'none';
+
+  // Color Theme — personal, per-device, open to anyone with Appearance
+  // access (not admin-gated). Only meaningful while the admin has Background
+  // mode set to "Color theme" — otherwise show the "unavailable" note instead.
+  if ($('colorThemeCard')) $('colorThemeCard').style.display = g.bgMode === 'gradient' ? 'block' : 'none';
+  if ($('colorThemeUnavailableNote')) $('colorThemeUnavailableNote').style.display = g.bgMode === 'photo' ? 'block' : 'none';
 
   // Theme swatches (rebuild once, otherwise just refresh 'active')
   const swatchRow = $('bgThemeSwatchRow');
@@ -5370,7 +5397,7 @@ function renderAppearancePanel() {
   }
   if (swatchRow) {
     swatchRow.querySelectorAll('[data-theme-choice]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.themeChoice === g.bgTheme);
+      btn.classList.toggle('active', btn.dataset.themeChoice === prefs.bgTheme);
     });
   }
 
@@ -5399,6 +5426,15 @@ function renderAppearancePanel() {
       : LOGO_PRESETS[0].svg;
   }
 
+  // AI orb icon upload preview
+  const aiIconPreview = $('aiIconUploadPreview');
+  if (aiIconPreview) {
+    aiIconPreview.innerHTML = g.aiIconGif
+      ? `<img src="${g.aiIconGif}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:50%; display:block;" />`
+      : `<span style="font-size:28px;">🤖</span>`;
+  }
+  if ($('aiIconResetBtn')) $('aiIconResetBtn').style.display = g.aiIconGif ? 'block' : 'none';
+
   renderQuoteOfDay();
 
   if (appearancePanelWired) return;
@@ -5409,8 +5445,7 @@ function renderAppearancePanel() {
   });
   document.querySelectorAll('#quoteTogglePickerRow [data-quote-choice]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      saveAppearancePrefs({ showQuote: btn.dataset.quoteChoice === 'show' });
-      renderAppearancePanel();
+      saveGlobalAppearance({ showQuote: btn.dataset.quoteChoice === 'show' }).then(renderAppearancePanel);
     });
   });
   document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
@@ -5420,7 +5455,8 @@ function renderAppearancePanel() {
     swatchRow.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-theme-choice]');
       if (!btn) return;
-      saveGlobalAppearance({ bgTheme: btn.dataset.themeChoice }).then(renderAppearancePanel);
+      saveAppearancePrefs({ bgTheme: btn.dataset.themeChoice });
+      renderAppearancePanel();
     });
   }
   if (catSelect) {
@@ -5454,6 +5490,36 @@ function renderAppearancePanel() {
       };
       reader.onerror = () => showToast('Could not read that image — please try another file.');
       reader.readAsDataURL(file);
+    });
+  }
+  const aiIconInput = $('aiIconUploadInput');
+  if (aiIconInput) {
+    aiIconInput.addEventListener('change', () => {
+      const file = aiIconInput.files && aiIconInput.files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024) {
+        showToast('That GIF is too large — please use something under 3MB.');
+        aiIconInput.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        saveGlobalAppearance({ aiIconGif: reader.result }).then(() => {
+          renderAppearancePanel();
+          showToast('AI icon updated for everyone.');
+        });
+      };
+      reader.onerror = () => showToast('Could not read that file — please try another one.');
+      reader.readAsDataURL(file);
+    });
+  }
+  if ($('aiIconResetBtn')) {
+    $('aiIconResetBtn').addEventListener('click', () => {
+      saveGlobalAppearance({ aiIconGif: null }).then(() => {
+        if (aiIconInput) aiIconInput.value = '';
+        renderAppearancePanel();
+        showToast('Reverted to the default AI icon for everyone.');
+      });
     });
   }
   if ($('logoResetBtn')) {

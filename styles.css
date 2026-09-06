@@ -1383,6 +1383,26 @@ input.stage-pos-input::-webkit-outer-spin-button {
 }
 .ai-orb:hover { transform: scale(1.08); }
 
+/* Admin-uploaded custom icon (GIF/image) — replaces the default animated
+   CSS flame design with the uploaded image, filling the same circular
+   button. background-image is set inline (applyAppearance()); this class
+   just switches the button over to displaying it and hides the default
+   CSS layers underneath so they don't show through/behind the image. */
+.ai-orb.ai-orb-custom {
+  background-color: transparent;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  animation: none;
+  box-shadow:
+    0 0 14px 2px rgba(150, 120, 255, 0.4),
+    0 0 30px 8px rgba(90, 70, 220, 0.25);
+}
+.ai-orb.ai-orb-custom .ai-orb-flame,
+.ai-orb.ai-orb-custom .ai-orb-core {
+  display: none;
+}
+
 /* Inner energy core — three overlapping, independently-animated blobs
    (screen blend so overlaps brighten like real light) sitting well inside
    the glass edge, leaving a darker "interior" ring before the rim — same
