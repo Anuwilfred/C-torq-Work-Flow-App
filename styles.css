@@ -643,6 +643,32 @@ input:focus, select:focus, textarea:focus {
 input[type="file"] { padding: 9px 10px; font-size: 12.5px; }
 textarea { min-height: 78px; resize: vertical; }
 
+/* Password fields — eye icon at the right end to show/hide what's typed. */
+.pw-field { position: relative; }
+.pw-field input { padding-right: 44px; }
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 17px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-dim);
+  opacity: 0.85;
+  border-radius: 8px;
+}
+.pw-toggle:hover, .pw-toggle:focus-visible { opacity: 1; background: rgba(255, 255, 255, 0.06); outline: none; }
+.pw-toggle.is-visible { color: var(--accent); }
+
 /* Auto-filled, non-editable fields (Project, Location, Date, Start/End time,
    Break minutes) — greyed out and not typeable. These are only ever set by
    the app itself (Clock In/Out, Start/Stop Break, picking a Job ID), never

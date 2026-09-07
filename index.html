@@ -70,7 +70,10 @@
       <label for="loginEmail">Email</label>
       <input id="loginEmail" type="email" autocomplete="username" />
       <label for="loginPassword">Password</label>
-      <input id="loginPassword" type="password" autocomplete="current-password" />
+      <div class="pw-field">
+        <input id="loginPassword" type="password" autocomplete="current-password" />
+        <button type="button" class="pw-toggle" data-pw-target="loginPassword" aria-label="Show password">👁️</button>
+      </div>
       <button id="loginBtn" class="primary">Log in</button>
       <p class="hint"><a href="#" id="showForgot">Forgot password?</a></p>
     </div>
@@ -86,9 +89,15 @@
     <div id="setPasswordView" style="display:none">
       <p id="setPasswordIntro" class="hint">Set a password for your account.</p>
       <label for="newPassword">New password</label>
-      <input id="newPassword" type="password" autocomplete="new-password" />
+      <div class="pw-field">
+        <input id="newPassword" type="password" autocomplete="new-password" />
+        <button type="button" class="pw-toggle" data-pw-target="newPassword" aria-label="Show password">👁️</button>
+      </div>
       <label for="confirmPassword">Confirm password</label>
-      <input id="confirmPassword" type="password" autocomplete="new-password" />
+      <div class="pw-field">
+        <input id="confirmPassword" type="password" autocomplete="new-password" />
+        <button type="button" class="pw-toggle" data-pw-target="confirmPassword" aria-label="Show password">👁️</button>
+      </div>
       <button id="setPasswordBtn" class="primary">Save password</button>
     </div>
 

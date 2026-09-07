@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.3';
+const APP_VERSION = 'v3.35.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Analytics: Time by task, Time by department, and Top contributors now show the rounded bar chart on top plus the full detailed list underneath, so nothing that was there before is missing.';
+const APP_UPDATE_NOTES = 'Added a show/hide (eye icon) toggle to the Login, New password, and Confirm password fields so you can check what you actually typed.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1702,6 +1702,26 @@ function showAuthView(view) {
   });
   $('authMsg').textContent = '';
 }
+
+// Show/hide password — an open-eye icon toggles the field to plain text so
+// people can check what they actually typed, a closed-eye (slashed) icon
+// switches it back to masked dots. Delegated to any element with class
+// .pw-toggle, targeting the input named in its data-pw-target, so this
+// covers Login, New password, and Confirm password with one handler.
+const PW_EYE_OPEN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const PW_EYE_CLOSED = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+document.querySelectorAll('.pw-toggle').forEach((btn) => {
+  btn.innerHTML = PW_EYE_CLOSED;
+  btn.addEventListener('click', () => {
+    const input = $(btn.dataset.pwTarget);
+    if (!input) return;
+    const nowVisible = input.type === 'password';
+    input.type = nowVisible ? 'text' : 'password';
+    btn.innerHTML = nowVisible ? PW_EYE_OPEN : PW_EYE_CLOSED;
+    btn.classList.toggle('is-visible', nowVisible);
+    btn.setAttribute('aria-label', nowVisible ? 'Hide password' : 'Show password');
+  });
+});
 
 $('showForgot').addEventListener('click', (e) => { e.preventDefault(); showAuthView('forgotView'); });
 $('backToLogin').addEventListener('click', (e) => { e.preventDefault(); showAuthView('loginView'); });
