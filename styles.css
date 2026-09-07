@@ -2687,6 +2687,7 @@ input.stage-pos-input::-webkit-outer-spin-button {
   display: flex; align-items: center; gap: 7px; letter-spacing: -0.005em;
 }
 
+.pa-bar-list { margin-top: 18px; }
 .pa-bar-row { margin-bottom: 14px; }
 .pa-bar-row:last-child { margin-bottom: 0; }
 .pa-bar-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; margin-bottom: 6px; }
