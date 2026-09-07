@@ -1,6 +1,10 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
+// VERSIONING RULE: always increment ONLY the last number by exactly 1
+// (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
+// big the change is. Never bump the first two numbers — that used to happen
+// for "big" features and made version jumps look confusing/skipped.
 const APP_VERSION = 'v3.35.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
