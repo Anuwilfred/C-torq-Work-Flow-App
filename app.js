@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.1';
+const APP_VERSION = 'v3.35.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a mobile reliability bug where the app could get stuck reloading itself over and over right after an update (showing as "A problem repeatedly occurred" in Safari) — it now hard-stops after 2 auto-reloads instead of potentially looping.';
+const APP_UPDATE_NOTES = 'Project Analytics: Time by task, Time by department, and Top contributors now use the same rounded bar-chart style as the Hours per day chart in reports, instead of thin horizontal bars.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -7403,6 +7403,35 @@ function paColor(i) { return PA_PALETTE[((i % PA_PALETTE.length) + PA_PALETTE.le
 // busiest item in each section (there's no "budget" per task, unlike the
 // department rings above) — this is a "where did the time go" read, not a
 // pass/fail one.
+// Shared "rounded vertical bar" chart for Time by task / Time by department /
+// Top contributors — same visual language as the "Hours per day" chart in
+// the report data area (hoursBarChart above), reused here so Project
+// Analytics reads consistently instead of the old thin horizontal pill
+// bars. Each item is {label, hours, color, valueSuffix?}; bar height is
+// relative to the tallest item in THIS chart. Full label + hours is always
+// on a hover/long-press tooltip (title attr), same pattern as hoursBarChart,
+// since the on-screen label under a narrow column gets line-clamped to 2
+// lines for longer names.
+function paVerticalBarChart(items) {
+  if (!items.length) return '';
+  const chartH = 90;
+  const maxV = Math.max(...items.map((it) => it.hours || 0), 0.01);
+  const cols = items.map((it) => {
+    const px = Math.max(4, Math.round(((it.hours || 0) / maxV) * chartH));
+    const valueText = `${it.hours}h${it.valueSuffix || ''}`;
+    return `
+      <div class="pa-vbar-col" title="${escapeHtml(it.label)}: ${escapeHtml(valueText)}">
+        <div class="pa-vbar-value">${escapeHtml(valueText)}</div>
+        <div class="pa-vbar-track" style="height:${chartH}px">
+          <div class="pa-vbar-fill" style="height:${px}px; background:linear-gradient(180deg, ${it.color}, ${it.color}99);"></div>
+        </div>
+        <div class="pa-vbar-label">${escapeHtml(it.label)}</div>
+      </div>
+    `;
+  }).join('');
+  return `<div class="pa-vbar-chart">${cols}</div>`;
+}
+
 async function renderProjectTaskBreakdown(data) {
   const wrap = $('projectTaskBreakdownArea');
   if (!wrap) return;
@@ -7451,23 +7480,13 @@ async function renderProjectTaskBreakdown(data) {
   let taskChartHtml = '';
   if (tasks.length) {
     const sortedTasks = [...tasks].sort((a, b) => b.hours - a.hours).slice(0, 12);
-    const maxTaskHours = Math.max(...sortedTasks.map((t) => t.hours), 0.01);
     taskChartHtml = `
       <div class="pa-section">
         <div class="pa-section-title">📊 Time by task</div>
-        ${sortedTasks.map((t) => {
+        ${paVerticalBarChart(sortedTasks.map((t) => {
           const cat = catMeta[t.category] ? t.category : 'other';
-          const color = paColor(catColorIndex[cat] ?? 0);
-          return `
-            <div class="pa-bar-row">
-              <div class="pa-bar-top">
-                <span class="pa-bar-label"><span class="pa-bar-dot" style="background:${color};"></span>${escapeHtml(t.label)}</span>
-                <span class="pa-bar-hours">${t.hours}h</span>
-              </div>
-              <div class="pa-bar-track"><div class="pa-bar-fill" style="width:${Math.max(4, Math.round((t.hours / maxTaskHours) * 100))}%; background:linear-gradient(90deg, ${color}, ${color}cc);"></div></div>
-            </div>
-          `;
-        }).join('')}
+          return { label: t.label, hours: t.hours, color: paColor(catColorIndex[cat] ?? 0) };
+        }))}
         ${untagged > 0 ? `<div class="pa-untagged-note">+ ${untagged}h logged with free-typed notes, not matching a specific task yet</div>` : ''}
       </div>
     `;
@@ -7484,22 +7503,15 @@ async function renderProjectTaskBreakdown(data) {
   let deptChartHtml = '';
   if (departments.length) {
     const sortedDepts = [...departments].sort((a, b) => b.usedHours - a.usedHours).slice(0, 8);
-    const maxDeptHours = Math.max(...sortedDepts.map((d) => d.usedHours), 0.01);
     deptChartHtml = `
       <div class="pa-section">
         <div class="pa-section-title">🏢 Time by department</div>
-        ${sortedDepts.map((d, i) => {
-          const color = paColor(i + 4);
-          return `
-            <div class="pa-bar-row">
-              <div class="pa-bar-top">
-                <span class="pa-bar-label"><span class="pa-bar-dot" style="background:${color};"></span>${escapeHtml(d.name)}</span>
-                <span class="pa-bar-hours">${d.usedHours}h${d.allocatedHours > 0 ? `<span class="pa-bar-sub"> / ${d.allocatedHours}h</span>` : ''}</span>
-              </div>
-              <div class="pa-bar-track"><div class="pa-bar-fill" style="width:${Math.max(4, Math.round((d.usedHours / maxDeptHours) * 100))}%; background:linear-gradient(90deg, ${color}, ${color}cc);"></div></div>
-            </div>
-          `;
-        }).join('')}
+        ${paVerticalBarChart(sortedDepts.map((d, i) => ({
+          label: d.name,
+          hours: d.usedHours,
+          color: paColor(i + 4),
+          valueSuffix: d.allocatedHours > 0 ? ` / ${d.allocatedHours}h` : '',
+        })))}
       </div>
     `;
   }
@@ -7508,22 +7520,14 @@ async function renderProjectTaskBreakdown(data) {
   let peopleChartHtml = '';
   if (contributors.length) {
     const sortedPeople = [...contributors].sort((a, b) => b.hours - a.hours).slice(0, 6);
-    const maxPersonHours = Math.max(...sortedPeople.map((c) => c.hours), 0.01);
     peopleChartHtml = `
       <div class="pa-section">
         <div class="pa-section-title">🙋 Top contributors</div>
-        ${sortedPeople.map((c, i) => {
-          const color = paColor(i + 2);
-          return `
-            <div class="pa-bar-row">
-              <div class="pa-bar-top">
-                <span class="pa-bar-label"><span class="pa-bar-dot" style="background:${color};"></span>${escapeHtml(c.name)}<span class="pa-bar-sub">${escapeHtml(c.departmentName || '')}</span></span>
-                <span class="pa-bar-hours">${c.hours}h</span>
-              </div>
-              <div class="pa-bar-track"><div class="pa-bar-fill" style="width:${Math.max(4, Math.round((c.hours / maxPersonHours) * 100))}%; background:linear-gradient(90deg, ${color}, ${color}cc);"></div></div>
-            </div>
-          `;
-        }).join('')}
+        ${paVerticalBarChart(sortedPeople.map((c, i) => ({
+          label: c.departmentName ? `${c.name} · ${c.departmentName}` : c.name,
+          hours: c.hours,
+          color: paColor(i + 2),
+        })))}
       </div>
     `;
   }
