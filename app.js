@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.35.0';
+const APP_VERSION = 'v3.35.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed: clocking in/out (and breaks) on one device now syncs live to your other devices — clock in on your laptop and your phone shows it instantly, no more re-clocking in when you switch devices.';
+const APP_UPDATE_NOTES = 'Fixed a mobile reliability bug where the app could get stuck reloading itself over and over right after an update (showing as "A problem repeatedly occurred" in Safari) — it now hard-stops after 2 auto-reloads instead of potentially looping.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -24,7 +24,45 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
 // ONCE automatically — silently self-correcting instead of leaving someone
 // stuck on old, possibly-broken code until they notice the update icon.
 (function healStaleAppShell() {
+  // NOTE: this guard used to live in sessionStorage. On an iPhone, if this
+  // site is used as a Home Screen (installed) app, iOS can and does kill the
+  // whole page process to reclaim memory whenever it's backgrounded — the
+  // next tap re-launches it as a genuinely fresh process with sessionStorage
+  // wiped, so a sessionStorage-based "only reload once" guard doesn't
+  // actually hold across that kind of relaunch. localStorage survives it,
+  // which is why both guards below now use that instead.
   const RELOAD_GUARD_KEY = 'ctorq-auto-heal-reload-for-version';
+  // HARD CAP, independent of which version was seen: a CDN (GitHub Pages
+  // runs behind Fastly) can serve slightly different content from different
+  // edge nodes for a few minutes right after a fresh deploy — especially
+  // likely on a mobile connection (5G/LTE), which can hit a different edge
+  // node on every single request. That means the per-VERSION guard above
+  // can be defeated: fetch sees v-old, reloads; next load's fetch happens
+  // to hit a different edge and sees a DIFFERENT stale version, which
+  // doesn't match the guard's remembered value, so it reloads again — on
+  // and on. That reload loop is exactly what makes Safari show "A problem
+  // repeatedly occurred" and give up on the page entirely. This counter
+  // makes sure that no matter what version is (mis)detected, this tab never
+  // auto-reloads itself more than twice within a few minutes before just
+  // giving up and showing whatever did load (the ordinary update-available
+  // icon still offers a manual refresh after that). The counter resets
+  // itself once RELOAD_COUNT_WINDOW_MS has passed since the last reload, so
+  // it never permanently blocks a genuinely new update days later.
+  const RELOAD_COUNT_KEY = 'ctorq-auto-heal-reload-count';
+  const RELOAD_COUNT_TS_KEY = 'ctorq-auto-heal-reload-count-ts';
+  const RELOAD_COUNT_WINDOW_MS = 3 * 60 * 1000;
+  const MAX_AUTO_RELOADS = 2;
+  function recentReloadCount() {
+    const ts = parseInt(localStorage.getItem(RELOAD_COUNT_TS_KEY) || '0', 10);
+    if (!ts || Date.now() - ts > RELOAD_COUNT_WINDOW_MS) return 0;
+    return parseInt(localStorage.getItem(RELOAD_COUNT_KEY) || '0', 10);
+  }
+  function bumpReloadCount() {
+    try {
+      localStorage.setItem(RELOAD_COUNT_KEY, String(recentReloadCount() + 1));
+      localStorage.setItem(RELOAD_COUNT_TS_KEY, String(Date.now()));
+    } catch (e) { /* ignore */ }
+  }
   // WHY THE WAIT BELOW: reloading the instant a version mismatch is found
   // (which can happen within the first fraction of a second of a cold load,
   // well before the auth code further down even starts) could interrupt
@@ -40,7 +78,8 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
     const deadline = Date.now() + 20000; // don't wait forever if something's stuck
     (function poll() {
       if (window.__ctorqAuthSettled || Date.now() > deadline) {
-        sessionStorage.setItem(RELOAD_GUARD_KEY, liveVersion);
+        try { localStorage.setItem(RELOAD_GUARD_KEY, liveVersion); } catch (e) { /* ignore */ }
+        bumpReloadCount();
         location.reload();
         return;
       }
@@ -52,11 +91,12 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
     .then((text) => {
       const liveVersion = (text.match(/const APP_VERSION\s*=\s*'([^']+)'/) || [])[1];
       if (!liveVersion || liveVersion === APP_VERSION) return;
+      if (recentReloadCount() >= MAX_AUTO_RELOADS) return; // hit the hard cap — stop, don't loop
       // Only ever auto-reload once per mismatched version per tab — if it
       // somehow mismatches again right after reloading (e.g. genuinely
       // offline/flaky network serving a half-cached response), don't loop
       // forever; just let the person keep using whatever did load.
-      if (sessionStorage.getItem(RELOAD_GUARD_KEY) === liveVersion) return;
+      if (localStorage.getItem(RELOAD_GUARD_KEY) === liveVersion) return;
       reloadWhenAuthSettled(liveVersion);
     })
     .catch(() => { /* offline or blocked — nothing to self-heal against, just continue */ });
