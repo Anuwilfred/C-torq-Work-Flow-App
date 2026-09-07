@@ -1,11 +1,11 @@
 // Bump this alongside CACHE_NAME in service-worker.js on every deploy — shown
 // in Settings so it's possible to check, at a glance, exactly which build is
 // actually live on a given device (screenshot it instead of guessing).
-const APP_VERSION = 'v3.34.0';
+const APP_VERSION = 'v3.35.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Appearance refinements: the Quote of the Day toggle, background mode/photos, app logo, and the AEON Ai icon are now org-wide admin controls (with a new option to upload your own AI icon GIF). Day/Night mode and Color Theme stay personal to each device.';
+const APP_UPDATE_NOTES = 'Fixed: clocking in/out (and breaks) on one device now syncs live to your other devices — clock in on your laptop and your phone shows it instantly, no more re-clocking in when you switch devices.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -327,6 +327,18 @@ function refreshModeVisibility() {
 // (clock in at 8am, close the app, reopen at lunch — it still remembers).
 // The underlying fields stay visible and editable too, in case someone
 // needs to correct a time or fill one in by hand after the fact.
+//
+// CROSS-DEVICE SYNC: localStorage alone only survives on the SAME device —
+// clocking in on a laptop and then opening the phone showed "not clocked
+// in" on the phone, because nothing backed this up anywhere shared. Every
+// saveClockState() call below now also pushes to a `clock_sessions` table
+// (one row per person) via pushClockStateToCloud(), and on sign-in
+// fetchAndMergeClockState() pulls that row down and — comparing
+// timestamps — applies whichever copy (this device's or the cloud's) is
+// actually newer. A realtime subscription (startClockSessionWatch()) then
+// keeps every other signed-in device for this same person live-updated the
+// moment something changes, the same pattern already used for org-wide
+// Appearance settings.
 // =====================================================================
 
 const CLOCK_KEY = 'ctorq-clock-state';
@@ -339,13 +351,111 @@ function getClockState() {
   return { status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0, interruptionMinutes: 0 };
 }
 function saveClockState(state) {
+  // Stamped on every save so two copies of this state (this device's vs.
+  // the cloud's) can be compared to see which one actually happened more
+  // recently — see fetchAndMergeClockState()/the realtime handler below.
+  state.updatedAt = new Date().toISOString();
   try { localStorage.setItem(CLOCK_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  pushClockStateToCloud(state);
 }
 function resetClockState() {
   saveClockState({ status: 'idle', clockInAt: null, clockOutAt: null, breaks: [], totalBreakMinutes: 0, segmentStart: null, interruptionMinutes: 0, qsrSegmentStart: null, qsrSegmentPausedAt: null, qsrJobId: null, qsrJobName: null });
   renderClockUI();
   renderQuickSwitchRing();
 }
+
+// ---- Cloud sync (clock_sessions table) --------------------------------
+let clockSyncDirty = false;   // true if the last push attempt failed (offline etc.) — retried when connectivity returns
+let clockSyncPushTimer = null;
+let clockSessionChannel = null;
+
+// Applies a remote state WITHOUT re-pushing it back up (that would just
+// bounce the same update back and forth between devices) — used both by
+// the initial fetch/merge and by the realtime handler.
+function applyRemoteClockState(state) {
+  try { localStorage.setItem(CLOCK_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  renderClockUI();
+  renderQuickSwitchRing();
+  rehydrateEntryFormFromClockState();
+  refreshModeVisibility();
+}
+
+function pushClockStateToCloud(state) {
+  if (!currentUser) return; // not signed in yet (e.g. very first load) — initClockSync() will push once signed in
+  clearTimeout(clockSyncPushTimer);
+  // Small debounce so a rapid burst of changes (e.g. break start immediately
+  // followed by other UI updates) collapses into one network call instead
+  // of firing on every single one.
+  clockSyncPushTimer = setTimeout(async () => {
+    try {
+      const { error } = await sb.from('clock_sessions')
+        .upsert({ user_id: currentUser.id, state, updated_at: state.updatedAt || new Date().toISOString() }, { onConflict: 'user_id' });
+      if (error) throw error;
+      clockSyncDirty = false;
+    } catch (err) {
+      // Most likely offline — don't lose the change, just remember to
+      // retry once we're back online (see the 'online' listener below).
+      clockSyncDirty = true;
+      console.warn('pushClockStateToCloud failed (will retry when online):', err);
+    }
+  }, 300);
+}
+
+// Called once at sign-in, before the rest of the app reads clock state —
+// fetches this person's clock_sessions row and, if it's newer than
+// whatever's saved locally on THIS device, applies it. If the local copy
+// is newer instead (e.g. clocked in here while offline, not yet synced),
+// pushes it up so the cloud catches up.
+async function fetchAndMergeClockState() {
+  if (!currentUser) return;
+  try {
+    const { data, error } = await sb.from('clock_sessions').select('*').eq('user_id', currentUser.id).maybeSingle();
+    if (error) throw error;
+    const local = getClockState();
+    if (data && data.state) {
+      const remoteTime = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+      const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+      if (remoteTime > localTime) {
+        applyRemoteClockState(data.state);
+        return;
+      }
+    }
+    // Local is newer (or no cloud row exists yet) — make sure the cloud
+    // has this device's current state.
+    if (local && local.status && local.status !== 'idle') pushClockStateToCloud(local);
+  } catch (err) {
+    console.warn('fetchAndMergeClockState failed (staying with local/last-known state):', err);
+  }
+}
+
+function startClockSessionWatch() {
+  if (clockSessionChannel || !currentUser) return;
+  clockSessionChannel = sb
+    .channel(`clock-session-watch-${currentUser.id}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'clock_sessions', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+      const remote = payload.new?.state;
+      if (!remote) return;
+      const local = getClockState();
+      const remoteTime = payload.new.updated_at ? new Date(payload.new.updated_at).getTime() : 0;
+      const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+      // Guards against applying our own echoed-back push, and against a
+      // slightly-delayed push from this same device arriving out of order.
+      if (remoteTime > localTime) applyRemoteClockState(remote);
+    })
+    .subscribe();
+}
+function stopClockSessionWatch() {
+  if (clockSessionChannel) { sb.removeChannel(clockSessionChannel); clockSessionChannel = null; }
+}
+function initClockSync() {
+  return fetchAndMergeClockState().then(startClockSessionWatch);
+}
+// If a push failed earlier (offline), try again as soon as the browser
+// says we're back online — otherwise a change made with no signal could
+// sit un-synced until the next unrelated clock action.
+window.addEventListener('online', () => {
+  if (clockSyncDirty) pushClockStateToCloud(getClockState());
+});
 function fmtClockTime(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1639,6 +1749,7 @@ $('logoutBtn').addEventListener('click', async () => {
   closePanel('weather');
   stopPresence();
   if (appAppearanceChannel) { sb.removeChannel(appAppearanceChannel); appAppearanceChannel = null; }
+  stopClockSessionWatch();
   stopLastSeenHeartbeat();
   stopGlobalMessageWatch();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
@@ -1783,7 +1894,10 @@ async function enterApp(knownUser) {
   // Rehydrate BEFORE checking today's allocation, so an already-in-progress
   // clock-in (possibly on a different job than today's fresh allocation)
   // wins — renderMyTodayAssignment only fills Job ID if it's still empty.
-  populateJobIdDropdown()
+  // Waits on initClockSync() too, so if this person clocked in on a
+  // different device, THAT state (not just whatever's stale on this
+  // device) is what gets rehydrated into the form.
+  Promise.all([populateJobIdDropdown(), initClockSync()])
     .then(() => { rehydrateEntryFormFromClockState(); return renderMyTodayAssignment(); })
     .then(renderJobBoard)
     .then(renderAdminScheduleBoard);
