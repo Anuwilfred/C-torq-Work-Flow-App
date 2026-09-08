@@ -2642,6 +2642,56 @@ input.stage-pos-input::-webkit-outer-spin-button {
 }
 .renewal-person-info-item { font-size: 12px; }
 .renewal-person-info-item .hint { font-size: 10.5px; margin-bottom: 1px; }
+
+/* HUD-style redesign for the Renewal Manager person detail card only —
+   hollow glowing panel, corner brackets, a scan-line reveal sweep, and a
+   barcode canvas standing in for a photo. Scoped entirely under
+   .renewal-hud so nothing else in the app is affected. */
+.renewal-hud {
+  position: relative;
+  margin-top: 12px;
+  background: rgba(2, 18, 14, 0.88);
+  border: 1px solid #39ffb0;
+  border-radius: 10px;
+  box-shadow: 0 0 26px rgba(57, 255, 176, 0.35), inset 0 0 30px rgba(57, 255, 176, 0.05);
+  color: #39ffb0;
+  font-family: Consolas, "Courier New", monospace;
+  overflow: hidden;
+  padding: 18px 18px 16px;
+}
+.renewal-hud-corner { position: absolute; width: 18px; height: 18px; border: 2px solid #39ffb0; pointer-events: none; }
+.renewal-hud-corner.tl { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+.renewal-hud-corner.tr { top: -1px; right: -1px; border-left: none; border-bottom: none; }
+.renewal-hud-corner.bl { bottom: -1px; left: -1px; border-right: none; border-top: none; }
+.renewal-hud-corner.br { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+.renewal-hud-sweep {
+  position: absolute; left: 0; right: 0; height: 34px; top: -34px;
+  background: linear-gradient(180deg, rgba(57, 255, 176, 0) 0%, rgba(57, 255, 176, 0.32) 50%, rgba(57, 255, 176, 0) 100%);
+  animation: renewalHudSweep 0.9s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes renewalHudSweep { to { top: 100%; } }
+.renewal-hud-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+  border-bottom: 1px solid rgba(57, 255, 176, 0.35);
+  padding-bottom: 12px; margin-bottom: 12px;
+}
+.renewal-hud-id { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.renewal-hud-barcode { image-rendering: pixelated; }
+.renewal-hud-name { font-size: 14px; letter-spacing: 0.5px; margin-top: 4px; }
+.renewal-hud-code { font-size: 11px; color: rgba(57, 255, 176, 0.65); letter-spacing: 1px; }
+.renewal-hud-close { color: #39ffb0; border: 1px solid rgba(57, 255, 176, 0.5); background: rgba(0, 0, 0, 0.25); }
+.renewal-hud-close:hover { background: rgba(57, 255, 176, 0.15); }
+.renewal-hud .renewal-person-info-grid,
+.renewal-hud .renewal-person-doc-row {
+  background: rgba(57, 255, 176, 0.05);
+  border-color: rgba(57, 255, 176, 0.3);
+}
+.renewal-hud .renewal-person-doc-row.sev-calm { border-left-color: rgba(120, 230, 210, 0.7); }
+.renewal-hud .hint { color: rgba(57, 255, 176, 0.55); }
+.renewal-hud .renewal-person-doc-label,
+.renewal-hud .renewal-person-doc-date,
+.renewal-hud strong { color: #39ffb0; }
 .home-tile-icon-tank {
   background: linear-gradient(160deg, rgba(90, 170, 224, 0.28), rgba(50, 120, 176, 0.14));
   border-color: rgba(90, 170, 224, 0.55);

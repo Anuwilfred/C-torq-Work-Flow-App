@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.12';
+const APP_VERSION = 'v3.36.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager person details now show passport, EID and visa numbers, date of birth, joining date, nationality, UID, sponsor, mobile and vehicle number — synced straight from the HR sheet.';
+const APP_UPDATE_NOTES = 'AEON Ai orb now sends a real water-ripple wave across the screen with a confirm sound when you tap it open. Renewal Manager person records now open in a glowing HUD-style panel with a barcode instead of a photo.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6484,7 +6484,7 @@ async function renderRenewalManager() {
   const [rows, detailsMap] = await Promise.all([fetchRenewalRows(), fetchEmployeeDetailsMap()]);
   renewalRowsCache = rows;
   employeeDetailsCache = detailsMap;
-  if (renewalDetailOpenFor) renderRenewalPersonDetail(renewalDetailOpenFor);
+  if (renewalDetailOpenFor) renderRenewalPersonDetail(renewalDetailOpenFor, { silent: true });
   if (!rows.length) {
     urgentArea.innerHTML = '<div class="empty">No renewal data yet — tap "Refresh from sheet" once the Renewal Manager sheet has been shared with the service account.</div>';
     if (statusLine) statusLine.textContent = 'Nothing synced yet.';
@@ -6645,7 +6645,43 @@ function renewalPersonInfoHtml(details) {
   `;
 }
 
-function renderRenewalPersonDetail(employeeCode) {
+// Deterministic-looking barcode drawn straight to canvas — no external
+// library, so it works fully offline like the rest of this PWA. The bar
+// widths/gaps are seeded off the employee code itself (same code always
+// draws the same pattern), standing in for a real ID barcode per the HUD
+// redesign — this replaces the old placeholder "face" entirely.
+function seedHudRandom(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return function () {
+    h += 0x6D2B79F5;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function drawHudBarcode(canvas, code) {
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const rand = seedHudRandom(code || 'CTORQ');
+  const barH = h - 22;
+  let x = 8;
+  ctx.fillStyle = '#39ffb0';
+  while (x < w - 8) {
+    const bw = 2 + Math.floor(rand() * 4);
+    if (rand() > 0.4) ctx.fillRect(x, 4, bw, barH);
+    x += bw + 2;
+  }
+  ctx.font = '11px Consolas, "Courier New", monospace';
+  ctx.fillStyle = '#39ffb0';
+  ctx.textAlign = 'center';
+  ctx.fillText(code || '', w / 2, h - 4);
+}
+
+function renderRenewalPersonDetail(employeeCode, opts) {
+  const { silent } = opts || {};
   const detailArea = $('renewalPersonDetail');
   if (!detailArea) return;
   if (!employeeCode) { detailArea.innerHTML = ''; renewalDetailOpenFor = null; return; }
@@ -6664,14 +6700,23 @@ function renderRenewalPersonDetail(employeeCode) {
     .join('');
   const infoHtml = renewalPersonInfoHtml(details);
 
+  // HUD redesign — hollow glowing panel with corner brackets, a scan-line
+  // reveal sweep, and a barcode standing in for a photo. Scoped entirely
+  // under .renewal-hud in styles.css so nothing else in the app is touched.
   detailArea.innerHTML = `
-    <div class="card glass renewal-person-detail" style="margin-top:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-        <div>
-          <strong style="font-size:15px;">${escapeHtml(name)}</strong>
-          <p class="hint" style="margin-top:2px;">${escapeHtml(employeeCode)} · every tracked document</p>
+    <div class="renewal-hud">
+      <div class="renewal-hud-corner tl"></div>
+      <div class="renewal-hud-corner tr"></div>
+      <div class="renewal-hud-corner bl"></div>
+      <div class="renewal-hud-corner br"></div>
+      <div class="renewal-hud-sweep"></div>
+      <div class="renewal-hud-head">
+        <div class="renewal-hud-id">
+          <canvas class="renewal-hud-barcode" width="220" height="64"></canvas>
+          <div class="renewal-hud-name">${escapeHtml(name)}</div>
+          <div class="renewal-hud-code">${escapeHtml(employeeCode)}</div>
         </div>
-        <button type="button" class="ghost" id="renewalPersonDetailClose">✕</button>
+        <button type="button" class="ghost renewal-hud-close" id="renewalPersonDetailClose">✕</button>
       </div>
       ${infoHtml}
       <div style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
@@ -6679,6 +6724,8 @@ function renderRenewalPersonDetail(employeeCode) {
       </div>
     </div>
   `;
+  drawHudBarcode(detailArea.querySelector('.renewal-hud-barcode'), employeeCode);
+  if (!silent) playHudConfirmSound();
   detailArea.querySelectorAll('.renewal-renew-btn').forEach((btn) => {
     btn.addEventListener('click', () => markRenewalRenewed(btn.dataset.renewId));
   });
@@ -10368,6 +10415,82 @@ let aiBusy = false;
 // Soft launch chime for opening AEON Ai (real audio clip, not synthesized).
 const launchAudio = new Audio('./notify.mp3');
 launchAudio.volume = 0.55;
+
+// HUD confirm sound — plays alongside the AEON orb ripple effect below, and
+// when the Renewal Manager HUD person panel opens.
+const hudConfirmAudio = new Audio('./hud-confirm.wav');
+hudConfirmAudio.volume = 0.6;
+function playHudConfirmSound() {
+  try { hudConfirmAudio.currentTime = 0; hudConfirmAudio.play().catch(() => {}); } catch { /* audio not available — silently skip */ }
+}
+
+// ---------- AEON orb tap — water-ripple wave effect ----------
+// A canvas overlay across the whole screen, created on first use. Tapping
+// the AEON orb to open the chat sends a real radial wave (with distance and
+// time decay, not a simple CSS pulse) out from the orb's exact on-screen
+// position toward the far corner. The canvas only animates while a ripple
+// is actually in flight, so it costs nothing the rest of the time, and it
+// never intercepts clicks (pointer-events: none).
+let hudRippleCanvas = null, hudRippleCtx = null, hudRipplePoints = [], hudRipples = [], hudRippleRunning = false;
+function ensureHudRippleCanvas() {
+  if (hudRippleCanvas) return;
+  hudRippleCanvas = document.createElement('canvas');
+  hudRippleCanvas.style.cssText = 'position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:9999;';
+  document.body.appendChild(hudRippleCanvas);
+  hudRippleCtx = hudRippleCanvas.getContext('2d');
+  const resizeRippleCanvas = () => {
+    hudRippleCanvas.width = window.innerWidth;
+    hudRippleCanvas.height = window.innerHeight;
+    const SPACING = 26;
+    hudRipplePoints = [];
+    for (let y = SPACING / 2; y < hudRippleCanvas.height; y += SPACING) {
+      for (let x = SPACING / 2; x < hudRippleCanvas.width; x += SPACING) {
+        hudRipplePoints.push({ x, y });
+      }
+    }
+  };
+  window.addEventListener('resize', resizeRippleCanvas);
+  resizeRippleCanvas();
+}
+function hudRippleFrame(now) {
+  const SPEED = 480, WAVELEN = 60, WAVEWIDTH = 120;
+  const diag = Math.hypot(hudRippleCanvas.width, hudRippleCanvas.height);
+  hudRipples = hudRipples.filter((r) => (now - r.start) / 1000 * SPEED - WAVEWIDTH < diag + 60);
+  hudRippleCtx.clearRect(0, 0, hudRippleCanvas.width, hudRippleCanvas.height);
+  if (!hudRipples.length) { hudRippleRunning = false; return; }
+  for (const p of hudRipplePoints) {
+    let disp = 0;
+    for (const r of hudRipples) {
+      const age = (now - r.start) / 1000;
+      const radius = age * SPEED;
+      const dist = Math.hypot(p.x - r.x, p.y - r.y);
+      const diff = dist - radius;
+      if (Math.abs(diff) < WAVEWIDTH) {
+        const envelope = Math.cos((diff / WAVEWIDTH) * Math.PI / 2);
+        const distDecay = Math.exp(-dist / 900);
+        const timeDecay = Math.exp(-age / 2.4);
+        const phase = (diff / WAVELEN) * Math.PI * 2;
+        disp += Math.sin(phase) * envelope * distDecay * timeDecay;
+      }
+    }
+    const bright = Math.max(0, disp) * 0.9;
+    if (bright > 0.05) {
+      const size = 1 + Math.max(0, disp) * 2.4;
+      hudRippleCtx.beginPath();
+      hudRippleCtx.fillStyle = `rgba(120,230,210,${Math.min(0.85, bright)})`;
+      hudRippleCtx.arc(p.x, p.y + disp * 7, Math.max(0.6, size), 0, Math.PI * 2);
+      hudRippleCtx.fill();
+    }
+  }
+  requestAnimationFrame(hudRippleFrame);
+}
+function triggerAeonRipple(originEl) {
+  if (!originEl) return;
+  ensureHudRippleCanvas();
+  const r = originEl.getBoundingClientRect();
+  hudRipples.push({ x: r.left + r.width / 2, y: r.top + r.height / 2, start: performance.now() });
+  if (!hudRippleRunning) { hudRippleRunning = true; requestAnimationFrame(hudRippleFrame); }
+}
 function playLaunchSound() {
   try {
     launchAudio.currentTime = 0;
@@ -10402,7 +10525,10 @@ function closeAiChat() {
   resetAiChat();
 }
 
-$('aiOrb').addEventListener('click', () => { aiOpen ? closeAiChat() : openAiChat(); });
+$('aiOrb').addEventListener('click', () => {
+  if (!aiOpen) { triggerAeonRipple($('aiOrb')); playHudConfirmSound(); }
+  aiOpen ? closeAiChat() : openAiChat();
+});
 $('aiCloseBtn').addEventListener('click', closeAiChat);
 $('aiMesh').addEventListener('click', closeAiChat);
 
