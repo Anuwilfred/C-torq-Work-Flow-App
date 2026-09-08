@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.10';
+const APP_VERSION = 'v3.35.11';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager: corrected the sticky-note glass to the standard translucent-blur recipe (no more white wash), and added a "Find a person" search at the top of the panel showing every tracked document for that person in one card.';
+const APP_UPDATE_NOTES = 'AEON Ai can now answer Renewal Manager questions: admins can ask about anyone\'s visa and document expiry, and a new "My Document Renewal Status" option in Map Access lets specific people ask about their own (never anyone else\'s).';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2927,6 +2927,7 @@ const FEATURE_LIST = [
   { key: 'datafeed', label: 'Data Feed (add/remove people & jobs, manage job types)' },
   { key: 'liveDrivers', label: 'Live Drivers (see driver locations)' },
   { key: 'appearance', label: 'Appearance (theme, background, daily quote)' },
+  { key: 'renewal', label: 'My Document Renewal Status (AEON Ai can tell them their own passport, visa, work permit and other document expiry — never anyone else\'s)' },
   { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
 ];
 
