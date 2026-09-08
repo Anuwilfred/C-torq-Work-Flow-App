@@ -230,6 +230,16 @@
           <span class="home-tile-icon home-tile-icon-datafeed">📥</span>
           <span class="home-tile-label">Data Feed</span>
         </button>
+        <!-- RENEWAL MANAGER — admin-only, hard-gated by role (not delegatable
+             via allowed_features/Map Access like the other tiles): this
+             shows every employee's passport/visa/EID/work-permit numbers and
+             expiry dates, so it's shown/hidden directly by
+             currentProfile.role === 'admin' in app.js's enterApp(), next to
+             adminTabBtn/adminHomeBtn. No data-feature attribute on purpose. -->
+        <button type="button" class="home-tile" data-open="renewalManager" id="renewalManagerHomeTile" style="display:none;">
+          <span class="home-tile-icon home-tile-icon-renewals">🛂</span>
+          <span class="home-tile-label">Renewal Manager</span>
+        </button>
         <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
@@ -1087,6 +1097,33 @@
           </div>
           <button type="button" id="addQuoteItemBtn" class="primary" style="margin-top:12px;">Add item</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RENEWAL MANAGER OVERLAY — sticky-note board of visa/document renewals,
+     soonest-expiry first. Admin-only (gated at the tile, not just here). -->
+<div id="renewalManagerOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="renewalManagerOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🛂 Renewal Manager</strong>
+      <button type="button" class="ghost" data-close="renewalManager">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <div>
+          <strong style="font-size:14px;">Visa &amp; document renewals</strong>
+          <p class="hint" id="renewalSyncStatus" style="margin-top:4px;">Loading…</p>
+        </div>
+        <button type="button" class="secondary" id="renewalRefreshBtn">🔄 Refresh from sheet</button>
+      </div>
+      <div id="renewalUrgentArea" style="margin-top:16px;"></div>
+      <div style="margin-top:22px;">
+        <strong style="font-size:14px;">All renewals, by date</strong>
+        <p class="hint" style="margin-top:2px;">Everyone, soonest expiry first. Renewed items sink to the bottom.</p>
+        <div id="renewalFullListArea" style="margin-top:10px;"></div>
       </div>
     </div>
   </div>

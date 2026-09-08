@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.4';
+const APP_VERSION = 'v3.35.5';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Added a show/hide (eye icon) toggle to the Login, New password, and Confirm password fields so you can check what you actually typed.';
+const APP_UPDATE_NOTES = 'Added Renewal Manager (admin-only): a sticky-note board tracking every employee\'s passport/visa/EID/work-permit renewals, synced from the HR Google Sheet.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1945,6 +1945,12 @@ async function enterApp(knownUser) {
   $('accountEmail').textContent = user.email;
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   $('adminHomeBtn').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
+  // Renewal Manager: hard-gated to role==='admin' directly (like the two
+  // lines above), NOT via data-feature/allowed_features like every other
+  // Home tile — it shows sensitive personal document data (passport/visa/
+  // EID numbers) for every employee, so it must never be delegatable
+  // through Map Access to a non-admin.
+  if ($('renewalManagerHomeTile')) $('renewalManagerHomeTile').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
   $('newGroupBtn').style.display = 'inline-block';
   if ($('newsComposeCard')) $('newsComposeCard').style.display = 'block';
   checkForUnreadNews();
@@ -5121,6 +5127,7 @@ const PANEL_IDS = {
   clients: ['clientsOverlay', 'clientsOverlayBackdrop'],
   quotations: ['quotationsOverlay', 'quotationsOverlayBackdrop'],
   quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
+  renewalManager: ['renewalManagerOverlay', 'renewalManagerOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   people: ['peopleOverlay', 'peopleOverlayBackdrop'],
@@ -5167,6 +5174,9 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'tank') {
     renderTank();
+  }
+  if (name === 'renewalManager') {
+    renderRenewalManager();
   }
   if (name === 'allocation') {
     openAllocationPanel();
@@ -6292,6 +6302,191 @@ if ($('quotationRejectBtn')) {
     await sb.from('quotations').update({ status: 'rejected' }).eq('id', currentQuotationId);
     openQuotationDetail(currentQuotationId);
     renderQuotationsList();
+  });
+}
+
+// =====================================================================
+// RENEWAL MANAGER — admin-only sticky-note board tracking every employee's
+// passport / visa & EID / work permit / other-travel-visa / seamen book /
+// CID clearance / CICPA renewal dates, synced from the HR Google Sheet by
+// the sync-renewals Edge Function (see supabase/functions/sync-renewals).
+//
+// Thresholds (per explicit product decision): a card turns red once its
+// document is within 30 days of expiry, and starts blinking once within 10
+// days — both are just CSS classes applied from the same daysLeft number,
+// nothing server-side. "Renewed" is a plain status flip (admin-only, via
+// RLS on visa_renewals) that sinks the item to the renewed section at the
+// bottom of the full list below the sticky stack; if the underlying sheet
+// cell for that item is later edited again, sync-renewals resets it straight
+// back to 'pending' on its own (see that function's comments) — re-editing
+// always wins over a prior acknowledgment.
+// =====================================================================
+
+const RENEWAL_RED_DAYS = 30;
+const RENEWAL_BLINK_DAYS = 10;
+const RENEWAL_DOC_LABELS = {
+  passport: 'Passport',
+  visa_eid: 'Visa & EID',
+  work_permit: 'Work Permit',
+  other_travel: 'Other Travel Visa',
+  seamen_book: 'Seamen Book',
+  cid_clearance: 'CID Clearance',
+  cicpa: 'CICPA',
+};
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+function formatRenewalDate(dateStr) {
+  if (!dateStr) return 'No date found — check sheet entry';
+  const d = new Date(`${dateStr}T00:00:00`);
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+async function fetchRenewalRows() {
+  const { data, error } = await sb.from('visa_renewals').select('*');
+  if (error) { console.error('fetchRenewalRows failed:', error); return []; }
+  return data || [];
+}
+
+function sortRenewalRows(rows) {
+  // Nulls (no parseable date) sort to the very end, after every dated item —
+  // treated as "furthest away" rather than "most urgent".
+  return [...rows].sort((a, b) => {
+    const da = a.expiry_date ? new Date(a.expiry_date).getTime() : Infinity;
+    const db = b.expiry_date ? new Date(b.expiry_date).getTime() : Infinity;
+    return da - db;
+  });
+}
+
+function renewalStickyHtml(row) {
+  const days = daysUntil(row.expiry_date);
+  const isNear = days !== null && days <= RENEWAL_RED_DAYS;
+  const isBlink = days !== null && days <= RENEWAL_BLINK_DAYS;
+  const overdue = days !== null && days < 0;
+  const daysLabel = days === null ? '—' : overdue ? `${Math.abs(days)}d overdue` : `${days}d left`;
+  return `
+    <div class="renewal-sticky ${isNear ? 'is-near' : ''} ${isBlink ? 'is-blink' : ''}" data-renewal-id="${row.id}">
+      <div class="renewal-sticky-top">
+        <div>
+          <div class="renewal-sticky-name">${escapeHtml(row.employee_name)}</div>
+          <div class="renewal-sticky-doc">${escapeHtml(RENEWAL_DOC_LABELS[row.document_type] || row.document_type)} · ${escapeHtml(row.employee_code)}</div>
+        </div>
+        <div class="renewal-sticky-days ${overdue ? 'overdue' : ''}">${daysLabel}</div>
+      </div>
+      <div class="renewal-sticky-meta">Expiry: ${formatRenewalDate(row.expiry_date)}</div>
+      <div class="renewal-sticky-actions">
+        <button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Mark renewed</button>
+      </div>
+    </div>
+  `;
+}
+
+function renewalRowHtml(row) {
+  const isRenewed = row.status === 'renewed';
+  const days = daysUntil(row.expiry_date);
+  return `
+    <div class="renewal-row ${isRenewed ? 'is-renewed' : ''}">
+      <div class="renewal-row-left">
+        <div class="renewal-row-name">${escapeHtml(row.employee_name)}</div>
+        <div class="renewal-row-doc">${escapeHtml(RENEWAL_DOC_LABELS[row.document_type] || row.document_type)} · ${escapeHtml(row.employee_code)}</div>
+      </div>
+      <div class="renewal-row-right">
+        <div class="renewal-row-date">${formatRenewalDate(row.expiry_date)}${days !== null && !isRenewed ? ` (${days}d)` : ''}</div>
+        ${isRenewed
+          ? '<span class="hint">✅ Renewed</span>'
+          : `<button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">Renew</button>`}
+      </div>
+    </div>
+  `;
+}
+
+async function renderRenewalManager() {
+  const urgentArea = $('renewalUrgentArea');
+  const fullListArea = $('renewalFullListArea');
+  const statusLine = $('renewalSyncStatus');
+  if (!urgentArea || !fullListArea) return;
+  urgentArea.innerHTML = '<div class="empty">Loading…</div>';
+  fullListArea.innerHTML = '';
+
+  const rows = await fetchRenewalRows();
+  if (!rows.length) {
+    urgentArea.innerHTML = '<div class="empty">No renewal data yet — tap "Refresh from sheet" once the Renewal Manager sheet has been shared with the service account.</div>';
+    if (statusLine) statusLine.textContent = 'Nothing synced yet.';
+    return;
+  }
+
+  const pending = sortRenewalRows(rows.filter((r) => r.status !== 'renewed'));
+  const renewed = rows.filter((r) => r.status === 'renewed')
+    .sort((a, b) => new Date(b.renewed_at || 0).getTime() - new Date(a.renewed_at || 0).getTime());
+
+  urgentArea.innerHTML = pending.length
+    ? `<div class="renewal-stack">${pending.map(renewalStickyHtml).join('')}</div>`
+    : '<div class="empty">Nothing pending — everything is renewed. 🎉</div>';
+
+  fullListArea.innerHTML = [...pending, ...renewed].map(renewalRowHtml).join('');
+
+  const lastSynced = rows.reduce((max, r) => {
+    const t = r.last_synced_at ? new Date(r.last_synced_at).getTime() : 0;
+    return t > max ? t : max;
+  }, 0);
+  if (statusLine) {
+    statusLine.textContent = lastSynced
+      ? `${rows.length} tracked · last synced ${new Date(lastSynced).toLocaleString()}`
+      : `${rows.length} tracked`;
+  }
+
+  urgentArea.querySelectorAll('.renewal-renew-btn').forEach((btn) => {
+    btn.addEventListener('click', () => markRenewalRenewed(btn.dataset.renewId));
+  });
+  fullListArea.querySelectorAll('.renewal-renew-btn').forEach((btn) => {
+    btn.addEventListener('click', () => markRenewalRenewed(btn.dataset.renewId));
+  });
+}
+
+async function markRenewalRenewed(id) {
+  if (!id) return;
+  const { error } = await sb.from('visa_renewals').update({
+    status: 'renewed',
+    renewed_at: new Date().toISOString(),
+    renewed_by: currentUser?.email || null,
+  }).eq('id', id);
+  if (error) { showToast(`Couldn't update: ${error.message}`); return; }
+  showToast('Marked renewed.');
+  renderRenewalManager();
+}
+
+if ($('renewalRefreshBtn')) {
+  $('renewalRefreshBtn').addEventListener('click', async () => {
+    const btn = $('renewalRefreshBtn');
+    const statusLine = $('renewalSyncStatus');
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+    if (statusLine) statusLine.textContent = 'Reading the sheet…';
+    try {
+      const { data: { session } } = await getSessionSafe();
+      const { data, error } = await withTimeout(
+        sb.functions.invoke('sync-renewals', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        45000,
+        'Sync'
+      );
+      if (error || data?.error) {
+        showToast(`Couldn't sync: ${data?.error || await readFunctionsError(error)}`);
+      } else {
+        showToast(`Synced: ${data.upserted || 0} new, ${data.changed || 0} updated.`);
+      }
+    } catch (err) {
+      showToast(`Couldn't sync: ${String(err?.message || err)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔄 Refresh from sheet';
+      renderRenewalManager();
+    }
   });
 }
 
