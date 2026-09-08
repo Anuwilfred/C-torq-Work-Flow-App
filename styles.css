@@ -2602,6 +2602,29 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .renewal-row-detail { font-size: 10.5px; opacity: 0.6; font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .renewal-row-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .renewal-row-date { font-size: 12px; opacity: 0.85; white-space: nowrap; }
+
+/* Person search (top of Renewal Manager) + full per-person detail card —
+   every document type gets its own row, including ones this person has
+   no sheet data for at all ("Not tracked"), so admins can see everything
+   tracked against one name/employee code in one place. */
+.renewal-person-result { text-align: left; }
+.renewal-person-doc-row {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--glass-border-strong);
+}
+.renewal-person-doc-row.sev-calm { border-left-color: rgba(120, 190, 225, 0.7); }
+.renewal-person-doc-row.sev-watch { border-left-color: rgba(230, 195, 90, 0.75); }
+.renewal-person-doc-row.sev-near { border-left-color: rgba(226, 96, 60, 0.8); }
+.renewal-person-doc-row.sev-critical { border-left-color: rgba(226, 50, 50, 0.9); }
+.renewal-person-doc-row.is-renewed { opacity: 0.6; }
+.renewal-person-doc-row.is-missing { opacity: 0.5; border-left-color: var(--glass-border); }
+.renewal-person-doc-label { font-size: 12.5px; font-weight: 700; }
+.renewal-person-doc-main { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 3px; }
+.renewal-person-doc-date { font-size: 12px; opacity: 0.85; }
+.renewal-person-doc-detail { font-size: 11px; opacity: 0.7; font-style: italic; margin-top: 3px; }
 .home-tile-icon-tank {
   background: linear-gradient(160deg, rgba(90, 170, 224, 0.28), rgba(50, 120, 176, 0.14));
   border-color: rgba(90, 170, 224, 0.55);

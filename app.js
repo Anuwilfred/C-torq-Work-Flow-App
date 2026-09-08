@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.9';
+const APP_VERSION = 'v3.35.10';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager: true glassmorphism pass on the sticky notes — real edge-lit rim lighting, a specular sheen, and a soft severity-tinted glow bleeding through the pane, on top of the calmer accent-bar layout.';
+const APP_UPDATE_NOTES = 'Renewal Manager: corrected the sticky-note glass to the standard translucent-blur recipe (no more white wash), and added a "Find a person" search at the top of the panel showing every tracked document for that person in one card.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6443,6 +6443,15 @@ function renewalRowHtml(row) {
   `;
 }
 
+// Kept in memory after every load/refresh so the person-search box (top of
+// the panel) can filter and show full per-person detail instantly, without
+// a extra round-trip to Supabase for every keystroke or click.
+let renewalRowsCache = [];
+// Employee code of whichever person's detail card is currently open, so a
+// Renew click (or a background refresh) can re-render that card in place
+// instead of leaving it showing stale data.
+let renewalDetailOpenFor = null;
+
 async function renderRenewalManager() {
   const urgentArea = $('renewalUrgentArea');
   const fullListArea = $('renewalFullListArea');
@@ -6452,6 +6461,8 @@ async function renderRenewalManager() {
   fullListArea.innerHTML = '';
 
   const rows = await fetchRenewalRows();
+  renewalRowsCache = rows;
+  if (renewalDetailOpenFor) renderRenewalPersonDetail(renewalDetailOpenFor);
   if (!rows.length) {
     urgentArea.innerHTML = '<div class="empty">No renewal data yet — tap "Refresh from sheet" once the Renewal Manager sheet has been shared with the service account.</div>';
     if (statusLine) statusLine.textContent = 'Nothing synced yet.';
@@ -6496,6 +6507,126 @@ async function markRenewalRenewed(id) {
   if (error) { showToast(`Couldn't update: ${error.message}`); return; }
   showToast('Marked renewed.');
   renderRenewalManager();
+}
+
+// ---------- Person search (top of the panel) ----------
+// Free-text filter over the in-memory rows cache — matches employee name
+// or code, groups multiple rows (one per document type) back into a
+// single result per person, and shows the top handful of matches as the
+// admin types.
+function renderRenewalPersonResults(query) {
+  const resultsArea = $('renewalPersonResults');
+  if (!resultsArea) return;
+  const q = query.trim().toLowerCase();
+  if (!q) { resultsArea.innerHTML = ''; return; }
+
+  const byCode = new Map();
+  for (const row of renewalRowsCache) {
+    if (!byCode.has(row.employee_code)) {
+      byCode.set(row.employee_code, { employee_code: row.employee_code, employee_name: row.employee_name, count: 0 });
+    }
+    byCode.get(row.employee_code).count += 1;
+  }
+  const matches = [...byCode.values()].filter((p) =>
+    (p.employee_name || '').toLowerCase().includes(q) || (p.employee_code || '').toLowerCase().includes(q)
+  ).slice(0, 8);
+
+  if (!matches.length) {
+    resultsArea.innerHTML = '<div class="hint" style="padding:6px 2px;">No one matches that search.</div>';
+    return;
+  }
+  resultsArea.innerHTML = matches.map((p) => `
+    <button type="button" class="secondary renewal-person-result" data-person-code="${escapeHtml(p.employee_code)}" style="display:flex; justify-content:space-between; width:100%; margin-bottom:6px;">
+      <span>${escapeHtml(p.employee_name)}</span>
+      <span class="hint">${escapeHtml(p.employee_code)} · ${p.count} tracked</span>
+    </button>
+  `).join('');
+  resultsArea.querySelectorAll('.renewal-person-result').forEach((btn) => {
+    btn.addEventListener('click', () => renderRenewalPersonDetail(btn.dataset.personCode));
+  });
+}
+
+// Full detail card for one person — every document type in
+// RENEWAL_DOC_LABELS gets its own row, even ones this person has no sheet
+// data for at all, so it's obvious at a glance what's missing vs. what's
+// tracked and fine.
+function renewalPersonDocRowHtml(row, label) {
+  if (!row) {
+    return `
+      <div class="renewal-person-doc-row is-missing">
+        <div class="renewal-person-doc-label">${escapeHtml(label)}</div>
+        <div class="hint">Not tracked for this person</div>
+      </div>
+    `;
+  }
+  const isRenewed = row.status === 'renewed';
+  const days = daysUntil(row.expiry_date);
+  const sev = renewalSeverity(days);
+  const overdue = days !== null && days < 0;
+  const daysLabel = days === null ? '' : overdue ? `${Math.abs(days)}d overdue` : `${days}d left`;
+  const detail = renewalDetailText(row);
+  return `
+    <div class="renewal-person-doc-row ${isRenewed ? 'is-renewed' : sev.key}">
+      <div class="renewal-person-doc-label">${escapeHtml(label)}</div>
+      <div class="renewal-person-doc-main">
+        <span class="renewal-person-doc-date">${formatRenewalDate(row.expiry_date)}</span>
+        ${isRenewed
+          ? '<span class="hint">✅ Renewed</span>'
+          : `<span class="renewal-sticky-days ${overdue ? 'overdue' : ''}">${daysLabel}</span>`}
+      </div>
+      ${detail ? `<div class="renewal-person-doc-detail" title="${escapeHtml(detail)}">${escapeHtml(detail)}</div>` : ''}
+      ${!isRenewed ? `<div style="margin-top:4px;"><button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Renewed</button></div>` : ''}
+    </div>
+  `;
+}
+
+function renderRenewalPersonDetail(employeeCode) {
+  const detailArea = $('renewalPersonDetail');
+  if (!detailArea) return;
+  if (!employeeCode) { detailArea.innerHTML = ''; renewalDetailOpenFor = null; return; }
+
+  const personRows = renewalRowsCache.filter((r) => r.employee_code === employeeCode);
+  if (!personRows.length) { detailArea.innerHTML = ''; renewalDetailOpenFor = null; return; }
+
+  renewalDetailOpenFor = employeeCode;
+  const name = personRows[0].employee_name;
+  const byDocType = {};
+  for (const row of personRows) byDocType[row.document_type] = row;
+
+  const rowsHtml = Object.entries(RENEWAL_DOC_LABELS)
+    .map(([key, label]) => renewalPersonDocRowHtml(byDocType[key], label))
+    .join('');
+
+  detailArea.innerHTML = `
+    <div class="card glass renewal-person-detail" style="margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div>
+          <strong style="font-size:15px;">${escapeHtml(name)}</strong>
+          <p class="hint" style="margin-top:2px;">${escapeHtml(employeeCode)} · every tracked document</p>
+        </div>
+        <button type="button" class="ghost" id="renewalPersonDetailClose">✕</button>
+      </div>
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+        ${rowsHtml}
+      </div>
+    </div>
+  `;
+  detailArea.querySelectorAll('.renewal-renew-btn').forEach((btn) => {
+    btn.addEventListener('click', () => markRenewalRenewed(btn.dataset.renewId));
+  });
+  const closeBtn = $('renewalPersonDetailClose');
+  if (closeBtn) closeBtn.addEventListener('click', () => {
+    renewalDetailOpenFor = null;
+    detailArea.innerHTML = '';
+    const searchInput = $('renewalPersonSearch');
+    const resultsArea = $('renewalPersonResults');
+    if (searchInput) searchInput.value = '';
+    if (resultsArea) resultsArea.innerHTML = '';
+  });
+}
+
+if ($('renewalPersonSearch')) {
+  $('renewalPersonSearch').addEventListener('input', (e) => renderRenewalPersonResults(e.target.value));
 }
 
 if ($('renewalRefreshBtn')) {
