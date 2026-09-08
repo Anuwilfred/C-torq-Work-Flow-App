@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.7';
+const APP_VERSION = 'v3.35.9';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager: sticky notes are back to glass style with a light-to-red severity gradient, a same-colour blinking alert (no more colour flicker), a pin, and gentle mouse-tilt.';
+const APP_UPDATE_NOTES = 'Renewal Manager: true glassmorphism pass on the sticky notes — real edge-lit rim lighting, a specular sheen, and a soft severity-tinted glow bleeding through the pane, on top of the calmer accent-bar layout.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6397,22 +6397,14 @@ function renewalDetailText(row) {
   return normalized;
 }
 
-// Idle tilt for each note before the mouse ever moves — see
-// initRenewalParallax() below, which reads/overwrites this same value on
-// mousemove so the board still looks hand-placed on a pinboard at rest.
-const RENEWAL_BASE_ROTATIONS = [-2.5, 1.8, -1, 2.4];
-
 function renewalStickyHtml(row, index) {
   const days = daysUntil(row.expiry_date);
   const sev = renewalSeverity(days);
   const overdue = days !== null && days < 0;
   const daysLabel = days === null ? '—' : overdue ? `${Math.abs(days)}d overdue` : `${days}d left`;
   const detail = renewalDetailText(row);
-  const baseRot = RENEWAL_BASE_ROTATIONS[index % RENEWAL_BASE_ROTATIONS.length];
   return `
-    <div class="renewal-sticky ${sev.key} ${sev.blink ? 'is-blink' : ''}" data-renewal-id="${row.id}" data-base-rot="${baseRot}" style="transform: rotate(${baseRot}deg);">
-      <div class="renewal-sticky-pin"></div>
-      ${sev.blink ? '<div class="renewal-sticky-alert-dot"></div>' : ''}
+    <div class="renewal-sticky ${sev.key} ${sev.blink ? 'is-blink' : ''}" data-renewal-id="${row.id}">
       <div class="renewal-sticky-top">
         <div>
           <div class="renewal-sticky-name">${escapeHtml(row.employee_name)}</div>
@@ -6427,32 +6419,6 @@ function renewalStickyHtml(row, index) {
       </div>
     </div>
   `;
-}
-
-// The urgent stack gently tilts toward the cursor, like notes physically
-// pinned to a board — each card reacts to how close the mouse is to its own
-// center, layered on top of its idle rotation (data-base-rot), and eases
-// back to that idle rotation the moment the mouse leaves the board.
-function initRenewalParallax() {
-  const stack = document.querySelector('#renewalUrgentArea .renewal-stack');
-  if (!stack || stack.dataset.parallaxBound) return;
-  stack.dataset.parallaxBound = '1';
-  stack.addEventListener('mousemove', (e) => {
-    stack.querySelectorAll('.renewal-sticky').forEach((card) => {
-      const rect = card.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dx = Math.max(-1, Math.min(1, (e.clientX - cx) / (rect.width * 1.5)));
-      const dy = Math.max(-1, Math.min(1, (e.clientY - cy) / (rect.height * 1.5)));
-      const baseRot = parseFloat(card.dataset.baseRot || '0');
-      card.style.transform = `rotate(${baseRot}deg) rotateX(${(-dy * 8).toFixed(2)}deg) rotateY(${(dx * 8).toFixed(2)}deg)`;
-    });
-  });
-  stack.addEventListener('mouseleave', () => {
-    stack.querySelectorAll('.renewal-sticky').forEach((card) => {
-      card.style.transform = `rotate(${card.dataset.baseRot || 0}deg)`;
-    });
-  });
 }
 
 function renewalRowHtml(row) {
@@ -6499,7 +6465,6 @@ async function renderRenewalManager() {
   urgentArea.innerHTML = pending.length
     ? `<div class="renewal-stack">${pending.map(renewalStickyHtml).join('')}</div>`
     : '<div class="empty">Nothing pending — everything is renewed. 🎉</div>';
-  if (pending.length) initRenewalParallax();
 
   fullListArea.innerHTML = [...pending, ...renewed].map(renewalRowHtml).join('');
 
