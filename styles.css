@@ -2625,6 +2625,23 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .renewal-person-doc-main { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 3px; }
 .renewal-person-doc-date { font-size: 12px; opacity: 0.85; }
 .renewal-person-doc-detail { font-size: 11px; opacity: 0.7; font-style: italic; margin-top: 3px; }
+.renewal-person-doc-numbers { font-size: 11px; margin-top: 2px; }
+
+/* Personal-info grid (DOB, joining date, nationality, UID, sponsor, mobile,
+   vehicle) shown at the top of the person detail card, above the per-
+   document rows — these come from employee_details, one row per person. */
+.renewal-person-info-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 14px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
+}
+.renewal-person-info-item { font-size: 12px; }
+.renewal-person-info-item .hint { font-size: 10.5px; margin-bottom: 1px; }
 .home-tile-icon-tank {
   background: linear-gradient(160deg, rgba(90, 170, 224, 0.28), rgba(50, 120, 176, 0.14));
   border-color: rgba(90, 170, 224, 0.55);

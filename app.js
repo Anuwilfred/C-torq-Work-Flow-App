@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.11';
+const APP_VERSION = 'v3.35.12';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'AEON Ai can now answer Renewal Manager questions: admins can ask about anyone\'s visa and document expiry, and a new "My Document Renewal Status" option in Map Access lets specific people ask about their own (never anyone else\'s).';
+const APP_UPDATE_NOTES = 'Renewal Manager person details now show passport, EID and visa numbers, date of birth, joining date, nationality, UID, sponsor, mobile and vehicle number — synced straight from the HR sheet.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6373,6 +6373,26 @@ async function fetchRenewalRows() {
   return data || [];
 }
 
+// Per-employee fields that don't belong to any single document type (Date
+// of Birth, Joining Date, Nationality, UID No, Visa/Permit Sponsor, Mobile
+// No., Vehicle No.) — synced by sync-renewals into employee_details.
+// Fetched alongside visa_renewals rows and cached the same way, keyed by
+// employee_code for quick lookup when rendering a person's detail card.
+let employeeDetailsCache = {};
+async function fetchEmployeeDetailsMap() {
+  const { data, error } = await sb.from('employee_details').select('*');
+  if (error) { console.error('fetchEmployeeDetailsMap failed:', error); return {}; }
+  const byCode = {};
+  for (const row of data || []) byCode[row.employee_code] = row;
+  return byCode;
+}
+
+function formatRenewalPastDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T00:00:00`);
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function sortRenewalRows(rows) {
   // Nulls (no parseable date) sort to the very end, after every dated item —
   // treated as "furthest away" rather than "most urgent".
@@ -6461,8 +6481,9 @@ async function renderRenewalManager() {
   urgentArea.innerHTML = '<div class="empty">Loading…</div>';
   fullListArea.innerHTML = '';
 
-  const rows = await fetchRenewalRows();
+  const [rows, detailsMap] = await Promise.all([fetchRenewalRows(), fetchEmployeeDetailsMap()]);
   renewalRowsCache = rows;
+  employeeDetailsCache = detailsMap;
   if (renewalDetailOpenFor) renderRenewalPersonDetail(renewalDetailOpenFor);
   if (!rows.length) {
     urgentArea.innerHTML = '<div class="empty">No renewal data yet — tap "Refresh from sheet" once the Renewal Manager sheet has been shared with the service account.</div>';
@@ -6551,6 +6572,20 @@ function renderRenewalPersonResults(query) {
 // RENEWAL_DOC_LABELS gets its own row, even ones this person has no sheet
 // data for at all, so it's obvious at a glance what's missing vs. what's
 // tracked and fine.
+// numbersHtml: passport_number rides on the 'passport' row, eid_number +
+// visa_number ride on the 'visa_eid' row (populated by sync-renewals) —
+// shown as a small line under the label so the actual document number is
+// visible right next to its expiry, not just buried in raw_value.
+function renewalDocNumbersHtml(row) {
+  if (!row) return '';
+  const parts = [];
+  if (row.passport_number) parts.push(`Passport No: ${escapeHtml(row.passport_number)}`);
+  if (row.eid_number) parts.push(`EID No: ${escapeHtml(row.eid_number)}`);
+  if (row.visa_number) parts.push(`Visa No: ${escapeHtml(row.visa_number)}`);
+  if (!parts.length) return '';
+  return `<div class="renewal-person-doc-numbers hint">${parts.join(' · ')}</div>`;
+}
+
 function renewalPersonDocRowHtml(row, label) {
   if (!row) {
     return `
@@ -6569,6 +6604,7 @@ function renewalPersonDocRowHtml(row, label) {
   return `
     <div class="renewal-person-doc-row ${isRenewed ? 'is-renewed' : sev.key}">
       <div class="renewal-person-doc-label">${escapeHtml(label)}</div>
+      ${renewalDocNumbersHtml(row)}
       <div class="renewal-person-doc-main">
         <span class="renewal-person-doc-date">${formatRenewalDate(row.expiry_date)}</span>
         ${isRenewed
@@ -6577,6 +6613,34 @@ function renewalPersonDocRowHtml(row, label) {
       </div>
       ${detail ? `<div class="renewal-person-doc-detail" title="${escapeHtml(detail)}">${escapeHtml(detail)}</div>` : ''}
       ${!isRenewed ? `<div style="margin-top:4px;"><button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Renewed</button></div>` : ''}
+    </div>
+  `;
+}
+
+// Personal-info block (Date of Birth, Joining Date, Nationality, UID No,
+// Visa/Permit Sponsor, Mobile No., Vehicle No.) shown above the document
+// rows in the person detail card — pulled from employeeDetailsCache, which
+// is populated once per employee (independent of document type).
+function renewalPersonInfoHtml(details) {
+  if (!details) return '';
+  const fields = [
+    ['Mobile No.', details.mobile_no],
+    ['Date of Birth', formatRenewalPastDate(details.date_of_birth)],
+    ['Joining Date', formatRenewalPastDate(details.joining_date)],
+    ['Nationality', details.nationality],
+    ['UID No', details.uid_no],
+    ['Visa/Permit Sponsor', details.visa_permit_sponsor],
+    ['Vehicle No.', details.vehicle_no],
+  ].filter(([, v]) => v);
+  if (!fields.length) return '';
+  return `
+    <div class="renewal-person-info-grid">
+      ${fields.map(([label, value]) => `
+        <div class="renewal-person-info-item">
+          <div class="hint">${escapeHtml(label)}</div>
+          <div>${escapeHtml(String(value))}</div>
+        </div>
+      `).join('')}
     </div>
   `;
 }
@@ -6593,10 +6657,12 @@ function renderRenewalPersonDetail(employeeCode) {
   const name = personRows[0].employee_name;
   const byDocType = {};
   for (const row of personRows) byDocType[row.document_type] = row;
+  const details = employeeDetailsCache[employeeCode];
 
   const rowsHtml = Object.entries(RENEWAL_DOC_LABELS)
     .map(([key, label]) => renewalPersonDocRowHtml(byDocType[key], label))
     .join('');
+  const infoHtml = renewalPersonInfoHtml(details);
 
   detailArea.innerHTML = `
     <div class="card glass renewal-person-detail" style="margin-top:12px;">
@@ -6607,6 +6673,7 @@ function renderRenewalPersonDetail(employeeCode) {
         </div>
         <button type="button" class="ghost" id="renewalPersonDetailClose">✕</button>
       </div>
+      ${infoHtml}
       <div style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
         ${rowsHtml}
       </div>
