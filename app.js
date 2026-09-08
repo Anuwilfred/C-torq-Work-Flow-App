@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.35.5';
+const APP_VERSION = 'v3.35.6';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Added Renewal Manager (admin-only): a sticky-note board tracking every employee\'s passport/visa/EID/work-permit renewals, synced from the HR Google Sheet.';
+const APP_UPDATE_NOTES = 'Renewal Manager: redesigned as real Post-it-style sticky notes (compact grid, solid red for near-expiry) and now shows the sheet\'s own text (country, multi-entry, etc.) on each card.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6364,12 +6364,28 @@ function sortRenewalRows(rows) {
   });
 }
 
+// The sheet's own raw cell text (row.raw_value) often carries real detail
+// that the automated date-parser throws away — which country a travel
+// visa is for, "multi-entry", a second onshore/offshore date, and so on
+// (e.g. "Kenya visa-27.08.27 Schengen visa-26.05.27 Canada Visa-26.08.27").
+// Only worth showing as its own line when it says more than the plain
+// parsed date already does.
+function renewalDetailText(row) {
+  if (!row.raw_value) return '';
+  const plainDate = row.expiry_date ? formatRenewalDate(row.expiry_date) : '';
+  const normalized = row.raw_value.trim();
+  if (!normalized) return '';
+  if (plainDate && normalized === plainDate) return '';
+  return normalized;
+}
+
 function renewalStickyHtml(row) {
   const days = daysUntil(row.expiry_date);
   const isNear = days !== null && days <= RENEWAL_RED_DAYS;
   const isBlink = days !== null && days <= RENEWAL_BLINK_DAYS;
   const overdue = days !== null && days < 0;
   const daysLabel = days === null ? '—' : overdue ? `${Math.abs(days)}d overdue` : `${days}d left`;
+  const detail = renewalDetailText(row);
   return `
     <div class="renewal-sticky ${isNear ? 'is-near' : ''} ${isBlink ? 'is-blink' : ''}" data-renewal-id="${row.id}">
       <div class="renewal-sticky-top">
@@ -6380,8 +6396,9 @@ function renewalStickyHtml(row) {
         <div class="renewal-sticky-days ${overdue ? 'overdue' : ''}">${daysLabel}</div>
       </div>
       <div class="renewal-sticky-meta">Expiry: ${formatRenewalDate(row.expiry_date)}</div>
+      ${detail ? `<div class="renewal-sticky-detail" title="${escapeHtml(detail)}">${escapeHtml(detail)}</div>` : ''}
       <div class="renewal-sticky-actions">
-        <button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Mark renewed</button>
+        <button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Renewed</button>
       </div>
     </div>
   `;
@@ -6390,11 +6407,13 @@ function renewalStickyHtml(row) {
 function renewalRowHtml(row) {
   const isRenewed = row.status === 'renewed';
   const days = daysUntil(row.expiry_date);
+  const detail = renewalDetailText(row);
   return `
     <div class="renewal-row ${isRenewed ? 'is-renewed' : ''}">
       <div class="renewal-row-left">
         <div class="renewal-row-name">${escapeHtml(row.employee_name)}</div>
         <div class="renewal-row-doc">${escapeHtml(RENEWAL_DOC_LABELS[row.document_type] || row.document_type)} · ${escapeHtml(row.employee_code)}</div>
+        ${detail ? `<div class="renewal-row-detail" title="${escapeHtml(detail)}">${escapeHtml(detail)}</div>` : ''}
       </div>
       <div class="renewal-row-right">
         <div class="renewal-row-date">${formatRenewalDate(row.expiry_date)}${days !== null && !isRenewed ? ` (${days}d)` : ''}</div>

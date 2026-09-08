@@ -2475,50 +2475,100 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .home-tile:hover .home-tile-icon-renewals,
 .home-tile:active .home-tile-icon-renewals { box-shadow: 0 10px 22px rgba(224, 100, 100, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 
-/* ===== RENEWAL MANAGER — sticky-note board ===== */
+/* ===== RENEWAL MANAGER — sticky-note board =====
+   Redesigned per feedback: real Post-it look (small, solid-colour paper,
+   slight rotation, folded corner), laid out as a wrapping grid instead of
+   full-width bars, with the sheet's raw cell text shown on the note so
+   details the parser doesn't fully understand (which country a travel
+   visa is for, "multi-entry", a second onshore/offshore date, etc.) are
+   still visible to a human reading the card. */
 .renewal-stack {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px 16px;
+  padding: 8px 4px 14px;
 }
 .renewal-sticky {
   position: relative;
-  border-radius: 14px;
-  padding: 12px 14px;
-  background: linear-gradient(160deg, rgba(255, 225, 120, 0.18), rgba(200, 170, 60, 0.08));
-  border: 1px solid rgba(255, 225, 120, 0.35);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  width: 202px;
+  border-radius: 2px 2px 12px 2px;
+  padding: 13px 13px 12px;
+  background: linear-gradient(160deg, #f7e069 0%, #edc93f 100%);
+  color: #3a2e04;
+  box-shadow: 0 10px 16px rgba(0, 0, 0, 0.3), 0 1px 0 rgba(255, 255, 255, 0.5) inset;
+  transform: rotate(-2deg);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.renewal-stack .renewal-sticky:nth-child(4n+1) { transform: rotate(-2.5deg); }
+.renewal-stack .renewal-sticky:nth-child(4n+2) { transform: rotate(1.8deg); }
+.renewal-stack .renewal-sticky:nth-child(4n+3) { transform: rotate(-1deg); }
+.renewal-stack .renewal-sticky:nth-child(4n+4) { transform: rotate(2.4deg); }
+.renewal-sticky:hover { transform: rotate(0deg) scale(1.05); z-index: 2; box-shadow: 0 14px 24px rgba(0, 0, 0, 0.4); }
+.renewal-sticky::after {
+  /* folded corner, like a real Post-it peeling slightly at the tip */
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 15px 15px;
+  border-color: transparent transparent rgba(0, 0, 0, 0.2) transparent;
 }
 .renewal-sticky.is-near {
-  background: linear-gradient(160deg, rgba(230, 80, 80, 0.28), rgba(150, 40, 40, 0.14));
-  border-color: rgba(230, 80, 80, 0.6);
+  background: linear-gradient(160deg, #f57a7a 0%, #e03e3e 100%);
+  color: #3a0707;
 }
 .renewal-sticky.is-blink {
   animation: renewal-blink 1.1s ease-in-out infinite;
 }
 @keyframes renewal-blink {
-  0%, 100% { box-shadow: 0 6px 16px rgba(230, 80, 80, 0.25); border-color: rgba(230, 80, 80, 0.6); }
-  50% { box-shadow: 0 6px 26px rgba(230, 80, 80, 0.75); border-color: rgba(255, 120, 120, 0.95); }
+  0%, 100% { box-shadow: 0 10px 16px rgba(224, 62, 62, 0.35), 0 1px 0 rgba(255, 255, 255, 0.4) inset; }
+  50% { box-shadow: 0 10px 30px rgba(255, 90, 90, 0.9), 0 1px 0 rgba(255, 255, 255, 0.4) inset; }
 }
 .renewal-sticky-top {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 8px;
+  gap: 6px;
 }
-.renewal-sticky-name { font-weight: 700; font-size: 14px; }
-.renewal-sticky-doc { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+.renewal-sticky-name { font-weight: 800; font-size: 12.5px; line-height: 1.25; }
+.renewal-sticky-doc { font-size: 10.5px; opacity: 0.85; margin-top: 2px; font-weight: 700; }
 .renewal-sticky-days {
-  font-weight: 700;
-  font-size: 12px;
-  padding: 3px 9px;
+  font-weight: 800;
+  font-size: 10px;
+  padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.18);
+  color: inherit;
   white-space: nowrap;
+  flex-shrink: 0;
 }
-.renewal-sticky-days.overdue { background: rgba(150, 20, 20, 0.65); }
-.renewal-sticky-meta { font-size: 12px; opacity: 0.8; margin-top: 6px; }
+.renewal-sticky-days.overdue { background: rgba(0, 0, 0, 0.38); }
+.renewal-sticky-meta { font-size: 11px; opacity: 0.9; margin-top: 6px; font-weight: 700; }
+.renewal-sticky-detail {
+  font-size: 10px;
+  opacity: 0.85;
+  margin-top: 5px;
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+}
 .renewal-sticky-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
+.renewal-sticky-actions .renewal-renew-btn {
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  color: inherit;
+}
+.renewal-sticky-actions .renewal-renew-btn:hover { background: rgba(0, 0, 0, 0.3); }
 
 .renewal-row {
   display: flex;
@@ -2535,6 +2585,7 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .renewal-row-left { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .renewal-row-name { font-size: 13px; font-weight: 600; }
 .renewal-row-doc { font-size: 11px; opacity: 0.75; }
+.renewal-row-detail { font-size: 10.5px; opacity: 0.6; font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .renewal-row-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .renewal-row-date { font-size: 12px; opacity: 0.85; white-space: nowrap; }
 .home-tile-icon-tank {
