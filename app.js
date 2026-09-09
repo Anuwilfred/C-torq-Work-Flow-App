@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.36.0';
+const APP_VERSION = 'v3.36.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'AEON Ai orb now sends a real water-ripple wave across the screen with a confirm sound when you tap it open. Renewal Manager person records now open in a glowing HUD-style panel with a barcode instead of a photo.';
+const APP_UPDATE_NOTES = 'Renewal Manager HUD panel resized to a compact centered card instead of stretching full width.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6712,7 +6712,7 @@ function renderRenewalPersonDetail(employeeCode, opts) {
       <div class="renewal-hud-sweep"></div>
       <div class="renewal-hud-head">
         <div class="renewal-hud-id">
-          <canvas class="renewal-hud-barcode" width="220" height="64"></canvas>
+          <canvas class="renewal-hud-barcode" width="160" height="46"></canvas>
           <div class="renewal-hud-name">${escapeHtml(name)}</div>
           <div class="renewal-hud-code">${escapeHtml(employeeCode)}</div>
         </div>
