@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.37.1';
+const APP_VERSION = 'v3.38.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed poor text contrast over Action photos backgrounds in Light mode — the photo dims more, and the quote card and tile labels get a stronger backdrop so everything stays readable.';
+const APP_UPDATE_NOTES = 'Renewal Manager can now be delegated: anyone granted the "renewal" Map Access feature gets full renew/edit/delete access to every employee\'s documents (not just the tile), matching an admin. Every edit now writes to a private history so admins can see who changed what. Requires the accompanying Supabase SQL migration to be run for the delegated access to actually take effect.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1945,12 +1945,15 @@ async function enterApp(knownUser) {
   $('accountEmail').textContent = user.email;
   $('adminTabBtn').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   $('adminHomeBtn').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
-  // Renewal Manager: hard-gated to role==='admin' directly (like the two
-  // lines above), NOT via data-feature/allowed_features like every other
-  // Home tile — it shows sensitive personal document data (passport/visa/
-  // EID numbers) for every employee, so it must never be delegatable
-  // through Map Access to a non-admin.
-  if ($('renewalManagerHomeTile')) $('renewalManagerHomeTile').style.display = currentProfile?.role === 'admin' ? 'flex' : 'none';
+  // Renewal Manager: visible to admins, and also to anyone the admin has
+  // explicitly delegated the 'renewal' Map Access feature to — matching
+  // RLS on visa_renewals/employee_details, which now grants that same
+  // group full read/write on the underlying data (see
+  // supabase/renewal_delegation_and_audit_migration.sql). A delegated
+  // person gets the exact same full board an admin sees; every edit/renew/
+  // delete they make is written to visa_renewals_audit_log so an admin can
+  // see who changed what.
+  if ($('renewalManagerHomeTile')) $('renewalManagerHomeTile').style.display = hasFeature('renewal') ? 'flex' : 'none';
   $('newGroupBtn').style.display = 'inline-block';
   if ($('newsComposeCard')) $('newsComposeCard').style.display = 'block';
   checkForUnreadNews();
@@ -2935,10 +2938,18 @@ const FEATURE_LIST = [
 // tiles) plus the two floating orbs (chat, ai) unless X is in this person's
 // allowed_features — a system admin (profiles.role === 'admin') always sees
 // everything, regardless of what's ticked in Map Access.
-function applyFeatureAccess() {
+// Global, reusable version of the same admin-or-delegated check used by
+// applyFeatureAccess() below — hoisted out so other code (Renewal Manager
+// tile gate, admin-only History button, etc.) can call it directly instead
+// of duplicating the isAdmin/allowed_features logic inline.
+function hasFeature(key) {
   const isAdmin = currentProfile?.role === 'admin';
   const allowed = Array.isArray(currentProfile?.allowed_features) ? currentProfile.allowed_features : [];
-  const has = (key) => isAdmin || allowed.includes(key);
+  return isAdmin || allowed.includes(key);
+}
+
+function applyFeatureAccess() {
+  const has = hasFeature;
 
   document.querySelectorAll('[data-feature]').forEach((el) => {
     el.style.display = has(el.dataset.feature) ? '' : 'none';
@@ -5129,6 +5140,8 @@ const PANEL_IDS = {
   quotations: ['quotationsOverlay', 'quotationsOverlayBackdrop'],
   quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
   renewalManager: ['renewalManagerOverlay', 'renewalManagerOverlayBackdrop'],
+  renewalEdit: ['renewalEditOverlay', 'renewalEditOverlayBackdrop'],
+  renewalHistory: ['renewalHistoryOverlay', 'renewalHistoryOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   people: ['peopleOverlay', 'peopleOverlayBackdrop'],
@@ -6539,16 +6552,121 @@ async function renderRenewalManager() {
   });
 }
 
+// Append-only "who changed what" trail — written alongside every real
+// human action (renew/edit/delete) a person takes through the app, NOT by
+// sync-renewals' automated sheet sync, so an admin only ever sees actual
+// people's actions here (see supabase/renewal_delegation_and_audit_migration.sql
+// for the visa_renewals_audit_log table + RLS). Failures are logged but
+// never block the underlying action — a missing audit row shouldn't stop
+// someone from renewing/editing/deleting a real record.
+async function logRenewalAudit(action, row, { oldValues = null, newValues = null } = {}) {
+  try {
+    await sb.from('visa_renewals_audit_log').insert({
+      visa_renewal_id: row?.id || null,
+      employee_code: row?.employee_code || null,
+      employee_name: row?.employee_name || null,
+      document_type: row?.document_type || null,
+      action,
+      changed_by: currentUser?.id || null,
+      changed_by_email: currentUser?.email || null,
+      old_values: oldValues,
+      new_values: newValues,
+    });
+  } catch (err) {
+    console.warn('logRenewalAudit failed (continuing anyway):', err);
+  }
+}
+
 async function markRenewalRenewed(id) {
   if (!id) return;
-  const { error } = await sb.from('visa_renewals').update({
+  const before = renewalRowsCache.find((r) => r.id === id) || null;
+  const patch = {
     status: 'renewed',
     renewed_at: new Date().toISOString(),
     renewed_by: currentUser?.email || null,
-  }).eq('id', id);
+  };
+  const { error } = await sb.from('visa_renewals').update(patch).eq('id', id);
   if (error) { showToast(`Couldn't update: ${error.message}`); return; }
+  logRenewalAudit('renew', before, {
+    oldValues: before ? { status: before.status, renewed_at: before.renewed_at } : null,
+    newValues: patch,
+  });
   showToast('Marked renewed.');
   renderRenewalManager();
+}
+
+// ---------- Edit ----------
+// Editable fields kept deliberately narrow: the expiry date itself, plus
+// whichever document-number field applies to that document type. Employee
+// name/code and document type stay fixed — those come from the sheet sync
+// and are the join key back to that person's other rows.
+const RENEWAL_NUMBER_FIELD = {
+  passport: { key: 'passport_number', label: 'Passport No' },
+  visa_eid: { key: 'eid_number', label: 'EID No' },
+};
+let renewalEditId = null;
+function openRenewalEditForm(id) {
+  const row = renewalRowsCache.find((r) => r.id === id);
+  if (!row) return;
+  renewalEditId = id;
+  if ($('renewalEditPersonName')) $('renewalEditPersonName').textContent = `${row.employee_name} — ${RENEWAL_DOC_LABELS[row.document_type] || row.document_type}`;
+  if ($('renewalEditExpiry')) $('renewalEditExpiry').value = row.expiry_date || '';
+  const numField = RENEWAL_NUMBER_FIELD[row.document_type];
+  const numRow = $('renewalEditNumberRow');
+  if (numRow) {
+    if (numField) {
+      numRow.style.display = 'block';
+      if ($('renewalEditNumberLabel')) $('renewalEditNumberLabel').textContent = numField.label;
+      if ($('renewalEditNumberInput')) $('renewalEditNumberInput').value = row[numField.key] || '';
+    } else {
+      numRow.style.display = 'none';
+    }
+  }
+  if (numField && $('renewalEditVisaNumberRow')) {
+    // visa_eid also carries a separate Visa No alongside EID No.
+    const showVisaNo = row.document_type === 'visa_eid';
+    $('renewalEditVisaNumberRow').style.display = showVisaNo ? 'block' : 'none';
+    if (showVisaNo && $('renewalEditVisaNumberInput')) $('renewalEditVisaNumberInput').value = row.visa_number || '';
+  } else if ($('renewalEditVisaNumberRow')) {
+    $('renewalEditVisaNumberRow').style.display = 'none';
+  }
+  openPanel('renewalEdit');
+}
+
+async function saveRenewalEdit() {
+  if (!renewalEditId) return;
+  const before = renewalRowsCache.find((r) => r.id === renewalEditId);
+  if (!before) return;
+  const patch = { expiry_date: $('renewalEditExpiry')?.value || null };
+  const numField = RENEWAL_NUMBER_FIELD[before.document_type];
+  if (numField) patch[numField.key] = $('renewalEditNumberInput')?.value.trim() || null;
+  if (before.document_type === 'visa_eid') patch.visa_number = $('renewalEditVisaNumberInput')?.value.trim() || null;
+
+  const { error } = await sb.from('visa_renewals').update(patch).eq('id', renewalEditId);
+  if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+  logRenewalAudit('edit', before, {
+    oldValues: { expiry_date: before.expiry_date, ...(numField ? { [numField.key]: before[numField.key] } : {}), ...(before.document_type === 'visa_eid' ? { visa_number: before.visa_number } : {}) },
+    newValues: patch,
+  });
+  showToast('Saved.');
+  closePanel('renewalEdit');
+  renewalEditId = null;
+  await renderRenewalManager();
+  if (renewalDetailOpenFor) renderRenewalPersonDetail(renewalDetailOpenFor, { silent: true });
+}
+
+// ---------- Delete ----------
+async function deleteRenewalRow(id) {
+  const row = renewalRowsCache.find((r) => r.id === id);
+  if (!row) return;
+  const label = `${row.employee_name} — ${RENEWAL_DOC_LABELS[row.document_type] || row.document_type}`;
+  if (!confirm(`Delete this record?\n\n${label}\n\nThis can't be undone (though it stays in the edit history).`)) return;
+  const { error } = await sb.from('visa_renewals').delete().eq('id', id);
+  if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+  logRenewalAudit('delete', row, { oldValues: row, newValues: null });
+  showToast('Deleted.');
+  await renderRenewalManager();
+  if (renewalDetailOpenFor) renderRenewalPersonDetail(renewalDetailOpenFor, { silent: true });
 }
 
 // ---------- Person search (top of the panel) ----------
@@ -6632,7 +6750,11 @@ function renewalPersonDocRowHtml(row, label) {
           : `<span class="renewal-sticky-days ${overdue ? 'overdue' : ''}">${daysLabel}</span>`}
       </div>
       ${detail ? `<div class="renewal-person-doc-detail" title="${escapeHtml(detail)}">${escapeHtml(detail)}</div>` : ''}
-      ${!isRenewed ? `<div style="margin-top:4px;"><button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Renewed</button></div>` : ''}
+      <div style="margin-top:4px; display:flex; gap:6px; flex-wrap:wrap;">
+        ${!isRenewed ? `<button type="button" class="secondary renewal-renew-btn" data-renew-id="${row.id}">✅ Renewed</button>` : ''}
+        <button type="button" class="ghost renewal-edit-btn" data-edit-id="${row.id}">✏️ Edit</button>
+        <button type="button" class="ghost renewal-delete-btn" data-delete-id="${row.id}">🗑️</button>
+      </div>
     </div>
   `;
 }
@@ -6737,7 +6859,10 @@ function renderRenewalPersonDetail(employeeCode, opts) {
           <div class="renewal-hud-name">${escapeHtml(name)}</div>
           <div class="renewal-hud-code">${escapeHtml(employeeCode)}</div>
         </div>
-        <button type="button" class="ghost renewal-hud-close" id="renewalPersonDetailClose">✕</button>
+        <div class="renewal-hud-head-actions">
+          ${currentProfile?.role === 'admin' ? `<button type="button" class="ghost renewal-hud-history" id="renewalPersonDetailHistory">🕘 History</button>` : ''}
+          <button type="button" class="ghost renewal-hud-close" id="renewalPersonDetailClose">✕</button>
+        </div>
       </div>
       ${infoHtml}
       <div class="renewal-hud-docs">
@@ -6750,6 +6875,14 @@ function renderRenewalPersonDetail(employeeCode, opts) {
   detailArea.querySelectorAll('.renewal-renew-btn').forEach((btn) => {
     btn.addEventListener('click', () => markRenewalRenewed(btn.dataset.renewId));
   });
+  detailArea.querySelectorAll('.renewal-edit-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openRenewalEditForm(btn.dataset.editId));
+  });
+  detailArea.querySelectorAll('.renewal-delete-btn').forEach((btn) => {
+    btn.addEventListener('click', () => deleteRenewalRow(btn.dataset.deleteId));
+  });
+  const historyBtn = $('renewalPersonDetailHistory');
+  if (historyBtn) historyBtn.addEventListener('click', () => openRenewalHistory(employeeCode, name));
   const closeBtn = $('renewalPersonDetailClose');
   if (closeBtn) closeBtn.addEventListener('click', () => {
     renewalDetailOpenFor = null;
@@ -6761,8 +6894,52 @@ function renderRenewalPersonDetail(employeeCode, opts) {
   });
 }
 
+// ---------- Edit History (admin-only) ----------
+async function fetchRenewalAuditLog(employeeCode) {
+  const { data, error } = await sb.from('visa_renewals_audit_log')
+    .select('*')
+    .eq('employee_code', employeeCode)
+    .order('changed_at', { ascending: false })
+    .limit(100);
+  if (error) { console.error('fetchRenewalAuditLog failed:', error); return []; }
+  return data || [];
+}
+
+function renewalAuditActionLabel(action) {
+  if (action === 'renew') return '✅ Marked renewed';
+  if (action === 'edit') return '✏️ Edited';
+  if (action === 'delete') return '🗑️ Deleted';
+  return action;
+}
+
+async function openRenewalHistory(employeeCode, personName) {
+  if ($('renewalHistoryPersonName')) $('renewalHistoryPersonName').textContent = personName || employeeCode;
+  const list = $('renewalHistoryList');
+  if (list) list.innerHTML = '<div class="empty">Loading…</div>';
+  openPanel('renewalHistory');
+  const rows = await fetchRenewalAuditLog(employeeCode);
+  if (!list) return;
+  if (!rows.length) {
+    list.innerHTML = '<div class="empty">No edits logged yet for this person.</div>';
+    return;
+  }
+  list.innerHTML = rows.map((r) => `
+    <div class="renewal-history-row">
+      <div class="renewal-history-top">
+        <span>${renewalAuditActionLabel(r.action)} — ${escapeHtml(RENEWAL_DOC_LABELS[r.document_type] || r.document_type || '')}</span>
+        <span class="hint">${new Date(r.changed_at).toLocaleString()}</span>
+      </div>
+      <div class="hint">by ${escapeHtml(r.changed_by_email || 'Unknown')}</div>
+    </div>
+  `).join('');
+}
+
 if ($('renewalPersonSearch')) {
   $('renewalPersonSearch').addEventListener('input', (e) => renderRenewalPersonResults(e.target.value));
+}
+
+if ($('renewalEditSaveBtn')) {
+  $('renewalEditSaveBtn').addEventListener('click', saveRenewalEdit);
 }
 
 if ($('renewalRefreshBtn')) {

@@ -230,12 +230,14 @@
           <span class="home-tile-icon home-tile-icon-datafeed">📥</span>
           <span class="home-tile-label">Data Feed</span>
         </button>
-        <!-- RENEWAL MANAGER — admin-only, hard-gated by role (not delegatable
-             via allowed_features/Map Access like the other tiles): this
-             shows every employee's passport/visa/EID/work-permit numbers and
-             expiry dates, so it's shown/hidden directly by
-             currentProfile.role === 'admin' in app.js's enterApp(), next to
-             adminTabBtn/adminHomeBtn. No data-feature attribute on purpose. -->
+        <!-- RENEWAL MANAGER — visible to admins, and to anyone granted the
+             'renewal' Map Access feature (full read/write on every
+             employee's passport/visa/EID/work-permit data, same as an
+             admin — see hasFeature('renewal') in app.js's enterApp(), and
+             the RLS policies in
+             supabase/renewal_delegation_and_audit_migration.sql). No
+             data-feature attribute here since the check also covers admins
+             via hasFeature(), unlike the plain [data-feature] tiles. -->
         <button type="button" class="home-tile" data-open="renewalManager" id="renewalManagerHomeTile" style="display:none;">
           <span class="home-tile-icon home-tile-icon-renewals">🛂</span>
           <span class="home-tile-label">Renewal Manager</span>
@@ -1132,6 +1134,46 @@
         <p class="hint" style="margin-top:2px;">Everyone, soonest expiry first. Renewed items sink to the bottom.</p>
         <div id="renewalFullListArea" style="margin-top:10px;"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- RENEWAL EDIT OVERLAY — edit expiry date / document numbers for one record.
+     Available to admins and anyone granted the 'renewal' Map Access feature. -->
+<div id="renewalEditOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="renewalEditOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>✏️ Edit — <span id="renewalEditPersonName">—</span></strong>
+      <button type="button" class="ghost" data-close="renewalEdit">✕</button>
+    </div>
+    <div class="panel-body">
+      <label class="hint" for="renewalEditExpiry">Expiry date</label>
+      <input id="renewalEditExpiry" type="date" style="margin-top:4px;" />
+      <div id="renewalEditNumberRow" style="margin-top:12px; display:none;">
+        <label class="hint" id="renewalEditNumberLabel" for="renewalEditNumberInput">Document No</label>
+        <input id="renewalEditNumberInput" type="text" style="margin-top:4px;" />
+      </div>
+      <div id="renewalEditVisaNumberRow" style="margin-top:12px; display:none;">
+        <label class="hint" for="renewalEditVisaNumberInput">Visa No</label>
+        <input id="renewalEditVisaNumberInput" type="text" style="margin-top:4px;" />
+      </div>
+      <button type="button" id="renewalEditSaveBtn" class="primary" style="margin-top:16px;">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- RENEWAL EDIT HISTORY OVERLAY — admin-only audit trail of who
+     renewed/edited/deleted this person's records. -->
+<div id="renewalHistoryOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="renewalHistoryOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🕘 Edit History — <span id="renewalHistoryPersonName">—</span></strong>
+      <button type="button" class="ghost" data-close="renewalHistory">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="renewalHistoryList"></div>
     </div>
   </div>
 </div>

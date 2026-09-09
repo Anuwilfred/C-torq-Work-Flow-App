@@ -2749,8 +2749,13 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .renewal-hud-barcode { image-rendering: pixelated; width: 160px; height: 46px; }
 .renewal-hud-name { font-size: 12.5px; letter-spacing: 0.3px; margin-top: 4px; }
 .renewal-hud-code { font-size: 10px; color: rgba(57, 255, 176, 0.65); letter-spacing: 1px; }
+.renewal-hud-head-actions { display: flex; align-items: flex-start; gap: 8px; flex-shrink: 0; }
 .renewal-hud-close { color: #39ffb0; border: 1px solid rgba(57, 255, 176, 0.5); background: rgba(0, 0, 0, 0.25); }
 .renewal-hud-close:hover { background: rgba(57, 255, 176, 0.15); }
+.renewal-hud-history { color: #39ffb0; border: 1px solid rgba(57, 255, 176, 0.5); background: rgba(0, 0, 0, 0.25); font-size: 11px; white-space: nowrap; }
+.renewal-hud-history:hover { background: rgba(57, 255, 176, 0.15); }
+.renewal-history-row { padding: 10px; border: 1px solid var(--glass-border); border-radius: 10px; background: var(--glass); margin-bottom: 8px; }
+.renewal-history-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-bottom: 3px; }
 .renewal-hud .renewal-person-info-grid,
 .renewal-hud .renewal-person-doc-row {
   background: rgba(57, 255, 176, 0.05);
