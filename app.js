@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.36.1';
+const APP_VERSION = 'v3.36.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager HUD panel resized to a compact centered card instead of stretching full width.';
+const APP_UPDATE_NOTES = 'Renewal Manager HUD panel documents now lay out as a 2-column grid instead of one tall vertical stack.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -6719,7 +6719,7 @@ function renderRenewalPersonDetail(employeeCode, opts) {
         <button type="button" class="ghost renewal-hud-close" id="renewalPersonDetailClose">✕</button>
       </div>
       ${infoHtml}
-      <div style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+      <div class="renewal-hud-docs">
         ${rowsHtml}
       </div>
     </div>
