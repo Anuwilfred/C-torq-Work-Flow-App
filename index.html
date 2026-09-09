@@ -1763,15 +1763,22 @@
       </div>
 
       <!-- Color Theme — personal, per-device, open to anyone with
-           Appearance access (not admin-only). Only visibly matters when
-           your admin has Background set to "Color theme" mode rather than
-           "Action photos" — hidden/noted otherwise in renderAppearancePanel(). -->
+           Appearance access (not admin-only). Always available: when the
+           admin's global Background mode is already "Color theme" the
+           swatches just apply directly; when it's "Action photos", the
+           extra Use my color / Use automatic toggle below lets this one
+           person opt out of the automatic photos on just their own device
+           without changing anything for anyone else. See
+           renderAppearancePanel(). -->
       <div class="card glass" id="colorThemeCard" style="margin-top:14px;">
         <strong style="font-size:14px;">🎨 Color Theme</strong>
-        <p class="hint" style="margin-top:2px;">Just for you, this device. Only shows while your admin has the background set to a color theme (not rotating photos).</p>
+        <p class="hint" style="margin-top:2px;">Just for you, this device. If you don't want the automatic background your admin set, switch to a solid color you pick yourself.</p>
+        <div id="colorThemeOverrideRow" class="appearance-choice-row" style="margin-top:10px; display:none;">
+          <button type="button" class="appearance-choice-btn" data-bgoverride-choice="on">🎨 Use my color</button>
+          <button type="button" class="appearance-choice-btn" data-bgoverride-choice="off">📷 Use automatic</button>
+        </div>
         <div id="bgThemeSwatchRow" class="theme-swatch-row" style="margin-top:10px;"></div>
       </div>
-      <p id="colorThemeUnavailableNote" class="hint card glass" style="margin-top:14px; display:none; text-align:center;">🎨 Color theme is off right now — your admin has the background set to rotating action photos instead.</p>
 
       <!-- Background mode + Action photos — admin-only, and ORG-WIDE:
            whatever the admin picks here shows on every signed-in person's

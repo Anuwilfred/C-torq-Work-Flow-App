@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.36.3';
+const APP_VERSION = 'v3.37.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager HUD panel now has a continuous ambient scan line and moving background texture, plus angled non-rectangular document tiles.';
+const APP_UPDATE_NOTES = 'Color Theme is now available to everyone, even when the admin has Background set to Action photos — switch to your own solid color on just your device with the new Use my color / Use automatic toggle.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5358,17 +5358,18 @@ const LOGO_PRESETS = [
   },
 ];
 
-// LOCAL, personal-per-device preferences only: Day/Night scheme and which
-// color-theme swatch shows (only relevant when the admin has Background mode
-// set to "Color theme" rather than "Action photos"). Everything else
-// (background mode/photos, logo, whether the quote shows at all) is org-wide
-// and lives in Supabase — see the GLOBAL appearance block just below.
+// LOCAL, personal-per-device preferences only: Day/Night scheme, which
+// color-theme swatch shows, and bgOverridePhoto (opt out of the admin's
+// "Action photos" background on just this device and use the swatch below
+// instead). Everything else (background mode/photos, logo, whether the
+// quote shows at all) is org-wide and lives in Supabase — see the GLOBAL
+// appearance block just below.
 const APPEARANCE_KEY = 'ctorqAppearance';
 function getAppearancePrefs() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) || 'null'); } catch { saved = null; }
   return {
-    scheme: 'dark', bgTheme: 'classic',
+    scheme: 'dark', bgTheme: 'classic', bgOverridePhoto: false,
     ...(saved || {}),
   };
 }
@@ -5486,9 +5487,14 @@ function applyAppearance() {
   const local = getAppearancePrefs();
   const g = getGlobalAppearance();
   const root = document.documentElement;
+  // A person can personally opt out of the admin's automatic "Action
+  // photos" background and use their own solid color instead — this only
+  // ever affects their own device (bgOverridePhoto is a local pref, never
+  // written to app_appearance), so it never changes what anyone else sees.
+  const effectiveBgMode = (g.bgMode === 'photo' && local.bgOverridePhoto) ? 'gradient' : g.bgMode;
   root.setAttribute('data-scheme', local.scheme);
   root.setAttribute('data-bg-theme', local.bgTheme);
-  root.setAttribute('data-bg-mode', g.bgMode);
+  root.setAttribute('data-bg-mode', effectiveBgMode);
 
   const logoContent = g.customLogo
     ? `<img src="${g.customLogo}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:inherit; display:block;" />`
@@ -5513,7 +5519,7 @@ function applyAppearance() {
   }
 
   const layer = $('bgPhotoLayer');
-  if (layer && g.bgMode === 'photo') {
+  if (layer && effectiveBgMode === 'photo') {
     const ids = sportsPhotoIdsForCategory(g.bgPhotoCategory);
     const manualIdx = activeManualPhotoIdx(g);
     const idx = (manualIdx !== null) ? manualIdx : dayOfYearIndex(ids.length);
@@ -5571,10 +5577,18 @@ function renderAppearancePanel() {
   if ($('bgPhotoOptionsArea')) $('bgPhotoOptionsArea').style.display = g.bgMode === 'photo' ? 'block' : 'none';
 
   // Color Theme — personal, per-device, open to anyone with Appearance
-  // access (not admin-gated). Only meaningful while the admin has Background
-  // mode set to "Color theme" — otherwise show the "unavailable" note instead.
-  if ($('colorThemeCard')) $('colorThemeCard').style.display = g.bgMode === 'gradient' ? 'block' : 'none';
-  if ($('colorThemeUnavailableNote')) $('colorThemeUnavailableNote').style.display = g.bgMode === 'photo' ? 'block' : 'none';
+  // access (not admin-gated), and always visible now. When the admin's
+  // Background mode is "Color theme" the swatches just apply directly like
+  // before. When it's "Action photos", the override row below lets this one
+  // person switch to their own solid color instead, without touching what
+  // anyone else sees — that choice lives in local bgOverridePhoto, never
+  // written to the org-wide app_appearance table.
+  if ($('colorThemeCard')) $('colorThemeCard').style.display = 'block';
+  if ($('colorThemeOverrideRow')) $('colorThemeOverrideRow').style.display = g.bgMode === 'photo' ? 'flex' : 'none';
+  document.querySelectorAll('#colorThemeOverrideRow [data-bgoverride-choice]').forEach((btn) => {
+    const wantsOn = btn.dataset.bgoverrideChoice === 'on';
+    btn.classList.toggle('active', wantsOn === !!prefs.bgOverridePhoto);
+  });
 
   // Theme swatches (rebuild once, otherwise just refresh 'active')
   const swatchRow = $('bgThemeSwatchRow');
@@ -5639,6 +5653,12 @@ function renderAppearancePanel() {
   });
   document.querySelectorAll('#bgModePickerRow [data-bgmode-choice]').forEach((btn) => {
     btn.addEventListener('click', () => { saveGlobalAppearance({ bgMode: btn.dataset.bgmodeChoice }).then(renderAppearancePanel); });
+  });
+  document.querySelectorAll('#colorThemeOverrideRow [data-bgoverride-choice]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      saveAppearancePrefs({ bgOverridePhoto: btn.dataset.bgoverrideChoice === 'on' });
+      renderAppearancePanel();
+    });
   });
   if (swatchRow) {
     swatchRow.addEventListener('click', (e) => {
