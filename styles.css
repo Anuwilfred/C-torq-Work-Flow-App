@@ -221,7 +221,43 @@ html[data-bg-mode="photo"] .bg-photo-layer { opacity: 1; }
   background: linear-gradient(180deg, rgba(10,10,10,0.55), rgba(10,10,10,0.78));
 }
 html[data-scheme="light"] .bg-photo-layer::after {
-  background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.80));
+  background: linear-gradient(180deg, rgba(255,255,255,0.68), rgba(255,255,255,0.9));
+}
+
+/* APPEARANCE — when a real photo is behind everything (data-bg-mode="photo"),
+   every ".glass" surface (cards, the quote-of-day card, dropdowns, etc.)
+   needs a noticeably stronger backdrop than it does over the plain gradient
+   background, or text sitting on top of a bright/busy photo becomes hard to
+   read — this was especially bad in Light scheme, where the default --glass
+   tint is only 5% black. Overriding the same variables the rest of the
+   stylesheet already reads (see the Day/Night block above) re-strengthens
+   every glass surface app-wide without touching individual component rules. */
+html[data-bg-mode="photo"] {
+  --glass: rgba(10, 10, 10, 0.42);
+  --glass-strong: rgba(10, 10, 10, 0.58);
+  --glass-2: rgba(10, 10, 10, 0.3);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-border-strong: rgba(255, 255, 255, 0.3);
+}
+html[data-scheme="light"][data-bg-mode="photo"] {
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-strong: rgba(255, 255, 255, 0.8);
+  --glass-2: rgba(255, 255, 255, 0.46);
+  --glass-border: rgba(0, 0, 0, 0.16);
+  --glass-border-strong: rgba(0, 0, 0, 0.26);
+}
+
+/* Tile labels sit directly on the photo with no card behind them at all, so
+   they get their own small pill backdrop (using the strengthened variables
+   above) whenever a photo is active — guarantees legibility no matter what
+   colors happen to be in that particular photo, in both schemes. */
+html[data-bg-mode="photo"] .home-tile-label {
+  background: var(--glass-strong);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  padding: 3px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
 }
 
 /* APPEARANCE — in-app logo/header mark (Appearance panel: 3 SVG variants).

@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.37.0';
+const APP_VERSION = 'v3.37.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Color Theme is now available to everyone, even when the admin has Background set to Action photos — switch to your own solid color on just your device with the new Use my color / Use automatic toggle.';
+const APP_UPDATE_NOTES = 'Fixed poor text contrast over Action photos backgrounds in Light mode — the photo dims more, and the quote card and tile labels get a stronger backdrop so everything stays readable.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
