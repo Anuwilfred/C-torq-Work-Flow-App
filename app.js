@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.40.0';
+const APP_VERSION = 'v3.41.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Profit Analyzer now pulls Quoted price + role hours straight from the JOB DATA Google Sheet (no manual entry) via sync-job-hours. New role totals section: whole-project hours/cost per role (Engineer, Technician, Supervisor, Foreman, Manager, Lead, Sales, Estimation, Marketing, Engineering, Design, Driver…) compared against quoted hours, with a chart, and an efficiency bonus (hours + cost) automatically credited — split by hours logged — to whoever finishes a role under its quoted hours. Department tiles, extra costs, and payments unchanged.';
+const APP_UPDATE_NOTES = 'Profit Analyzer now shows Invest amount / Cost / Profit clearly: a new Invest amount breakdown (man hours + procurement + transportation & logistics + rent + interest — pick a category when logging an extra cost) with its own chart, plus a headline Quoted-vs-Invested-vs-Collected-vs-Profit bar. Department breakdown is a real tile grid, and Extra costs / Payments collected are tucked behind a Show/Hide toggle. Requires the accompanying SQL (adds project_extra_costs.category).';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2884,6 +2884,14 @@ document.addEventListener('touchend', () => { newsDragStartX = null; });
 // for the row rendering / per-row Access modal / Invite All logic — those
 // need FEATURE_LIST and fetchRoles(), defined just after this block).
 // =====================================================================
+
+// Cost categories for Profit Analyzer's "Invest amount" breakdown — man
+// hours is filled in automatically from the labor ledger; the rest are
+// picked when an admin logs an extra cost (project_extra_costs.category).
+const COST_CATEGORY_LABEL = {
+  man_hours: '👷 Man hours', procurement: '📦 Procurement', transportation_logistics: '🚚 Transportation & logistics',
+  rent: '🏠 Rent', interest: '🏦 Interest', other: '➕ Other',
+};
 
 const POSITION_LABEL = {
   engineer: 'Engineer', supervisor: 'Supervisor', foreman: 'Lead Foreman', technician: 'Technician', helper: 'Helper', other: 'Other',
@@ -8990,6 +8998,19 @@ async function fetchProjectCostBreakdown(jobId) {
   const collected = (payments || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalUsed = totalLaborCost + extraCostsTotal;
 
+  // Invest amount = everything the company has put into this job so far —
+  // man hours (automatic, from the ledger) plus every categorized extra
+  // cost (procurement, transportation & logistics, rent, interest, other).
+  const costByCategory = { man_hours: totalLaborCost, procurement: 0, transportation_logistics: 0, rent: 0, interest: 0, other: 0 };
+  (extraCosts || []).forEach((r) => {
+    const cat = COST_CATEGORY_LABEL[r.category] ? r.category : 'other';
+    costByCategory[cat] = (costByCategory[cat] || 0) + (Number(r.amount) || 0);
+  });
+  const investBreakdown = Object.entries(costByCategory)
+    .filter(([, amount]) => amount > 0)
+    .map(([category, amount]) => ({ category, label: COST_CATEGORY_LABEL[category] || category, amount }))
+    .sort((a, b) => b.amount - a.amount);
+
   return {
     jobId,
     quoted,
@@ -8999,6 +9020,7 @@ async function fetchProjectCostBreakdown(jobId) {
     extraCostsTotal,
     totalUsed,
     totalHours,
+    investBreakdown,
     profitActual: collected - totalUsed,
     profitProjected: quoted.amount - totalUsed,
     departments: Object.entries(deptBuckets)
@@ -9016,19 +9038,20 @@ async function fetchProjectCostBreakdown(jobId) {
 function profitDeptRowHtml(d) {
   const overBudget = d.allocated > 0 && d.hours > d.allocated;
   return `
-    <div class="card glass" style="margin-bottom:8px;">
-      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;">
+    <div class="profit-dept-tile">
+      <div class="profit-dept-tile-head">
         <strong style="font-size:13px;">${escapeHtml(d.name)}</strong>
-        <span class="hint">${d.hours.toFixed(1)}h${d.allocated ? ` / ${d.allocated.toFixed(1)}h budget` : ''} · ${formatUSD(d.cost)}</span>
+        <span class="hint">${d.hours.toFixed(1)}h${d.allocated ? ` / ${d.allocated.toFixed(1)}h budget` : ''}</span>
       </div>
-      ${overBudget ? `<div class="hint" style="color:#ff5470; margin-top:2px;">Over budget by ${(d.hours - d.allocated).toFixed(1)}h</div>` : ''}
-      <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;">
-        ${d.people.map((p) => `
-          <div style="display:flex; justify-content:space-between; font-size:12.5px; gap:8px;">
+      <div class="profit-dept-tile-cost" style="color:${overBudget ? '#ff5470' : '#39ffb0'};">${formatUSD(d.cost)}</div>
+      ${overBudget ? `<div class="hint" style="color:#ff5470;">Over budget by ${(d.hours - d.allocated).toFixed(1)}h</div>` : ''}
+      <div class="profit-dept-tile-people">
+        ${d.people.length ? d.people.map((p) => `
+          <div class="profit-dept-tile-person">
             <span>${escapeHtml(p.name)}</span>
             <span class="hint">${p.hours.toFixed(1)}h × ${formatUSD(p.rate)}/hr = ${formatUSD(p.cost)}</span>
           </div>
-        `).join('')}
+        `).join('') : '<div class="empty" style="padding:4px 0;">No one logged hours here yet.</div>'}
       </div>
     </div>
   `;
@@ -9068,11 +9091,12 @@ function profitRoleRowHtml(r) {
 }
 
 function profitExtraCostRowHtml(c) {
+  const catLabel = COST_CATEGORY_LABEL[c.category] || COST_CATEGORY_LABEL.other;
   return `
     <div class="entry" data-extra-cost="${c.id}">
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(c.description)}</div>
-        <div class="entry-meta">${formatUSD(c.amount)} · ${new Date(`${c.entry_date}T00:00:00`).toLocaleDateString()}</div>
+        <div class="entry-meta">${catLabel} · ${formatUSD(c.amount)} · ${new Date(`${c.entry_date}T00:00:00`).toLocaleDateString()}</div>
       </div>
       <button type="button" class="ghost" data-delete-extra-cost="${c.id}">✕</button>
     </div>
@@ -9094,55 +9118,114 @@ function profitPaymentRowHtml(p) {
 let profitDeptDoughnutChart = null;
 let profitDeptBarChart = null;
 let profitRoleBarChart = null;
+let profitSummaryBarChart = null;
+let profitInvestDoughnutChart = null;
+// Extra costs / Payments start collapsed — reduces clutter on the detail
+// screen since most of the time an admin is just checking the numbers, not
+// logging a new cost. Persisted at module scope so the collapse state
+// survives the re-render that happens after adding/deleting an entry.
+let profitExtraCostsExpanded = false;
+let profitPaymentsExpanded = false;
 
 function renderProfitCharts(data) {
-  const doughnutEl = $('profitDeptDoughnut');
-  const barEl = $('profitDeptBar');
-  if (typeof Chart === 'undefined' || !doughnutEl || !barEl) return;
+  if (typeof Chart === 'undefined') return;
   if (profitDeptDoughnutChart) { profitDeptDoughnutChart.destroy(); profitDeptDoughnutChart = null; }
   if (profitDeptBarChart) { profitDeptBarChart.destroy(); profitDeptBarChart = null; }
   if (profitRoleBarChart) { profitRoleBarChart.destroy(); profitRoleBarChart = null; }
+  if (profitSummaryBarChart) { profitSummaryBarChart.destroy(); profitSummaryBarChart = null; }
+  if (profitInvestDoughnutChart) { profitInvestDoughnutChart.destroy(); profitInvestDoughnutChart = null; }
 
   const palette = ['#39ffb0', '#4dabff', '#ffb84d', '#ff5470', '#b98bff', '#5df2c8', '#f2d94d', '#ff8a5c'];
+
+  // Single-project headline: Quoted / Invested / Collected / Profit, all in
+  // one glanceable bar — the "more graphs" the numbers alone don't give you.
+  const summaryBarEl = $('profitSummaryBar');
+  if (summaryBarEl) {
+    profitSummaryBarChart = new Chart(summaryBarEl.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ['Quoted', 'Invested', 'Collected', 'Profit'],
+        datasets: [{
+          data: [data.expected, data.totalUsed, data.collected, data.profitActual],
+          backgroundColor: ['#4dabff', '#ffb84d', '#39ffb0', data.profitActual >= 0 ? '#39ffb0' : '#ff5470'],
+        }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          title: { display: true, text: 'Quoted vs invested vs collected vs profit', color: '#cfe8ff' },
+        },
+        scales: {
+          x: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { ticks: { color: '#cfe8ff', callback: (v) => formatUSD(v) }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        },
+      },
+    });
+  }
+
+  // Invest amount breakdown by category — man hours vs procurement vs
+  // transportation & logistics vs rent vs interest vs other.
+  const investDoughnutEl = $('profitInvestDoughnut');
+  const investBreakdown = data.investBreakdown || [];
+  if (investDoughnutEl && investBreakdown.length) {
+    profitInvestDoughnutChart = new Chart(investDoughnutEl.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: investBreakdown.map((b) => b.label),
+        datasets: [{ data: investBreakdown.map((b) => b.amount), backgroundColor: investBreakdown.map((_, i) => palette[i % palette.length]), borderColor: 'rgba(10,10,20,0.6)', borderWidth: 1 }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
+          title: { display: true, text: 'Invest amount by category', color: '#cfe8ff' },
+        },
+      },
+    });
+  }
+
+  const doughnutEl = $('profitDeptDoughnut');
+  const barEl = $('profitDeptBar');
   const depts = data.departments;
-  if (!depts.length) return;
+  if (doughnutEl && barEl && depts.length) {
+    profitDeptDoughnutChart = new Chart(doughnutEl.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: depts.map((d) => d.name),
+        datasets: [{ data: depts.map((d) => d.cost), backgroundColor: depts.map((_, i) => palette[i % palette.length]), borderColor: 'rgba(10,10,20,0.6)', borderWidth: 1 }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
+          title: { display: true, text: 'Labor cost by department', color: '#cfe8ff' },
+        },
+      },
+    });
 
-  profitDeptDoughnutChart = new Chart(doughnutEl.getContext('2d'), {
-    type: 'doughnut',
-    data: {
-      labels: depts.map((d) => d.name),
-      datasets: [{ data: depts.map((d) => d.cost), backgroundColor: depts.map((_, i) => palette[i % palette.length]), borderColor: 'rgba(10,10,20,0.6)', borderWidth: 1 }],
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
-        title: { display: true, text: 'Labor cost by department', color: '#cfe8ff' },
+    profitDeptBarChart = new Chart(barEl.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: depts.map((d) => d.name),
+        datasets: [
+          { label: 'Budgeted hrs', data: depts.map((d) => d.allocated), backgroundColor: 'rgba(77,171,255,0.5)' },
+          { label: 'Used hrs', data: depts.map((d) => d.hours), backgroundColor: depts.map((d) => (d.allocated && d.hours > d.allocated ? '#ff5470' : '#39ffb0')) },
+        ],
       },
-    },
-  });
-
-  profitDeptBarChart = new Chart(barEl.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels: depts.map((d) => d.name),
-      datasets: [
-        { label: 'Budgeted hrs', data: depts.map((d) => d.allocated), backgroundColor: 'rgba(77,171,255,0.5)' },
-        { label: 'Used hrs', data: depts.map((d) => d.hours), backgroundColor: depts.map((d) => (d.allocated && d.hours > d.allocated ? '#ff5470' : '#39ffb0')) },
-      ],
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
-        title: { display: true, text: 'Budgeted vs used hours', color: '#cfe8ff' },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
+          title: { display: true, text: 'Budgeted vs used hours', color: '#cfe8ff' },
+        },
+        scales: {
+          x: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        },
       },
-      scales: {
-        x: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-        y: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-      },
-    },
-  });
+    });
+  }
 
   const roleBarEl = $('profitRoleBar');
   const roles = (data.roles || []).filter((r) => r.allocated > 0 || r.actualHours > 0);
@@ -9177,8 +9260,9 @@ function wireProfitDetailButtons(jobId, jobName) {
     const description = $('profitCostDesc').value.trim();
     const amount = parseFloat($('profitCostAmount').value) || 0;
     const entryDate = $('profitCostDate').value || new Date().toISOString().slice(0, 10);
+    const category = $('profitCostCategory')?.value || 'other';
     if (!description || amount <= 0) { showToast('Enter a description and an amount.'); return; }
-    const { error } = await sb.from('project_extra_costs').insert({ job_id: jobId, description, amount, entry_date: entryDate, created_by: currentUser?.id || null });
+    const { error } = await sb.from('project_extra_costs').insert({ job_id: jobId, description, amount, entry_date: entryDate, category, created_by: currentUser?.id || null });
     if (error) { showToast(`Couldn't add: ${error.message}`); return; }
     showToast('Cost added.');
     renderProfitDetail(jobId, jobName);
@@ -9233,7 +9317,7 @@ async function renderProfitDetail(jobId, jobName) {
         <div class="profit-stat-value" style="color:#39ffb0;">${formatUSD(data.collected)}</div>
       </div>
       <div class="profit-stat-card">
-        <div class="hint">📤 Used (labor + costs)</div>
+        <div class="hint">💰 Invest amount (labor + procurement + logistics + rent + interest)</div>
         <div class="profit-stat-value" style="color:#ffb84d;">${formatUSD(data.totalUsed)}</div>
       </div>
       <div class="profit-stat-card">
@@ -9244,45 +9328,89 @@ async function renderProfitDetail(jobId, jobName) {
     <p class="hint" style="margin-top:8px;">Projected profit if fully paid: <strong style="color:${projectedColor};">${formatUSD(data.profitProjected)}</strong> · Labor cost: ${formatUSD(data.totalLaborCost)} (${data.totalHours.toFixed(1)}h) · Extra costs: ${formatUSD(data.extraCostsTotal)}</p>
 
     <div class="profit-chart-row">
+      <div class="profit-chart-card"><canvas id="profitSummaryBar" height="220"></canvas></div>
+      <div class="profit-chart-card"><canvas id="profitInvestDoughnut" height="220"></canvas></div>
+    </div>
+
+    <div style="margin-top:18px;">
+      <strong style="font-size:14px;">💰 Invest amount — where the money went</strong>
+      <p class="hint" style="margin-top:2px;">Man hours is automatic from logged hours. Procurement, transportation &amp; logistics, rent, and interest come from the categorized costs you log below.</p>
+      <div id="profitInvestList" style="margin-top:8px; display:flex; flex-direction:column; gap:4px;">
+        ${(data.investBreakdown || []).length ? data.investBreakdown.map((b) => `
+          <div style="display:flex; justify-content:space-between; font-size:13px; gap:8px;">
+            <span>${b.label}</span>
+            <span class="hint">${formatUSD(b.amount)}</span>
+          </div>
+        `).join('') : '<div class="empty">Nothing invested yet.</div>'}
+      </div>
+    </div>
+
+    <div class="profit-chart-row">
       <div class="profit-chart-card"><canvas id="profitDeptDoughnut" height="220"></canvas></div>
       <div class="profit-chart-card"><canvas id="profitDeptBar" height="220"></canvas></div>
     </div>
 
     <div style="margin-top:18px;">
-      <strong style="font-size:14px;">👷 Department &amp; person breakdown</strong>
-      <div id="profitDeptList" style="margin-top:8px;">${data.departments.length ? data.departments.map(profitDeptRowHtml).join('') : '<div class="empty">No hours logged yet.</div>'}</div>
+      <strong style="font-size:14px;">👷 Department tiles — who spent what</strong>
+      <div id="profitDeptList" class="profit-dept-grid" style="margin-top:8px;">${data.departments.length ? data.departments.map(profitDeptRowHtml).join('') : '<div class="empty">No hours logged yet.</div>'}</div>
     </div>
 
     <div style="margin-top:20px;">
       <strong style="font-size:14px;">🧮 Role totals, quoted-vs-actual &amp; bonus</strong>
       <p class="hint" style="margin-top:2px;">Whole-project totals per role (Engineer, Technician, Supervisor, Foreman, Manager…), compared against the hours quoted for that role in the JOB DATA sheet. A role that finishes under its quoted hours turns the saved time into a bonus, split by hours logged among the people who worked it.</p>
       <div class="profit-chart-card" style="margin-top:10px;"><canvas id="profitRoleBar" height="220"></canvas></div>
-      <div id="profitRoleList" style="margin-top:8px;">${(data.roles || []).length ? data.roles.map(profitRoleRowHtml).join('') : '<div class="empty">No role budget or hours yet.</div>'}</div>
+      <div id="profitRoleList" style="margin-top:8px;">${(data.roles || []).length ? data.roles.map(profitRoleRowHtml).join('') : '<div class="empty">No role budget or hours yet — fill in the JOB DATA sheet and refresh from Data Feed.</div>'}</div>
     </div>
 
     <div style="margin-top:20px;">
-      <strong style="font-size:14px;">➕ Extra costs</strong>
-      <p class="hint" style="margin-top:2px;">Materials, subcontractor, equipment, or any other project spend outside labor.</p>
-      <div class="location-row" style="margin-top:8px;">
-        <input id="profitCostDesc" type="text" placeholder="Description" style="flex:2 1 160px;" />
-        <input id="profitCostAmount" type="number" min="0" step="0.01" placeholder="Amount" style="flex:1 1 100px;" />
-        <input id="profitCostDate" type="date" style="flex:1 1 130px;" />
-        <button type="button" id="profitAddCostBtn" class="secondary">+ Add</button>
+      <button type="button" class="secondary" id="profitExtraCostsToggle" style="width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center;">
+        <span><strong style="font-size:14px;">➕ Extra costs</strong> <span class="hint">(${data.extraCosts.length})</span></span>
+        <span>${profitExtraCostsExpanded ? '▾ Hide' : '▸ Show'}</span>
+      </button>
+      <div id="profitExtraCostsBody" style="display:${profitExtraCostsExpanded ? 'block' : 'none'}; margin-top:8px;">
+        <p class="hint">Procurement, transportation &amp; logistics, rent, interest, or any other project spend outside labor.</p>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="profitCostDesc" type="text" placeholder="Description" style="flex:2 1 160px;" />
+          <select id="profitCostCategory" style="flex:1 1 150px;">
+            <option value="procurement">📦 Procurement</option>
+            <option value="transportation_logistics">🚚 Transportation &amp; logistics</option>
+            <option value="rent">🏠 Rent</option>
+            <option value="interest">🏦 Interest</option>
+            <option value="other" selected>➕ Other</option>
+          </select>
+          <input id="profitCostAmount" type="number" min="0" step="0.01" placeholder="Amount" style="flex:1 1 100px;" />
+          <input id="profitCostDate" type="date" style="flex:1 1 130px;" />
+          <button type="button" id="profitAddCostBtn" class="secondary">+ Add</button>
+        </div>
+        <div id="profitCostList" style="margin-top:8px;">${data.extraCosts.length ? data.extraCosts.map(profitExtraCostRowHtml).join('') : '<div class="empty">None logged yet.</div>'}</div>
       </div>
-      <div id="profitCostList" style="margin-top:8px;">${data.extraCosts.length ? data.extraCosts.map(profitExtraCostRowHtml).join('') : '<div class="empty">None logged yet.</div>'}</div>
     </div>
 
     <div style="margin-top:20px;">
-      <strong style="font-size:14px;">💳 Payments collected</strong>
-      <div class="location-row" style="margin-top:8px;">
-        <input id="profitPayAmount" type="number" min="0" step="0.01" placeholder="Amount" style="flex:1 1 100px;" />
-        <input id="profitPayDate" type="date" style="flex:1 1 130px;" />
-        <input id="profitPayNote" type="text" placeholder="Note (optional)" style="flex:2 1 160px;" />
-        <button type="button" id="profitAddPaymentBtn" class="secondary">+ Log</button>
+      <button type="button" class="secondary" id="profitPaymentsToggle" style="width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center;">
+        <span><strong style="font-size:14px;">💳 Payments collected</strong> <span class="hint">(${data.payments.length})</span></span>
+        <span>${profitPaymentsExpanded ? '▾ Hide' : '▸ Show'}</span>
+      </button>
+      <div id="profitPaymentsBody" style="display:${profitPaymentsExpanded ? 'block' : 'none'}; margin-top:8px;">
+        <div class="location-row">
+          <input id="profitPayAmount" type="number" min="0" step="0.01" placeholder="Amount" style="flex:1 1 100px;" />
+          <input id="profitPayDate" type="date" style="flex:1 1 130px;" />
+          <input id="profitPayNote" type="text" placeholder="Note (optional)" style="flex:2 1 160px;" />
+          <button type="button" id="profitAddPaymentBtn" class="secondary">+ Log</button>
+        </div>
+        <div id="profitPaymentList" style="margin-top:8px;">${data.payments.length ? data.payments.map(profitPaymentRowHtml).join('') : '<div class="empty">None logged yet.</div>'}</div>
       </div>
-      <div id="profitPaymentList" style="margin-top:8px;">${data.payments.length ? data.payments.map(profitPaymentRowHtml).join('') : '<div class="empty">None logged yet.</div>'}</div>
     </div>
   `;
+
+  $('profitExtraCostsToggle')?.addEventListener('click', () => {
+    profitExtraCostsExpanded = !profitExtraCostsExpanded;
+    renderProfitDetail(jobId, jobName);
+  });
+  $('profitPaymentsToggle')?.addEventListener('click', () => {
+    profitPaymentsExpanded = !profitPaymentsExpanded;
+    renderProfitDetail(jobId, jobName);
+  });
 
   wireProfitDetailButtons(jobId, jobName);
   renderProfitCharts(data);
