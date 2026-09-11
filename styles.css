@@ -2769,6 +2769,54 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .renewal-hud .renewal-person-doc-label,
 .renewal-hud .renewal-person-doc-date,
 .renewal-hud strong { color: #39ffb0; }
+.home-tile-icon-profit {
+  background: linear-gradient(160deg, rgba(57, 255, 176, 0.28), rgba(20, 176, 120, 0.14));
+  border-color: rgba(57, 255, 176, 0.55);
+  box-shadow: 0 6px 16px rgba(57, 255, 176, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile:hover .home-tile-icon-profit,
+.home-tile:active .home-tile-icon-profit { box-shadow: 0 10px 22px rgba(57, 255, 176, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+
+/* ---------- Profit Analyzer ---------- */
+.profit-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (min-width: 560px) {
+  .profit-stat-grid { grid-template-columns: repeat(4, 1fr); }
+}
+.profit-stat-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.profit-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.profit-chart-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+@media (min-width: 720px) {
+  .profit-chart-row { grid-template-columns: 1fr 1fr; }
+}
+.profit-chart-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 10px;
+  position: relative;
+  height: 240px;
+}
+.profit-panel .location-row select,
+.profit-panel .location-row input { flex: 1 1 100px; }
+
 .home-tile-icon-tank {
   background: linear-gradient(160deg, rgba(90, 170, 224, 0.28), rgba(50, 120, 176, 0.14));
   border-color: rgba(90, 170, 224, 0.55);

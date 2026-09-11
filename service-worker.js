@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.38.0';
+const CACHE_NAME = 'ctorq-workflow-v3.39.0';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 // Resumable/chunked uploads for larger chat attachments (photos/videos) —
 // see the TUS_UPLOAD block in app.js for how this is used.
@@ -8,6 +8,8 @@ const TUS_SDK_URL = 'https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.j
 // static-map approach for that screen).
 const LEAFLET_JS_URL = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
 const LEAFLET_CSS_URL = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';
+// Profit Analyzer's line/bar/doughnut charts.
+const CHARTJS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
 // RELIABILITY FIX #3: an installed app (tapped from the home screen / Start
 // Menu icon) opens through this service worker on every single launch, not
 // just on refresh. The previous version made every launch wait on the real
@@ -35,6 +37,7 @@ const STATIC_ASSETS = [
   TUS_SDK_URL,
   LEAFLET_JS_URL,
   LEAFLET_CSS_URL,
+  CHARTJS_URL,
 ];
 
 // BUG FIX: cache.add(url) does a normal fetch, which happily reuses whatever
@@ -86,7 +89,7 @@ self.addEventListener('fetch', (event) => {
   const reqUrl = event.request.url;
   const url = new URL(reqUrl);
   const isAppShell = url.origin === self.location.origin;
-  const isThirdPartySdk = reqUrl === SUPABASE_SDK_URL || reqUrl === TUS_SDK_URL || reqUrl === LEAFLET_JS_URL || reqUrl === LEAFLET_CSS_URL;
+  const isThirdPartySdk = reqUrl === SUPABASE_SDK_URL || reqUrl === TUS_SDK_URL || reqUrl === LEAFLET_JS_URL || reqUrl === LEAFLET_CSS_URL || reqUrl === CHARTJS_URL;
   if (!isAppShell && !isThirdPartySdk) return; // don't touch Supabase auth/API/Edge Function calls, or the large-file upload traffic itself
 
   const isStatic = STATIC_ASSETS.some((a) => reqUrl === a || reqUrl.endsWith(a.replace('./', '')));

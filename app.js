@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.38.0';
+const APP_VERSION = 'v3.39.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Renewal Manager can now be delegated: anyone granted the "renewal" Map Access feature gets full renew/edit/delete access to every employee\'s documents (not just the tile), matching an admin. Every edit now writes to a private history so admins can see who changed what. Requires the accompanying Supabase SQL migration to be run for the delegated access to actually take effect.';
+const APP_UPDATE_NOTES = 'New: Profit Analyzer — search any project to see its quoted price, labor cost by department/person (using each person\'s hourly rate from Data Feed), extra costs, payments collected, and profit, with charts. Also shows a company-wide profit trend over any year range you pick. Set hourly rates for people in Data Feed. Requires the accompanying Supabase SQL migration to be run first.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2932,6 +2932,7 @@ const FEATURE_LIST = [
   { key: 'appearance', label: 'Appearance (theme, background, daily quote)' },
   { key: 'renewal', label: 'My Document Renewal Status (AEON Ai can tell them their own passport, visa, work permit and other document expiry — never anyone else\'s)' },
   { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
+  { key: 'profit', label: 'Profit Analyzer (project cost/profit breakdown, hourly rates, payments)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -4843,6 +4844,62 @@ async function renderDepartmentHeadsList() {
   });
 }
 
+// ---------- Hourly Rates (Data Feed → feeds Profit Analyzer) ----------
+let hourlyRatePeopleCache = [];
+let hourlyRateFilterQuery = '';
+async function renderHourlyRateList() {
+  const box = $('hourlyRateList');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: people, error } = await sb.from('profiles')
+    .select('id, email, full_name, hourly_rate, status')
+    .eq('status', 'active')
+    .order('full_name', { ascending: true });
+  if (error) {
+    box.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  hourlyRatePeopleCache = people || [];
+  renderHourlyRateListFiltered();
+}
+function renderHourlyRateListFiltered() {
+  const box = $('hourlyRateList');
+  if (!box) return;
+  const q = hourlyRateFilterQuery.trim().toLowerCase();
+  const rows = q
+    ? hourlyRatePeopleCache.filter((p) => (p.full_name || p.email || '').toLowerCase().includes(q))
+    : hourlyRatePeopleCache;
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">No one matches that search.</div>';
+    return;
+  }
+  box.innerHTML = rows.map((p) => `
+    <div class="jobdesc-row">
+      <span class="jobdesc-label" style="flex:1 1 160px;">${escapeHtml(p.full_name || p.email)}</span>
+      <span class="hint" style="flex:0 0 auto;">$</span>
+      <input type="number" min="0" step="0.01" data-hourly-rate="${p.id}" value="${Number(p.hourly_rate || 0)}" style="flex:1 1 100px; max-width:110px;" />
+      <span class="hint" style="flex:0 0 auto;">/hr</span>
+    </div>
+  `).join('');
+  box.querySelectorAll('[data-hourly-rate]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const val = Math.max(0, Number(input.value) || 0);
+      input.value = val;
+      const { error: updErr } = await sb.from('profiles').update({ hourly_rate: val }).eq('id', input.dataset.hourlyRate);
+      if (updErr) { showToast(`Couldn't save: ${updErr.message}`); return; }
+      const person = hourlyRatePeopleCache.find((p) => p.id === input.dataset.hourlyRate);
+      if (person) person.hourly_rate = val;
+      showToast(`Saved — ${person?.full_name || person?.email || 'their'} rate is now $${val.toFixed(2)}/hr.`);
+    });
+  });
+}
+if ($('hourlyRateSearch')) {
+  $('hourlyRateSearch').addEventListener('input', (e) => {
+    hourlyRateFilterQuery = e.target.value;
+    renderHourlyRateListFiltered();
+  });
+}
+
 $('addStageTemplateBtn')?.addEventListener('click', async () => {
   const labelInput = $('newStageLabel');
   const deptSelect = $('newStageDepartment');
@@ -5139,6 +5196,8 @@ const PANEL_IDS = {
   clients: ['clientsOverlay', 'clientsOverlayBackdrop'],
   quotations: ['quotationsOverlay', 'quotationsOverlayBackdrop'],
   quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
+  profitAnalyzer: ['profitAnalyzerOverlay', 'profitAnalyzerOverlayBackdrop'],
+  profitDetail: ['profitDetailOverlay', 'profitDetailOverlayBackdrop'],
   renewalManager: ['renewalManagerOverlay', 'renewalManagerOverlayBackdrop'],
   renewalEdit: ['renewalEditOverlay', 'renewalEditOverlayBackdrop'],
   renewalHistory: ['renewalHistoryOverlay', 'renewalHistoryOverlayBackdrop'],
@@ -5192,6 +5251,10 @@ function openPanel(name, opts = {}) {
   if (name === 'renewalManager') {
     renderRenewalManager();
   }
+  if (name === 'profitAnalyzer') {
+    renderProfitAnalyzerList();
+    renderCompanyProfitAnalysis();
+  }
   if (name === 'allocation') {
     openAllocationPanel();
   }
@@ -5222,6 +5285,7 @@ function openPanel(name, opts = {}) {
     populateStageDepartmentSelect();
     renderProjectStageTemplateList();
     renderDepartmentHeadsList();
+    renderHourlyRateList();
   }
 }
 function closePanel(name) {
@@ -8720,6 +8784,502 @@ if ($('addBoqItemBtn')) {
     ['boqItemDescription', 'boqItemUnit', 'boqItemQuantity', 'boqItemRate'].forEach((id) => { $(id).value = ''; });
     renderBoq(jobId);
   });
+}
+
+// =====================================================================
+// PROFIT ANALYZER — quoted price vs. what's actually been spent/collected
+// on a project, broken down by department and person (hours × hourly_rate
+// from Data Feed), plus a company-wide profit trend over a chosen year
+// range. Charts use Chart.js (loaded via CDN in index.html, cached by the
+// service worker like the other third-party libs).
+// =====================================================================
+
+function formatUSD(n) {
+  const num = Number(n) || 0;
+  const sign = num < 0 ? '-' : '';
+  return `${sign}$${Math.abs(num).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// PostgREST caps a single response at 1000 rows by default — fine for one
+// project's ledger rows, not safe to assume for a company-wide, multi-year
+// query. This pages through with .range() until a short page confirms
+// there's nothing left, same idea as sync-to-drive's own pagination.
+async function fetchAllPaginated(table, selectStr, applyFilters) {
+  let all = [];
+  let from = 0;
+  const pageSize = 1000;
+  for (;;) {
+    let q = sb.from(table).select(selectStr).range(from, from + pageSize - 1);
+    if (applyFilters) q = applyFilters(q);
+    const { data, error } = await q;
+    if (error) { console.error(`fetchAllPaginated(${table}) failed:`, error); break; }
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+// Quoted price: prefers the accepted Quotation for this job (falling back
+// to the most recent Quotation of any status), and falls back to the BOQ
+// total if this job has no Quotation at all — some projects are quoted one
+// way, some the other.
+async function fetchQuotedPrice(jobId) {
+  const { data: quotes } = await sb.from('quotations')
+    .select('id, status, issue_date')
+    .eq('job_id', jobId)
+    .order('issue_date', { ascending: false });
+  if (quotes && quotes.length) {
+    const chosen = quotes.find((q) => q.status === 'accepted') || quotes[0];
+    const { data: items } = await sb.from('quotation_items').select('quantity, unit_price').eq('quotation_id', chosen.id);
+    const amount = (items || []).reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
+    return { source: 'quotation', amount };
+  }
+  const { data: boq } = await sb.from('boq_items').select('quantity, unit_rate').eq('job_id', jobId);
+  if (boq && boq.length) {
+    const amount = boq.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_rate) || 0), 0);
+    return { source: 'boq', amount };
+  }
+  return { source: null, amount: 0 };
+}
+
+async function fetchProjectCostBreakdown(jobId) {
+  const [
+    { data: ledgerRows },
+    { data: allocRows },
+    { data: depts },
+    { data: people },
+    quoted,
+    { data: extraCosts },
+    { data: payments },
+  ] = await Promise.all([
+    sb.from('job_hours_ledger').select('person_id, department_id, hours').eq('job_id', jobId),
+    sb.from('project_department_hours').select('department_id, allocated_hours').eq('job_id', jobId),
+    sb.from('departments').select('id, name'),
+    sb.from('profiles').select('id, full_name, email, hourly_rate'),
+    fetchQuotedPrice(jobId),
+    sb.from('project_extra_costs').select('*').eq('job_id', jobId).order('entry_date', { ascending: false }),
+    sb.from('project_payments').select('*').eq('job_id', jobId).order('entry_date', { ascending: false }),
+  ]);
+
+  const peopleMap = new Map((people || []).map((p) => [p.id, p]));
+  const deptMap = new Map((depts || []).map((d) => [d.id, d.name]));
+  const allocByDept = {};
+  (allocRows || []).forEach((r) => {
+    allocByDept[r.department_id] = (allocByDept[r.department_id] || 0) + (Number(r.allocated_hours) || 0);
+  });
+
+  const deptBuckets = {};
+  let totalLaborCost = 0;
+  let totalHours = 0;
+  (ledgerRows || []).forEach((row) => {
+    const deptId = row.department_id || '_none';
+    const person = peopleMap.get(row.person_id);
+    const rate = Number(person?.hourly_rate || 0);
+    const hours = Number(row.hours) || 0;
+    const cost = hours * rate;
+    totalLaborCost += cost;
+    totalHours += hours;
+    if (!deptBuckets[deptId]) {
+      deptBuckets[deptId] = { name: deptMap.get(deptId) || 'Unassigned', hours: 0, cost: 0, allocated: allocByDept[deptId] || 0, people: new Map() };
+    }
+    const bucket = deptBuckets[deptId];
+    bucket.hours += hours;
+    bucket.cost += cost;
+    const key = row.person_id || 'unknown';
+    if (!bucket.people.has(key)) bucket.people.set(key, { name: person?.full_name || person?.email || 'Unknown', hours: 0, rate, cost: 0 });
+    const pRec = bucket.people.get(key);
+    pRec.hours += hours;
+    pRec.cost += cost;
+  });
+
+  const extraCostsTotal = (extraCosts || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const collected = (payments || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalUsed = totalLaborCost + extraCostsTotal;
+
+  return {
+    jobId,
+    quoted,
+    expected: quoted.amount,
+    collected,
+    totalLaborCost,
+    extraCostsTotal,
+    totalUsed,
+    totalHours,
+    profitActual: collected - totalUsed,
+    profitProjected: quoted.amount - totalUsed,
+    departments: Object.entries(deptBuckets)
+      .map(([id, b]) => ({
+        id, name: b.name, hours: b.hours, cost: b.cost, allocated: b.allocated,
+        people: [...b.people.values()].sort((a, b2) => b2.cost - a.cost),
+      }))
+      .sort((a, b) => b.cost - a.cost),
+    extraCosts: extraCosts || [],
+    payments: payments || [],
+  };
+}
+
+function profitDeptRowHtml(d) {
+  const overBudget = d.allocated > 0 && d.hours > d.allocated;
+  return `
+    <div class="card glass" style="margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;">
+        <strong style="font-size:13px;">${escapeHtml(d.name)}</strong>
+        <span class="hint">${d.hours.toFixed(1)}h${d.allocated ? ` / ${d.allocated.toFixed(1)}h budget` : ''} · ${formatUSD(d.cost)}</span>
+      </div>
+      ${overBudget ? `<div class="hint" style="color:#ff5470; margin-top:2px;">Over budget by ${(d.hours - d.allocated).toFixed(1)}h</div>` : ''}
+      <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;">
+        ${d.people.map((p) => `
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; gap:8px;">
+            <span>${escapeHtml(p.name)}</span>
+            <span class="hint">${p.hours.toFixed(1)}h × ${formatUSD(p.rate)}/hr = ${formatUSD(p.cost)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function profitExtraCostRowHtml(c) {
+  return `
+    <div class="entry" data-extra-cost="${c.id}">
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(c.description)}</div>
+        <div class="entry-meta">${formatUSD(c.amount)} · ${new Date(`${c.entry_date}T00:00:00`).toLocaleDateString()}</div>
+      </div>
+      <button type="button" class="ghost" data-delete-extra-cost="${c.id}">✕</button>
+    </div>
+  `;
+}
+
+function profitPaymentRowHtml(p) {
+  return `
+    <div class="entry" data-payment="${p.id}">
+      <div class="entry-body">
+        <div class="entry-desc">${formatUSD(p.amount)}${p.note ? ` — ${escapeHtml(p.note)}` : ''}</div>
+        <div class="entry-meta">${new Date(`${p.entry_date}T00:00:00`).toLocaleDateString()}</div>
+      </div>
+      <button type="button" class="ghost" data-delete-payment="${p.id}">✕</button>
+    </div>
+  `;
+}
+
+let profitDeptDoughnutChart = null;
+let profitDeptBarChart = null;
+
+function renderProfitCharts(data) {
+  const doughnutEl = $('profitDeptDoughnut');
+  const barEl = $('profitDeptBar');
+  if (typeof Chart === 'undefined' || !doughnutEl || !barEl) return;
+  if (profitDeptDoughnutChart) { profitDeptDoughnutChart.destroy(); profitDeptDoughnutChart = null; }
+  if (profitDeptBarChart) { profitDeptBarChart.destroy(); profitDeptBarChart = null; }
+
+  const palette = ['#39ffb0', '#4dabff', '#ffb84d', '#ff5470', '#b98bff', '#5df2c8', '#f2d94d', '#ff8a5c'];
+  const depts = data.departments;
+  if (!depts.length) return;
+
+  profitDeptDoughnutChart = new Chart(doughnutEl.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: depts.map((d) => d.name),
+      datasets: [{ data: depts.map((d) => d.cost), backgroundColor: depts.map((_, i) => palette[i % palette.length]), borderColor: 'rgba(10,10,20,0.6)', borderWidth: 1 }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
+        title: { display: true, text: 'Labor cost by department', color: '#cfe8ff' },
+      },
+    },
+  });
+
+  profitDeptBarChart = new Chart(barEl.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: depts.map((d) => d.name),
+      datasets: [
+        { label: 'Budgeted hrs', data: depts.map((d) => d.allocated), backgroundColor: 'rgba(77,171,255,0.5)' },
+        { label: 'Used hrs', data: depts.map((d) => d.hours), backgroundColor: depts.map((d) => (d.allocated && d.hours > d.allocated ? '#ff5470' : '#39ffb0')) },
+      ],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
+        title: { display: true, text: 'Budgeted vs used hours', color: '#cfe8ff' },
+      },
+      scales: {
+        x: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        y: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+      },
+    },
+  });
+}
+
+function wireProfitDetailButtons(jobId, jobName) {
+  const addCostBtn = $('profitAddCostBtn');
+  if (addCostBtn) addCostBtn.addEventListener('click', async () => {
+    const description = $('profitCostDesc').value.trim();
+    const amount = parseFloat($('profitCostAmount').value) || 0;
+    const entryDate = $('profitCostDate').value || new Date().toISOString().slice(0, 10);
+    if (!description || amount <= 0) { showToast('Enter a description and an amount.'); return; }
+    const { error } = await sb.from('project_extra_costs').insert({ job_id: jobId, description, amount, entry_date: entryDate, created_by: currentUser?.id || null });
+    if (error) { showToast(`Couldn't add: ${error.message}`); return; }
+    showToast('Cost added.');
+    renderProfitDetail(jobId, jobName);
+  });
+
+  const addPayBtn = $('profitAddPaymentBtn');
+  if (addPayBtn) addPayBtn.addEventListener('click', async () => {
+    const amount = parseFloat($('profitPayAmount').value) || 0;
+    const entryDate = $('profitPayDate').value || new Date().toISOString().slice(0, 10);
+    const note = $('profitPayNote').value.trim() || null;
+    if (amount <= 0) { showToast('Enter an amount.'); return; }
+    const { error } = await sb.from('project_payments').insert({ job_id: jobId, amount, entry_date: entryDate, note, created_by: currentUser?.id || null });
+    if (error) { showToast(`Couldn't log payment: ${error.message}`); return; }
+    showToast('Payment logged.');
+    renderProfitDetail(jobId, jobName);
+  });
+
+  document.querySelectorAll('[data-delete-extra-cost]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this cost entry?')) return;
+      await sb.from('project_extra_costs').delete().eq('id', btn.dataset.deleteExtraCost);
+      renderProfitDetail(jobId, jobName);
+    });
+  });
+  document.querySelectorAll('[data-delete-payment]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this payment record?')) return;
+      await sb.from('project_payments').delete().eq('id', btn.dataset.deletePayment);
+      renderProfitDetail(jobId, jobName);
+    });
+  });
+}
+
+async function renderProfitDetail(jobId, jobName) {
+  if ($('profitDetailTitle')) $('profitDetailTitle').textContent = jobName || jobId;
+  const body = $('profitDetailBody');
+  if (body) body.innerHTML = '<div class="empty">Loading…</div>';
+  const data = await fetchProjectCostBreakdown(jobId);
+  if (!body) return;
+
+  const profitColor = data.profitActual >= 0 ? '#39ffb0' : '#ff5470';
+  const projectedColor = data.profitProjected >= 0 ? '#39ffb0' : '#ff5470';
+
+  body.innerHTML = `
+    <div class="profit-stat-grid">
+      <div class="profit-stat-card">
+        <div class="hint">💵 Quoted price${data.quoted.source ? ` (${data.quoted.source === 'quotation' ? 'Quotation' : 'BOQ'})` : ''}</div>
+        <div class="profit-stat-value">${formatUSD(data.expected)}</div>
+      </div>
+      <div class="profit-stat-card">
+        <div class="hint">📥 Collected</div>
+        <div class="profit-stat-value" style="color:#39ffb0;">${formatUSD(data.collected)}</div>
+      </div>
+      <div class="profit-stat-card">
+        <div class="hint">📤 Used (labor + costs)</div>
+        <div class="profit-stat-value" style="color:#ffb84d;">${formatUSD(data.totalUsed)}</div>
+      </div>
+      <div class="profit-stat-card">
+        <div class="hint">${data.profitActual >= 0 ? '📈' : '📉'} Profit so far</div>
+        <div class="profit-stat-value" style="color:${profitColor};">${formatUSD(data.profitActual)}</div>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:8px;">Projected profit if fully paid: <strong style="color:${projectedColor};">${formatUSD(data.profitProjected)}</strong> · Labor cost: ${formatUSD(data.totalLaborCost)} (${data.totalHours.toFixed(1)}h) · Extra costs: ${formatUSD(data.extraCostsTotal)}</p>
+
+    <div class="profit-chart-row">
+      <div class="profit-chart-card"><canvas id="profitDeptDoughnut" height="220"></canvas></div>
+      <div class="profit-chart-card"><canvas id="profitDeptBar" height="220"></canvas></div>
+    </div>
+
+    <div style="margin-top:18px;">
+      <strong style="font-size:14px;">👷 Department &amp; person breakdown</strong>
+      <div id="profitDeptList" style="margin-top:8px;">${data.departments.length ? data.departments.map(profitDeptRowHtml).join('') : '<div class="empty">No hours logged yet.</div>'}</div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <strong style="font-size:14px;">➕ Extra costs</strong>
+      <p class="hint" style="margin-top:2px;">Materials, subcontractor, equipment, or any other project spend outside labor.</p>
+      <div class="location-row" style="margin-top:8px;">
+        <input id="profitCostDesc" type="text" placeholder="Description" style="flex:2 1 160px;" />
+        <input id="profitCostAmount" type="number" min="0" step="0.01" placeholder="Amount" style="flex:1 1 100px;" />
+        <input id="profitCostDate" type="date" style="flex:1 1 130px;" />
+        <button type="button" id="profitAddCostBtn" class="secondary">+ Add</button>
+      </div>
+      <div id="profitCostList" style="margin-top:8px;">${data.extraCosts.length ? data.extraCosts.map(profitExtraCostRowHtml).join('') : '<div class="empty">None logged yet.</div>'}</div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <strong style="font-size:14px;">💳 Payments collected</strong>
+      <div class="location-row" style="margin-top:8px;">
+        <input id="profitPayAmount" type="number" min="0" step="0.01" placeholder="Amount" style="flex:1 1 100px;" />
+        <input id="profitPayDate" type="date" style="flex:1 1 130px;" />
+        <input id="profitPayNote" type="text" placeholder="Note (optional)" style="flex:2 1 160px;" />
+        <button type="button" id="profitAddPaymentBtn" class="secondary">+ Log</button>
+      </div>
+      <div id="profitPaymentList" style="margin-top:8px;">${data.payments.length ? data.payments.map(profitPaymentRowHtml).join('') : '<div class="empty">None logged yet.</div>'}</div>
+    </div>
+  `;
+
+  wireProfitDetailButtons(jobId, jobName);
+  renderProfitCharts(data);
+}
+
+function openProfitDetail(jobId, jobName) {
+  openPanel('profitDetail');
+  renderProfitDetail(jobId, jobName);
+}
+if ($('profitDetailBackBtn')) {
+  $('profitDetailBackBtn').addEventListener('click', () => { closePanel('profitDetail'); openPanel('profitAnalyzer'); });
+}
+
+let profitProjectsCache = [];
+let profitSearchQuery = '';
+async function renderProfitAnalyzerList() {
+  const box = $('profitProjectList');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">Loading…</div>';
+  const { rows, error } = await fetchProjects();
+  if (error) { box.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  profitProjectsCache = rows;
+  renderProfitAnalyzerListFiltered();
+}
+function renderProfitAnalyzerListFiltered() {
+  const box = $('profitProjectList');
+  if (!box) return;
+  const q = profitSearchQuery.trim().toLowerCase();
+  const rows = q
+    ? profitProjectsCache.filter((p) => (p.job_id || '').toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q))
+    : profitProjectsCache;
+  if (!rows.length) { box.innerHTML = '<div class="empty">No projects match.</div>'; return; }
+  box.innerHTML = rows.map((p) => `
+    <div class="entry" data-profit-project="${escapeHtml(p.job_id)}" style="cursor:pointer;">
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(p.name || p.job_id)}</div>
+        <div class="entry-meta">${escapeHtml(p.job_id)}${p.client ? ` · ${escapeHtml(p.client)}` : ''} · ${escapeHtml(p.status || '')}</div>
+      </div>
+      <span class="hint">View →</span>
+    </div>
+  `).join('');
+  box.querySelectorAll('[data-profit-project]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const p = profitProjectsCache.find((row) => row.job_id === el.dataset.profitProject);
+      openProfitDetail(el.dataset.profitProject, p?.name);
+    });
+  });
+}
+if ($('profitProjectSearch')) {
+  $('profitProjectSearch').addEventListener('input', (e) => {
+    profitSearchQuery = e.target.value;
+    renderProfitAnalyzerListFiltered();
+  });
+}
+
+// ---------- Company-wide profit analysis (year range) ----------
+let companyProfitChart = null;
+function populateProfitYearSelects() {
+  const fromSel = $('profitYearFrom');
+  const toSel = $('profitYearTo');
+  if (!fromSel || !toSel || fromSel.options.length) return;
+  const nowYear = new Date().getFullYear();
+  const years = [];
+  for (let y = nowYear; y >= nowYear - 6; y--) years.push(y);
+  const optsHtml = years.map((y) => `<option value="${y}">${y}</option>`).join('');
+  fromSel.innerHTML = optsHtml;
+  toSel.innerHTML = optsHtml;
+  fromSel.value = String(nowYear);
+  toSel.value = String(nowYear);
+}
+
+async function renderCompanyProfitAnalysis() {
+  populateProfitYearSelects();
+  const fromYear = Number($('profitYearFrom')?.value) || new Date().getFullYear();
+  const toYear = Number($('profitYearTo')?.value) || fromYear;
+  const lowYear = Math.min(fromYear, toYear);
+  const highYear = Math.max(fromYear, toYear);
+  const startDate = `${lowYear}-01-01`;
+  const endDate = `${highYear}-12-31`;
+
+  const summaryBox = $('profitCompanySummary');
+  if (summaryBox) summaryBox.innerHTML = '<div class="empty">Loading…</div>';
+
+  const [ledgerRows, payments, extraCosts, peopleRes] = await Promise.all([
+    fetchAllPaginated('job_hours_ledger', 'person_id, hours, entry_date', (q) => q.gte('entry_date', startDate).lte('entry_date', endDate)),
+    fetchAllPaginated('project_payments', 'amount, entry_date', (q) => q.gte('entry_date', startDate).lte('entry_date', endDate)),
+    fetchAllPaginated('project_extra_costs', 'amount, entry_date', (q) => q.gte('entry_date', startDate).lte('entry_date', endDate)),
+    sb.from('profiles').select('id, hourly_rate'),
+  ]);
+  const rateMap = new Map((peopleRes.data || []).map((p) => [p.id, Number(p.hourly_rate || 0)]));
+
+  const months = [];
+  for (let yy = lowYear; yy <= highYear; yy++) {
+    for (let m = 1; m <= 12; m++) months.push(`${yy}-${String(m).padStart(2, '0')}`);
+  }
+  const bucket = new Map(months.map((m) => [m, { collected: 0, cost: 0 }]));
+  const monthKey = (d) => (d ? d.slice(0, 7) : null);
+
+  ledgerRows.forEach((r) => {
+    const k = monthKey(r.entry_date);
+    if (!bucket.has(k)) return;
+    bucket.get(k).cost += (Number(r.hours) || 0) * (rateMap.get(r.person_id) || 0);
+  });
+  extraCosts.forEach((r) => {
+    const k = monthKey(r.entry_date);
+    if (!bucket.has(k)) return;
+    bucket.get(k).cost += Number(r.amount) || 0;
+  });
+  payments.forEach((r) => {
+    const k = monthKey(r.entry_date);
+    if (!bucket.has(k)) return;
+    bucket.get(k).collected += Number(r.amount) || 0;
+  });
+
+  const totalCollected = payments.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalCost = ledgerRows.reduce((s, r) => s + (Number(r.hours) || 0) * (rateMap.get(r.person_id) || 0), 0)
+    + extraCosts.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const netProfit = totalCollected - totalCost;
+
+  if (summaryBox) {
+    summaryBox.innerHTML = `
+      <div class="profit-stat-grid">
+        <div class="profit-stat-card"><div class="hint">📥 Collected</div><div class="profit-stat-value" style="color:#39ffb0;">${formatUSD(totalCollected)}</div></div>
+        <div class="profit-stat-card"><div class="hint">📤 Cost</div><div class="profit-stat-value" style="color:#ffb84d;">${formatUSD(totalCost)}</div></div>
+        <div class="profit-stat-card"><div class="hint">${netProfit >= 0 ? '📈' : '📉'} Net profit</div><div class="profit-stat-value" style="color:${netProfit >= 0 ? '#39ffb0' : '#ff5470'};">${formatUSD(netProfit)}</div></div>
+      </div>
+    `;
+  }
+
+  const chartEl = $('profitCompanyChart');
+  if (chartEl && typeof Chart !== 'undefined') {
+    if (companyProfitChart) { companyProfitChart.destroy(); companyProfitChart = null; }
+    const sameYear = lowYear === highYear;
+    const labels = months.map((m) => {
+      const [yy, mm] = m.split('-');
+      return new Date(Number(yy), Number(mm) - 1, 1).toLocaleDateString(undefined, sameYear ? { month: 'short' } : { month: 'short', year: '2-digit' });
+    });
+    companyProfitChart = new Chart(chartEl.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Collected', data: months.map((m) => bucket.get(m).collected), borderColor: '#39ffb0', backgroundColor: 'rgba(57,255,176,0.15)', fill: true, tension: 0.35 },
+          { label: 'Cost', data: months.map((m) => bucket.get(m).cost), borderColor: '#ff5470', backgroundColor: 'rgba(255,84,112,0.12)', fill: true, tension: 0.35 },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          x: { ticks: { color: '#cfe8ff', maxRotation: months.length > 12 ? 60 : 0 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+          y: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        },
+      },
+    });
+  }
+}
+if ($('profitApplyYearRangeBtn')) {
+  $('profitApplyYearRangeBtn').addEventListener('click', renderCompanyProfitAnalysis);
 }
 
 // ---------- Share a project's status into one of the viewer's own groups ----------

@@ -218,6 +218,10 @@
           <span class="home-tile-icon home-tile-icon-quotations">🧾</span>
           <span class="home-tile-label">Quotations</span>
         </button>
+        <button type="button" class="home-tile" data-open="profitAnalyzer" data-feature="profit">
+          <span class="home-tile-icon home-tile-icon-profit">💰</span>
+          <span class="home-tile-label">Profit Analyzer</span>
+        </button>
         <button type="button" class="home-tile" data-open="tank" data-feature="tank">
           <span class="home-tile-icon home-tile-icon-tank">🛢️</span>
           <span class="home-tile-label">Project Tank</span>
@@ -1104,6 +1108,56 @@
   </div>
 </div>
 
+<!-- PROFIT ANALYZER OVERLAY — company-wide profit trend + searchable project
+     list. Visible to admins and anyone granted the 'profit' Map Access
+     feature. -->
+<div id="profitAnalyzerOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="profitAnalyzerOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>💰 Profit Analyzer</strong>
+      <button type="button" class="ghost" data-close="profitAnalyzer">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass profit-panel">
+        <strong style="font-size:14px;">📊 Company profit analysis</strong>
+        <p class="hint" style="margin-top:2px;">Pick a year range — counts every payment collected and every cost logged (labor + extra costs) within it, by the date it was logged.</p>
+        <div class="location-row" style="margin-top:8px;">
+          <select id="profitYearFrom"></select>
+          <span class="hint">to</span>
+          <select id="profitYearTo"></select>
+          <button type="button" id="profitApplyYearRangeBtn" class="secondary">Apply</button>
+        </div>
+        <div id="profitCompanySummary" style="margin-top:12px;"></div>
+        <div class="profit-chart-card" style="margin-top:12px;">
+          <canvas id="profitCompanyChart" height="220"></canvas>
+        </div>
+      </div>
+
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">🔍 Find a project</strong>
+        <input id="profitProjectSearch" type="text" placeholder="🔍 Search by Job ID, name, or client…" style="margin-top:8px;" />
+        <div id="profitProjectList" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROFIT DETAIL OVERLAY — one project's full cost/profit breakdown. -->
+<div id="profitDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="profitDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="profitDetailBackBtn">‹ Back</button>
+      <strong id="profitDetailTitle">Project</strong>
+      <button type="button" class="ghost" data-close="profitDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="profitDetailBody"></div>
+    </div>
+  </div>
+</div>
+
 <!-- RENEWAL MANAGER OVERLAY — sticky-note board of visa/document renewals,
      soonest-expiry first. Admin-only (gated at the tile, not just here). -->
 <div id="renewalManagerOverlayBackdrop" class="panel-overlay-backdrop"></div>
@@ -1440,6 +1494,17 @@
           <p class="hint" style="margin-top:2px;">Whoever is set here is the person who can acknowledge and hand off that department's stage on the roadmap above.</p>
           <div id="departmentHeadsList" style="margin-top:8px;"></div>
         </div>
+      </div>
+
+      <!-- HOURLY RATES — feeds Profit Analyzer's labor cost math. Each
+           person's rate (USD/hour) here is multiplied by their logged hours
+           (job_hours_ledger) on a project to compute what that person's time
+           cost. Admin-only, same as everything else money-related. -->
+      <div class="card glass">
+        <strong style="font-size:14px;">💵 Hourly Rates</strong>
+        <p class="hint" style="margin-top:2px;">Set each person's hourly pay rate (USD). Profit Analyzer uses this — rate × logged hours — to work out labor cost per project, per department, and per person.</p>
+        <input id="hourlyRateSearch" type="text" placeholder="🔍 Filter by name…" style="margin-top:8px;" />
+        <div id="hourlyRateList" style="margin-top:10px;"></div>
       </div>
     </div>
   </div>
@@ -1914,6 +1979,8 @@
 <!-- Resumable/chunked uploads for larger chat attachments (photos/videos) -->
 <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Profit Analyzer charts (line/bar/doughnut) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="./config.js"></script>
 <script src="./app.js"></script>
 </body>
