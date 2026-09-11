@@ -1302,6 +1302,7 @@
       <div class="mode-grid" style="margin-bottom:10px;">
         <div class="sr-top-mode-chip selected" data-sr-top-mode="lateEntry"><span class="emoji">⏰</span>Late Entry</div>
         <div class="sr-top-mode-chip" data-sr-top-mode="leave"><span class="emoji">🌴</span>Leave / Vacation</div>
+        <div class="sr-top-mode-chip" data-sr-top-mode="document"><span class="emoji">📄</span>Request Document</div>
       </div>
 
       <div id="srLateEntrySection">
@@ -1431,6 +1432,32 @@
           <div id="leaveCalendarLegendList" style="margin-top:10px; display:flex; flex-direction:column; gap:4px;"></div>
         </div>
       </div>
+
+      <div id="srDocumentSection" style="display:none;">
+        <p class="hint">Need a Salary Certificate, Visa copy, Work Permit, NOC, Character Certificate, or another official document? Pick the type, tell us where it's going, and admin will upload it here once it's ready — you'll get a notification. For anything urgent, don't wait on this queue — email HR directly instead.</p>
+
+        <div class="card glass">
+          <strong style="font-size:14px;">New document request</strong>
+          <label>Document type</label>
+          <div id="docTypeGrid" class="mode-grid"></div>
+
+          <label for="docRequestPurpose">Where are you submitting this? (required)</label>
+          <textarea id="docRequestPurpose" placeholder="e.g. Bank loan application, embassy visa renewal, new landlord tenancy contract…" required></textarea>
+
+          <button type="button" class="primary" id="docRequestSubmitBtn" style="width:100%; margin-top:12px;">Submit request</button>
+        </div>
+
+        <div class="card glass" style="margin-top:14px;">
+          <strong style="font-size:14px;">My document requests</strong>
+          <div id="myDocumentRequestsList" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="card glass" id="docRequestApprovalsCard" style="margin-top:14px; display:none;">
+          <strong style="font-size:14px;">Pending document requests</strong>
+          <p class="hint" style="margin-top:2px;">Upload the file once it's ready — the requester gets notified automatically.</p>
+          <div id="docRequestApprovalsList" style="margin-top:8px;"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1533,6 +1560,21 @@
           <button type="button" id="addJobDescCategoryBtn" class="secondary">+ Add</button>
         </div>
         <div id="jobDescCategoryList" style="margin-top:10px;"></div>
+      </div>
+
+      <!-- MANAGE DOCUMENT TYPES — the catalog someone picks from under
+           Special Request -> Request Document (Salary Document, Visa, Work
+           Permit, NOC, Character Certificate, etc.). Add your own, rename,
+           disable, or delete one. -->
+      <div class="card glass">
+        <strong style="font-size:14px;">📄 Manage Document Types</strong>
+        <p class="hint" style="margin-top:2px;">These are the options people can request under Special Request → Request Document. Add your own, rename, disable, or delete one — changes show up immediately.</p>
+        <div class="location-row" style="margin-top:8px;">
+          <input id="newDocTypeIcon" type="text" placeholder="Icon (e.g. 📄)" maxlength="8" style="max-width:90px; flex:none;" />
+          <input id="newDocTypeName" type="text" placeholder="e.g. Salary Certificate" />
+          <button type="button" id="addDocTypeBtn" class="secondary">+ Add</button>
+        </div>
+        <div id="docTypeList" style="margin-top:10px;"></div>
       </div>
 
       <!-- MANAGE PROJECT STAGES — the single shared roadmap every project's

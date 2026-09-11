@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.42.0';
+const APP_VERSION = 'v3.43.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Special Request now has a Leave/Vacation option: request Holiday, Emergency Leave, Exhibition, Sick Leave, Maternity Leave or Other for a date range, with department-head/admin approval (My leave requests + Pending leave approvals). Approved leave shows on a colour-coded year-timeline chart per person so nobody double-books a project. Requires the accompanying SQL (adds leave_requests table).';
+const APP_UPDATE_NOTES = 'Special Request now has a Request Document option: pick from admin-managed document types (Salary Certificate, Visa, Work Permit, NOC, etc. — managed in Data Feed), explain where it\'s going, and submit. Admin uploads the file once ready and you get a push notification, then download it from My document requests. Requires the accompanying SQL (adds document_types + document_requests) and a new private "document-requests" Storage bucket.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -4723,6 +4723,105 @@ $('addJobDescCategoryBtn')?.addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------
+// ADMIN: manage the Document Types catalog (document_types) — what shows
+// up as pickable chips under Special Request -> Request Document. Deleting
+// a type is blocked (by the FK on document_requests.document_type_id) if
+// anyone has ever requested that type — disable it instead in that case.
+// ---------------------------------------------------------------------
+let docTypesCache = null;
+async function fetchDocumentTypes(forceRefresh = false) {
+  if (docTypesCache && !forceRefresh) return docTypesCache;
+  const { data, error } = await sb.from('document_types').select('id, name, icon, active, sort_order').order('sort_order', { ascending: true });
+  docTypesCache = error ? [] : (data || []);
+  return docTypesCache;
+}
+
+let editingDocTypeId = null;
+async function renderDocumentTypeList() {
+  const box = $('docTypeList');
+  if (!box) return;
+  const types = await fetchDocumentTypes(true);
+  if (!types.length) { box.innerHTML = '<div class="empty">No document types yet — add one above.</div>'; return; }
+  box.innerHTML = types.map((t) => {
+    if (editingDocTypeId === t.id) {
+      return `
+        <div class="jobdesc-row">
+          <input type="text" class="jobdesc-edit-input" data-doctype-edit-icon="${t.id}" value="${escapeHtml(t.icon)}" maxlength="8" style="max-width:70px; flex:none;" />
+          <input type="text" class="jobdesc-edit-input" data-doctype-edit-name="${t.id}" value="${escapeHtml(t.name)}" />
+          <button type="button" class="secondary" data-doctype-save="${t.id}">💾 Save</button>
+          <button type="button" class="secondary" data-doctype-cancel="${t.id}">✖ Cancel</button>
+        </div>
+      `;
+    }
+    return `
+      <div class="jobdesc-row">
+        <span class="jobdesc-label">${t.icon} ${escapeHtml(t.name)}${t.active ? '' : ' <em style="opacity:.6;">(disabled)</em>'}</span>
+        <button type="button" class="secondary" data-doctype-edit="${t.id}">✏️ Edit</button>
+        <button type="button" class="secondary" data-doctype-toggle="${t.id}">${t.active ? '🚫 Disable' : '✅ Enable'}</button>
+        <button type="button" class="secondary" data-doctype-delete="${t.id}">🗑️ Delete</button>
+      </div>
+    `;
+  }).join('');
+
+  box.querySelectorAll('[data-doctype-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => { editingDocTypeId = btn.dataset.doctypeEdit; renderDocumentTypeList(); });
+  });
+  box.querySelectorAll('[data-doctype-cancel]').forEach((btn) => {
+    btn.addEventListener('click', () => { editingDocTypeId = null; renderDocumentTypeList(); });
+  });
+  box.querySelectorAll('[data-doctype-save]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.doctypeSave;
+      const iconInput = box.querySelector(`[data-doctype-edit-icon="${id}"]`);
+      const nameInput = box.querySelector(`[data-doctype-edit-name="${id}"]`);
+      const icon = (iconInput?.value || '📄').trim() || '📄';
+      const name = (nameInput?.value || '').trim();
+      if (!name) { showToast('Document type name cannot be empty.'); return; }
+      const { error } = await sb.from('document_types').update({ icon, name }).eq('id', id);
+      if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+      showToast('Saved.');
+      editingDocTypeId = null;
+      renderDocumentTypeList();
+    });
+  });
+  box.querySelectorAll('[data-doctype-toggle]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.doctypeToggle;
+      const current = types.find((t) => t.id === id);
+      const { error } = await sb.from('document_types').update({ active: !current.active }).eq('id', id);
+      if (error) { showToast(`Couldn't update: ${error.message}`); return; }
+      renderDocumentTypeList();
+    });
+  });
+  box.querySelectorAll('[data-doctype-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.doctypeDelete;
+      if (!confirm('Delete this document type? This only works if nobody has ever requested it — disable it instead if they have.')) return;
+      const { error } = await sb.from('document_types').delete().eq('id', id);
+      if (error) { showToast("Couldn't delete — someone has already requested this type. Disable it instead."); return; }
+      showToast('Document type deleted.');
+      renderDocumentTypeList();
+    });
+  });
+}
+
+$('addDocTypeBtn')?.addEventListener('click', async () => {
+  const iconInput = $('newDocTypeIcon');
+  const nameInput = $('newDocTypeName');
+  const name = (nameInput?.value || '').trim();
+  const icon = (iconInput?.value || '📄').trim() || '📄';
+  if (!name) { showToast('Enter a document type name.'); return; }
+  const existing = await fetchDocumentTypes(true);
+  const sortOrder = existing.length ? Math.max(...existing.map((t) => t.sort_order || 0)) + 1 : 1;
+  const { error } = await sb.from('document_types').insert({ name, icon, sort_order: sortOrder });
+  if (error) { showToast(`Couldn't add: ${error.message}`); return; }
+  if (iconInput) iconInput.value = '';
+  if (nameInput) nameInput.value = '';
+  showToast('Document type added.');
+  renderDocumentTypeList();
+});
+
+// ---------------------------------------------------------------------
 // ADMIN: manage the shared Project Stage roadmap (project_stage_templates)
 // — the ordered list every project's "Project timeline" road is built
 // from, and which department is responsible for acknowledging/handing off
@@ -5287,6 +5386,9 @@ function openPanel(name, opts = {}) {
     renderMyLeaveRequests();
     renderLeaveApprovals();
     renderLeaveCalendar();
+    renderDocumentRequestForm();
+    renderMyDocumentRequests();
+    renderDocumentRequestApprovals();
   }
   if (name === 'people') {
     renderTeamList();
@@ -5308,6 +5410,7 @@ function openPanel(name, opts = {}) {
     renderProjectStageTemplateList();
     renderDepartmentHeadsList();
     renderHourlyRateList();
+    renderDocumentTypeList();
   }
 }
 function closePanel(name) {
@@ -11321,6 +11424,7 @@ document.querySelectorAll('.sr-top-mode-chip').forEach((chip) => {
     const mode = chip.dataset.srTopMode;
     if ($('srLateEntrySection')) $('srLateEntrySection').style.display = mode === 'lateEntry' ? '' : 'none';
     if ($('srLeaveSection')) $('srLeaveSection').style.display = mode === 'leave' ? '' : 'none';
+    if ($('srDocumentSection')) $('srDocumentSection').style.display = mode === 'document' ? '' : 'none';
   });
 });
 
@@ -11567,6 +11671,203 @@ async function renderLeaveCalendar() {
       },
     },
   });
+}
+
+// =====================================================================
+// REQUEST A DOCUMENT — a third Special Request mode. Employee picks a
+// document type (Salary Document, Visa, Work Permit, NOC, Character
+// Certificate, etc. — managed by admin in Data Feed), explains where it's
+// going, and submits. Admin-only queue (no department-head routing here);
+// admin uploads the actual file once it's ready, which flips the request
+// to 'ready' and fires a push notification to the requester. Rejecting
+// just flips the status — nothing else changes.
+// =====================================================================
+
+const DOC_STATUS_LABEL = { pending: 'queued', ready: 'ready to download', rejected: 'rejected' };
+const DOC_STATUS_CLASS = { pending: 'pending', ready: 'synced', rejected: 'error' };
+
+let selectedDocTypeId = '';
+async function renderDocumentRequestForm() {
+  const grid = $('docTypeGrid');
+  if (!grid) return;
+  selectedDocTypeId = '';
+  if ($('docRequestPurpose')) $('docRequestPurpose').value = '';
+  const types = (await fetchDocumentTypes()).filter((t) => t.active);
+  grid.innerHTML = types.length
+    ? types.map((t) => `<div class="doc-type-chip" data-doctype-id="${t.id}"><span class="emoji">${t.icon}</span>${escapeHtml(t.name)}</div>`).join('')
+    : '<div class="empty">No document types set up yet — ask an admin to add some in Data Feed.</div>';
+  grid.querySelectorAll('.doc-type-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      selectedDocTypeId = chip.dataset.doctypeId;
+      grid.querySelectorAll('.doc-type-chip').forEach((c) => c.classList.toggle('selected', c === chip));
+    });
+  });
+}
+
+if ($('docRequestSubmitBtn')) {
+  $('docRequestSubmitBtn').addEventListener('click', async () => {
+    const purpose = $('docRequestPurpose').value.trim();
+    if (!selectedDocTypeId) { showToast('Pick a document type.'); return; }
+    if (!purpose) { showToast("Tell us where you're submitting this document — it's required."); return; }
+    if (!confirm('Submit this document request? It goes straight to admin.')) return;
+
+    $('docRequestSubmitBtn').disabled = true;
+    try {
+      const { error } = await sb.from('document_requests').insert({
+        person_id: currentUser.id,
+        document_type_id: selectedDocTypeId,
+        purpose,
+      });
+      if (error) throw error;
+      showToast('Document request submitted — waiting on admin.');
+      renderDocumentRequestForm();
+      renderMyDocumentRequests();
+    } catch (err) {
+      showToast(`Couldn't submit: ${err.message || err}`);
+    } finally {
+      $('docRequestSubmitBtn').disabled = false;
+    }
+  });
+}
+
+async function renderMyDocumentRequests() {
+  const wrap = $('myDocumentRequestsList');
+  if (!wrap || !currentUser) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data, error } = await sb.from('document_requests').select('*, document_types(name, icon)').eq('person_id', currentUser.id).order('created_at', { ascending: false }).limit(30);
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data.length) { wrap.innerHTML = '<div class="empty">No document requests yet.</div>'; return; }
+  wrap.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon">${r.document_types?.icon || '📄'}</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(r.document_types?.name || 'Document')}</div>
+        <div class="entry-desc">${escapeHtml(r.purpose)}</div>
+      </div>
+      <div class="entry-status-stack">
+        <span class="chip ${DOC_STATUS_CLASS[r.status] || ''}">${DOC_STATUS_LABEL[r.status] || r.status}</span>
+        ${r.status === 'ready' ? `<button type="button" class="secondary" data-doc-download="${r.id}" style="margin-top:6px;">⬇ Download</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('[data-doc-download]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.docDownload;
+      const row = data.find((r) => r.id === id);
+      if (!row?.file_path) { showToast('No file on this request yet.'); return; }
+      btn.disabled = true;
+      try {
+        const { data: signed, error } = await sb.storage.from('document-requests').createSignedUrl(row.file_path, 600);
+        if (error || !signed?.signedUrl) throw error || new Error('Could not create a download link');
+        window.open(signed.signedUrl, '_blank');
+      } catch (err) {
+        showToast(`Couldn't download: ${err.message || err}`);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+let docManagerIsAdmin = false;
+const pendingDocUploads = new Map(); // requestId -> File, chosen but not yet uploaded
+
+async function renderDocumentRequestApprovals() {
+  const card = $('docRequestApprovalsCard');
+  const wrap = $('docRequestApprovalsList');
+  if (!card || !wrap || !currentUser) return;
+
+  docManagerIsAdmin = currentProfile?.role === 'admin';
+  if (!docManagerIsAdmin) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: rows, error } = await sb.from('document_requests').select('*, document_types(name, icon)').eq('status', 'pending').order('created_at', { ascending: true });
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!rows || !rows.length) { wrap.innerHTML = '<div class="empty">Nothing pending.</div>'; return; }
+
+  const personIds = [...new Set(rows.map((r) => r.person_id))];
+  const { data: people } = await sb.from('profiles').select('id, full_name, email').in('id', personIds);
+  const nameById = {};
+  (people || []).forEach((p) => { nameById[p.id] = p.full_name || p.email; });
+
+  wrap.innerHTML = rows.map((r) => `
+    <div class="entry" style="align-items:flex-start;">
+      <span class="type-icon">${r.document_types?.icon || '📄'}</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(nameById[r.person_id] || 'Someone')}</div>
+        <div class="entry-meta">${escapeHtml(r.document_types?.name || 'Document')}</div>
+        <div class="entry-meta">📝 ${escapeHtml(r.purpose)}</div>
+        <div class="location-row" style="margin-top:8px;">
+          <input type="file" data-doc-file="${r.id}" style="flex:1 1 160px;" />
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="button" class="primary" data-doc-upload="${r.id}" style="flex:1; margin-top:0;">⬆ Upload &amp; mark ready</button>
+          <button type="button" class="secondary" data-doc-reject="${r.id}" style="flex:1;">✕ Reject</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('[data-doc-file]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const id = input.dataset.docFile;
+      if (input.files && input.files[0]) pendingDocUploads.set(id, input.files[0]);
+      else pendingDocUploads.delete(id);
+    });
+  });
+  wrap.querySelectorAll('[data-doc-upload]').forEach((btn) => {
+    btn.addEventListener('click', () => uploadDocumentForRequest(btn.dataset.docUpload));
+  });
+  wrap.querySelectorAll('[data-doc-reject]').forEach((btn) => {
+    btn.addEventListener('click', () => reviewDocumentRequest(btn.dataset.docReject, 'reject'));
+  });
+}
+
+async function uploadDocumentForRequest(requestId) {
+  const file = pendingDocUploads.get(requestId);
+  if (!file) { showToast('Choose a file first.'); return; }
+  try {
+    const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
+    const path = `${requestId}/${Date.now()}_${safeName}`;
+    const { error: upErr } = await sb.storage.from('document-requests').upload(path, file, { contentType: file.type || 'application/octet-stream' });
+    if (upErr) throw upErr;
+
+    const { error } = await sb.from('document_requests').update({
+      status: 'ready',
+      file_path: path,
+      file_name: file.name,
+      uploaded_by: currentUser.id,
+      uploaded_at: new Date().toISOString(),
+    }).eq('id', requestId);
+    if (error) throw error;
+
+    // Best-effort — a push failure shouldn't undo an already-uploaded file.
+    const { data: { session } } = await getSessionSafe();
+    sb.functions.invoke('send-push', {
+      body: { kind: 'document', requestId },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    }).catch(() => {});
+
+    showToast('Uploaded — requester notified.');
+    pendingDocUploads.delete(requestId);
+    renderDocumentRequestApprovals();
+  } catch (err) {
+    showToast(`Couldn't upload: ${err.message || err}`);
+  }
+}
+
+async function reviewDocumentRequest(requestId, action) {
+  if (action === 'reject' && !confirm('Reject this document request?')) return;
+  try {
+    const { error } = await sb.from('document_requests').update({ status: 'rejected' }).eq('id', requestId);
+    if (error) throw error;
+    showToast('Rejected.');
+    renderDocumentRequestApprovals();
+  } catch (err) {
+    showToast(`Couldn't reject: ${err.message || err}`);
+  }
 }
 
 async function renderQueue() {
