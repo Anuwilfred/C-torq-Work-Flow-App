@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.41.0';
+const APP_VERSION = 'v3.42.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Profit Analyzer now shows Invest amount / Cost / Profit clearly: a new Invest amount breakdown (man hours + procurement + transportation & logistics + rent + interest — pick a category when logging an extra cost) with its own chart, plus a headline Quoted-vs-Invested-vs-Collected-vs-Profit bar. Department breakdown is a real tile grid, and Extra costs / Payments collected are tucked behind a Show/Hide toggle. Requires the accompanying SQL (adds project_extra_costs.category).';
+const APP_UPDATE_NOTES = 'Special Request now has a Leave/Vacation option: request Holiday, Emergency Leave, Exhibition, Sick Leave, Maternity Leave or Other for a date range, with department-head/admin approval (My leave requests + Pending leave approvals). Approved leave shows on a colour-coded year-timeline chart per person so nobody double-books a project. Requires the accompanying SQL (adds leave_requests table).';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5284,6 +5284,9 @@ function openPanel(name, opts = {}) {
     renderSpecialRequestForm();
     renderMySpecialRequests();
     renderSpecialRequestApprovals();
+    renderMyLeaveRequests();
+    renderLeaveApprovals();
+    renderLeaveCalendar();
   }
   if (name === 'people') {
     renderTeamList();
@@ -11288,6 +11291,282 @@ async function reviewSpecialRequest(requestId, action) {
   } catch (err) {
     showToast(`Couldn't ${action}: ${err.message || err}`);
   }
+}
+
+// =====================================================================
+// LEAVE / VACATION REQUEST — a separate, date-RANGE request type sharing
+// only the Special Request panel's UI (via the top mode toggle below) and
+// its exact RLS/approval permission shape. No synced timesheet entry or
+// job_hours_ledger row is ever created here, so — unlike special requests
+// — approval is a plain status update straight against leave_requests,
+// no Edge Function involved. The whole point is the year-timeline chart
+// at the bottom: a quick visual of who's away, what kind of leave, and
+// when they're back, so nobody gets a project understaffed by surprise.
+// =====================================================================
+
+const LEAVE_TYPE_LABEL = {
+  holiday: '🏖️ Holiday', emergency: '🚨 Emergency Leave', exhibition: '🎪 Exhibition',
+  sick: '🤒 Sick Leave', maternity: '🤰 Maternity Leave', other: '✨ Other',
+};
+const LEAVE_TYPE_COLOR = {
+  holiday: '#4dabff', emergency: '#ff5470', exhibition: '#b98bff',
+  sick: '#ffb84d', maternity: '#f2d94d', other: '#39ffb0',
+};
+const LEAVE_STATUS_LABEL = { pending: 'pending approval', approved: 'approved', rejected: 'rejected' };
+const LEAVE_STATUS_CLASS = { pending: 'pending', approved: 'synced', rejected: 'error' };
+
+document.querySelectorAll('.sr-top-mode-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.sr-top-mode-chip').forEach((c) => c.classList.toggle('selected', c === chip));
+    const mode = chip.dataset.srTopMode;
+    if ($('srLateEntrySection')) $('srLateEntrySection').style.display = mode === 'lateEntry' ? '' : 'none';
+    if ($('srLeaveSection')) $('srLeaveSection').style.display = mode === 'leave' ? '' : 'none';
+  });
+});
+
+let selectedLeaveType = '';
+document.querySelectorAll('.leave-type-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    selectedLeaveType = chip.dataset.leaveType;
+    document.querySelectorAll('.leave-type-chip').forEach((c) => c.classList.toggle('selected', c === chip));
+  });
+});
+
+function resetLeaveRequestForm() {
+  if ($('leaveStartDate')) $('leaveStartDate').value = '';
+  if ($('leaveEndDate')) $('leaveEndDate').value = '';
+  if ($('leaveRequestReason')) $('leaveRequestReason').value = '';
+  selectedLeaveType = '';
+  document.querySelectorAll('.leave-type-chip').forEach((c) => c.classList.remove('selected'));
+}
+
+if ($('leaveSubmitBtn')) {
+  $('leaveSubmitBtn').addEventListener('click', async () => {
+    const startDate = $('leaveStartDate').value;
+    const endDate = $('leaveEndDate').value;
+    const reason = $('leaveRequestReason').value.trim();
+
+    if (!selectedLeaveType) { showToast('Pick a leave type.'); return; }
+    if (!startDate || !endDate) { showToast('Pick a start date and a return date.'); return; }
+    if (endDate < startDate) { showToast('Return date must be on or after the start date.'); return; }
+    if (!confirm(`Request ${LEAVE_TYPE_LABEL[selectedLeaveType] || 'leave'} from ${startDate} to ${endDate}?\n\nThis goes to your department head (or an admin) for approval.`)) return;
+
+    $('leaveSubmitBtn').disabled = true;
+    try {
+      const { error } = await sb.from('leave_requests').insert({
+        person_id: currentUser.id,
+        department_id: currentProfile?.department_id || null,
+        leave_type: selectedLeaveType,
+        start_date: startDate,
+        end_date: endDate,
+        reason: reason || null,
+      });
+      if (error) throw error;
+      showToast('Leave request submitted — waiting for approval.');
+      resetLeaveRequestForm();
+      renderMyLeaveRequests();
+    } catch (err) {
+      showToast(`Couldn't submit: ${err.message || err}`);
+    } finally {
+      $('leaveSubmitBtn').disabled = false;
+    }
+  });
+}
+
+async function renderMyLeaveRequests() {
+  const wrap = $('myLeaveRequestsList');
+  if (!wrap || !currentUser) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data, error } = await sb.from('leave_requests').select('*').eq('person_id', currentUser.id).order('start_date', { ascending: false }).limit(30);
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!data.length) { wrap.innerHTML = '<div class="empty">No leave requests yet.</div>'; return; }
+  wrap.innerHTML = data.map((r) => `
+    <div class="entry">
+      <span class="type-icon">${(LEAVE_TYPE_LABEL[r.leave_type] || '🌴').split(' ')[0]}</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(LEAVE_TYPE_LABEL[r.leave_type] || r.leave_type)}</div>
+        <div class="entry-desc">${escapeHtml(r.start_date)} → ${escapeHtml(r.end_date)}</div>
+        ${r.reason ? `<div class="entry-meta">${escapeHtml(r.reason)}</div>` : ''}
+      </div>
+      <div class="entry-status-stack">
+        <span class="chip ${LEAVE_STATUS_CLASS[r.status] || ''}">${LEAVE_STATUS_LABEL[r.status] || r.status}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+let leaveManagerIsAdmin = false;
+let leaveManagerDepartmentIds = [];
+async function ensureLeaveManagerContext() {
+  leaveManagerIsAdmin = currentProfile?.role === 'admin';
+  if (!leaveManagerIsAdmin) {
+    const { data } = await sb.from('departments').select('id').eq('head_id', currentUser.id);
+    leaveManagerDepartmentIds = (data || []).map((d) => d.id);
+  }
+  return leaveManagerIsAdmin || leaveManagerDepartmentIds.length > 0;
+}
+
+async function renderLeaveApprovals() {
+  const card = $('leaveApprovalsCard');
+  const wrap = $('leaveApprovalsList');
+  if (!card || !wrap || !currentUser) return;
+
+  const canManage = await ensureLeaveManagerContext();
+  if (!canManage) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: rows, error } = await sb.from('leave_requests').select('*').eq('status', 'pending').order('start_date', { ascending: true });
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!rows || !rows.length) { wrap.innerHTML = '<div class="empty">Nothing pending.</div>'; return; }
+
+  const personIds = [...new Set(rows.map((r) => r.person_id))];
+  const { data: people } = await sb.from('profiles').select('id, full_name, email').in('id', personIds);
+  const nameById = {};
+  (people || []).forEach((p) => { nameById[p.id] = p.full_name || p.email; });
+
+  wrap.innerHTML = rows.map((r) => `
+    <div class="entry" style="align-items:flex-start;">
+      <span class="type-icon">${(LEAVE_TYPE_LABEL[r.leave_type] || '🌴').split(' ')[0]}</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(nameById[r.person_id] || 'Someone')}</div>
+        <div class="entry-meta">${escapeHtml(LEAVE_TYPE_LABEL[r.leave_type] || r.leave_type)}</div>
+        <div class="entry-meta">📅 ${escapeHtml(r.start_date)} → ${escapeHtml(r.end_date)}</div>
+        ${r.reason ? `<div class="entry-meta">${escapeHtml(r.reason)}</div>` : ''}
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="button" class="primary" data-leave-approve="${r.id}" style="flex:1; margin-top:0;">✓ Approve</button>
+          <button type="button" class="secondary" data-leave-reject="${r.id}" style="flex:1;">✕ Reject</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('[data-leave-approve]').forEach((btn) => {
+    btn.addEventListener('click', () => reviewLeaveRequest(btn.dataset.leaveApprove, 'approve'));
+  });
+  wrap.querySelectorAll('[data-leave-reject]').forEach((btn) => {
+    btn.addEventListener('click', () => reviewLeaveRequest(btn.dataset.leaveReject, 'reject'));
+  });
+}
+
+async function reviewLeaveRequest(requestId, action) {
+  if (action === 'reject' && !confirm('Reject this leave request?')) return;
+  try {
+    const { error } = await sb.from('leave_requests').update({
+      status: action === 'approve' ? 'approved' : 'rejected',
+      reviewed_by: currentUser.id,
+      reviewed_at: new Date().toISOString(),
+    }).eq('id', requestId);
+    if (error) throw error;
+    showToast(action === 'approve' ? 'Approved.' : 'Rejected.');
+    renderLeaveApprovals();
+    renderMyLeaveRequests();
+    renderLeaveCalendar();
+  } catch (err) {
+    showToast(`Couldn't ${action}: ${err.message || err}`);
+  }
+}
+
+// ---------- Year-timeline leave calendar (Gantt-style) ----------
+let leaveCalendarChart = null;
+let leaveCalendarYearPopulated = false;
+
+function isLeapYear(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+function dayOfYearFor(dateStr, year) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const start = Date.UTC(year, 0, 1);
+  const diff = Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - start) / 86400000);
+  return diff;
+}
+function monthLabelForDay(day, year) {
+  const d = new Date(Date.UTC(year, 0, 1));
+  d.setUTCDate(d.getUTCDate() + Math.round(day));
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function populateLeaveCalendarYearSelect() {
+  const sel = $('leaveCalendarYear');
+  if (!sel || leaveCalendarYearPopulated) return;
+  const nowYear = new Date().getFullYear();
+  sel.innerHTML = [nowYear - 1, nowYear, nowYear + 1].map((y) => `<option value="${y}" ${y === nowYear ? 'selected' : ''}>${y}</option>`).join('');
+  sel.addEventListener('change', () => renderLeaveCalendar());
+  leaveCalendarYearPopulated = true;
+  if (typeof initGlassSelect === 'function') initGlassSelect(sel);
+}
+
+async function renderLeaveCalendar() {
+  const card = $('leaveCalendarCard');
+  const legendWrap = $('leaveCalendarLegendList');
+  if (!card || !currentUser) return;
+
+  const canManage = await ensureLeaveManagerContext();
+  if (!canManage) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  populateLeaveCalendarYearSelect();
+  if (legendWrap) {
+    legendWrap.innerHTML = Object.entries(LEAVE_TYPE_LABEL).map(([key, label]) => `
+      <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:#cfe8ff;">
+        <span style="width:12px; height:12px; border-radius:3px; background:${LEAVE_TYPE_COLOR[key]}; display:inline-block;"></span>${escapeHtml(label)}
+      </div>
+    `).join('');
+  }
+
+  const year = parseInt($('leaveCalendarYear')?.value, 10) || new Date().getFullYear();
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+
+  const { data: rows, error } = await sb.from('leave_requests').select('*').eq('status', 'approved')
+    .lte('start_date', yearEnd).gte('end_date', yearStart).order('start_date', { ascending: true });
+
+  const chartEl = $('leaveCalendarChart');
+  if (!chartEl || typeof Chart === 'undefined') return;
+  if (leaveCalendarChart) { leaveCalendarChart.destroy(); leaveCalendarChart = null; }
+  if (error || !rows || !rows.length) return;
+
+  const personIds = [...new Set(rows.map((r) => r.person_id))];
+  const { data: people } = await sb.from('profiles').select('id, full_name, email').in('id', personIds);
+  const nameById = {};
+  (people || []).forEach((p) => { nameById[p.id] = p.full_name || p.email; });
+
+  const sorted = [...rows].sort((a, b) => (nameById[a.person_id] || '').localeCompare(nameById[b.person_id] || '') || a.start_date.localeCompare(b.start_date));
+  const yearLen = isLeapYear(year) ? 366 : 365;
+
+  const labels = sorted.map((r) => nameById[r.person_id] || 'Someone');
+  const data = sorted.map((r) => [
+    Math.max(0, dayOfYearFor(r.start_date, year)),
+    Math.min(yearLen, dayOfYearFor(r.end_date, year) + 1),
+  ]);
+  const colors = sorted.map((r) => LEAVE_TYPE_COLOR[r.leave_type] || '#39ffb0');
+
+  leaveCalendarChart = new Chart(chartEl.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: `Who's on leave — ${year}`, color: '#cfe8ff' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const r = sorted[ctx.dataIndex];
+              return `${LEAVE_TYPE_LABEL[r.leave_type] || r.leave_type} · ${r.start_date} → ${r.end_date}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          min: 0, max: yearLen,
+          ticks: { color: '#cfe8ff', callback: (v) => monthLabelForDay(v, year) },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+        },
+        y: { ticks: { color: '#cfe8ff', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+      },
+    },
+  });
 }
 
 async function renderQueue() {

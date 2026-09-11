@@ -1299,6 +1299,12 @@
       <button type="button" class="ghost" data-close="specialRequest">✕</button>
     </div>
     <div class="panel-body">
+      <div class="mode-grid" style="margin-bottom:10px;">
+        <div class="sr-top-mode-chip selected" data-sr-top-mode="lateEntry"><span class="emoji">⏰</span>Late Entry</div>
+        <div class="sr-top-mode-chip" data-sr-top-mode="leave"><span class="emoji">🌴</span>Leave / Vacation</div>
+      </div>
+
+      <div id="srLateEntrySection">
       <p class="hint">Forgot to clock in, missed a whole day, or need to fix a mistake after the fact? Fill this in — it goes to your department head (or an admin) for approval before it becomes a real entry.</p>
 
       <div class="card glass">
@@ -1367,6 +1373,63 @@
         <strong style="font-size:14px;">Pending approvals</strong>
         <p class="hint" style="margin-top:2px;">Special requests waiting on you — approve or reject anytime.</p>
         <div id="srApprovalsList" style="margin-top:8px;"></div>
+      </div>
+      </div>
+
+      <div id="srLeaveSection" style="display:none;">
+        <p class="hint">Request time off — Holiday, Emergency Leave, Exhibition, Sick Leave, Maternity Leave, or Other. It goes to your department head (or an admin) for approval, then shows up on the leave calendar so nobody double-books the same people on a project.</p>
+
+        <div class="card glass">
+          <strong style="font-size:14px;">New leave request</strong>
+          <label>Leave type</label>
+          <div id="leaveTypeGrid" class="mode-grid">
+            <div class="leave-type-chip" data-leave-type="holiday"><span class="emoji">🏖️</span>Holiday</div>
+            <div class="leave-type-chip" data-leave-type="emergency"><span class="emoji">🚨</span>Emergency Leave</div>
+            <div class="leave-type-chip" data-leave-type="exhibition"><span class="emoji">🎪</span>Exhibition</div>
+            <div class="leave-type-chip" data-leave-type="sick"><span class="emoji">🤒</span>Sick Leave</div>
+            <div class="leave-type-chip" data-leave-type="maternity"><span class="emoji">🤰</span>Maternity Leave</div>
+            <div class="leave-type-chip" data-leave-type="other"><span class="emoji">✨</span>Other</div>
+          </div>
+
+          <div class="row-2" style="margin-top:10px;">
+            <div>
+              <label for="leaveStartDate">From</label>
+              <input id="leaveStartDate" type="date" />
+            </div>
+            <div>
+              <label for="leaveEndDate">To (return day after this)</label>
+              <input id="leaveEndDate" type="date" />
+            </div>
+          </div>
+
+          <label for="leaveRequestReason">Reason (optional)</label>
+          <textarea id="leaveRequestReason" placeholder="Anything worth telling your department head?"></textarea>
+
+          <button type="button" class="primary" id="leaveSubmitBtn" style="width:100%; margin-top:12px;">Submit for approval</button>
+        </div>
+
+        <div class="card glass" style="margin-top:14px;">
+          <strong style="font-size:14px;">My leave requests</strong>
+          <div id="myLeaveRequestsList" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="card glass" id="leaveApprovalsCard" style="margin-top:14px; display:none;">
+          <strong style="font-size:14px;">Pending leave approvals</strong>
+          <p class="hint" style="margin-top:2px;">Leave requests waiting on you — approve or reject anytime.</p>
+          <div id="leaveApprovalsList" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="card glass" id="leaveCalendarCard" style="margin-top:14px; display:none;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <strong style="font-size:14px;">📅 Who's on leave this year</strong>
+            <div class="location-row" style="margin:0;">
+              <select id="leaveCalendarYear" style="flex:1 1 100px;"></select>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:2px;">Approved leave only, one bar per period, colour-coded by type — a quick way to see who's away, when, and when they're back before allocating a project.</p>
+          <div class="profit-chart-card" id="leaveCalendarChartWrap" style="margin-top:10px; height:340px;"><canvas id="leaveCalendarChart"></canvas></div>
+          <div id="leaveCalendarLegendList" style="margin-top:10px; display:flex; flex-direction:column; gap:4px;"></div>
+        </div>
       </div>
     </div>
   </div>
