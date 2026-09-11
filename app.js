@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.44.1';
+const APP_VERSION = 'v3.45.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Fixed a styling bug: the Request Document type chips, leave-type chips, and the Late Entry/Leave/Document mode toggle had no visible highlight when tapped, making them look unresponsive. They now show the same orange selected-state as everywhere else in the app.";
+const APP_UPDATE_NOTES = "Leave/Vacation and Request Document are now admin-gated: both are OFF by default (Request Document especially — salary/visa documents are private) and only show up inside Special Request once an admin ticks 'Leave / Vacation requests' or 'Request Document' for that person in Map Access. Fixed a styling bug where the new chips had no visible highlight when tapped.";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2944,6 +2944,8 @@ const FEATURE_LIST = [
   { key: 'renewal', label: 'My Document Renewal Status (AEON Ai can tell them their own passport, visa, work permit and other document expiry — never anyone else\'s)' },
   { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
   { key: 'profit', label: 'Profit Analyzer (project cost/profit breakdown, hourly rates, payments)' },
+  { key: 'leaveRequest', label: 'Leave / Vacation requests (inside Special Request)' },
+  { key: 'documentRequest', label: 'Request Document (inside Special Request)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
