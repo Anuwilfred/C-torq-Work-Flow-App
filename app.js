@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.39.0';
+const APP_VERSION = 'v3.40.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: Profit Analyzer — search any project to see its quoted price, labor cost by department/person (using each person\'s hourly rate from Data Feed), extra costs, payments collected, and profit, with charts. Also shows a company-wide profit trend over any year range you pick. Set hourly rates for people in Data Feed. Requires the accompanying Supabase SQL migration to be run first.';
+const APP_UPDATE_NOTES = 'Profit Analyzer now pulls Quoted price + role hours straight from the JOB DATA Google Sheet (no manual entry) via sync-job-hours. New role totals section: whole-project hours/cost per role (Engineer, Technician, Supervisor, Foreman, Manager, Lead, Sales, Estimation, Marketing, Engineering, Design, Driver…) compared against quoted hours, with a chart, and an efficiency bonus (hours + cost) automatically credited — split by hours logged — to whoever finishes a role under its quoted hours. Department tiles, extra costs, and payments unchanged.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2885,7 +2885,10 @@ document.addEventListener('touchend', () => { newsDragStartX = null; });
 // need FEATURE_LIST and fetchRoles(), defined just after this block).
 // =====================================================================
 
-const POSITION_LABEL = { engineer: 'Engineer', supervisor: 'Supervisor', foreman: 'Lead Foreman', technician: 'Technician', helper: 'Helper', other: 'Other' };
+const POSITION_LABEL = {
+  engineer: 'Engineer', supervisor: 'Supervisor', foreman: 'Lead Foreman', technician: 'Technician', helper: 'Helper', other: 'Other',
+  manager: 'Manager', lead: 'Lead', sales: 'Sales', estimation: 'Estimation', marketing: 'Marketing', engineering: 'Engineering', design: 'Design', driver: 'Driver',
+};
 
 // Departments that break allocated hours down by role (matches your JOB
 // DATA sheet's Engineers/Supervisor/Foremen/Technicians columns) — keyed
@@ -2982,9 +2985,17 @@ function positionForRoleName(name) {
   const n = (name || '').toLowerCase();
   if (n === 'engineer') return 'engineer';
   if (n === 'supervisor') return 'supervisor';
-  if (n.includes('foreman')) return 'foreman'; // matches "Foreman" or "Lead Foreman"
+  if (n.includes('foreman')) return 'foreman'; // matches "Foreman" or "Lead Foreman" — checked before the plain 'lead' match below
   if (n === 'technician') return 'technician';
   if (n === 'helper') return 'helper';
+  if (n === 'manager') return 'manager';
+  if (n === 'lead') return 'lead';
+  if (n === 'sales') return 'sales';
+  if (n.includes('estimat')) return 'estimation'; // matches "Estimation" or "Estimator"
+  if (n === 'marketing') return 'marketing';
+  if (n.includes('engineering')) return 'engineering'; // distinct from the plain 'engineer' role above
+  if (n === 'design') return 'design';
+  if (n === 'driver') return 'driver';
   return 'other';
 }
 
@@ -8825,6 +8836,14 @@ async function fetchAllPaginated(table, selectStr, applyFilters) {
 // total if this job has no Quotation at all — some projects are quoted one
 // way, some the other.
 async function fetchQuotedPrice(jobId) {
+  // Sheet-sourced quote (JOB DATA "Quoted price" column, synced straight into
+  // projects.quoted_price by sync-job-hours) is now the primary source — no
+  // manual entry needed. Only fall back to the old manual Quotation/BOQ
+  // derivation for jobs the sheet hasn't quoted yet.
+  const { data: proj } = await sb.from('projects').select('quoted_price').eq('job_id', jobId).maybeSingle();
+  if (proj && proj.quoted_price !== null && proj.quoted_price !== undefined && Number(proj.quoted_price) > 0) {
+    return { source: 'sheet', amount: Number(proj.quoted_price) || 0 };
+  }
   const { data: quotes } = await sb.from('quotations')
     .select('id, status, issue_date')
     .eq('job_id', jobId)
@@ -8843,6 +8862,78 @@ async function fetchQuotedPrice(jobId) {
   return { source: null, amount: 0 };
 }
 
+// Role-wide (not department-scoped) budget-vs-actual + efficiency bonus.
+// Budget per role comes from project_position_hours (Engineers/Supervisor/
+// Foremen/Technicians/Departments columns synced from the JOB DATA sheet —
+// see sync-job-hours). Actual hours/cost per role come from job_hours_ledger
+// joined to each person's profiles.position. When a role finishes UNDER its
+// quoted hours, the saved hours + cost become a bonus split proportionally
+// to hours logged among the people who actually worked that role on this job.
+async function fetchRoleBreakdown(jobId) {
+  const [{ data: posHours }, { data: ledgerRows }, { data: people }] = await Promise.all([
+    sb.from('project_position_hours').select('position, allocated_hours').eq('job_id', jobId),
+    sb.from('job_hours_ledger').select('person_id, hours').eq('job_id', jobId),
+    sb.from('profiles').select('id, full_name, email, position, hourly_rate'),
+  ]);
+
+  const peopleMap = new Map((people || []).map((p) => [p.id, p]));
+  const allocatedByPosition = new Map((posHours || []).filter((r) => r.position !== 'general').map((r) => [r.position, Number(r.allocated_hours) || 0]));
+
+  const buckets = new Map(); // position -> { hours, cost, people: Map(personId -> {name, hours, rate, cost}) }
+  (ledgerRows || []).forEach((row) => {
+    const person = peopleMap.get(row.person_id);
+    const position = person?.position || 'other';
+    const hours = Number(row.hours) || 0;
+    const rate = Number(person?.hourly_rate || 0);
+    const cost = hours * rate;
+    if (!buckets.has(position)) buckets.set(position, { hours: 0, cost: 0, people: new Map() });
+    const bucket = buckets.get(position);
+    bucket.hours += hours;
+    bucket.cost += cost;
+    const key = row.person_id || 'unknown';
+    if (!bucket.people.has(key)) bucket.people.set(key, { id: key, name: person?.full_name || person?.email || 'Unknown', hours: 0, rate, cost: 0 });
+    const pRec = bucket.people.get(key);
+    pRec.hours += hours;
+    pRec.cost += cost;
+  });
+
+  // Union of every position that has either a budget or actual hours, so a
+  // fully-budgeted-but-not-yet-worked role (or vice versa) still shows up.
+  const allPositions = new Set([...allocatedByPosition.keys(), ...buckets.keys()]);
+
+  const roles = [...allPositions].map((position) => {
+    const bucket = buckets.get(position) || { hours: 0, cost: 0, people: new Map() };
+    const allocated = allocatedByPosition.get(position) || 0;
+    const variance = allocated - bucket.hours; // positive = under budget (gained time), negative = exceeded
+    const peopleArr = [...bucket.people.values()].sort((a, b) => b.hours - a.hours);
+
+    // Bonus only applies when there's a real budget to have beaten and the
+    // role actually logged hours (no budget = nothing to compare against;
+    // no hours logged = no one to credit).
+    const bonusPool = allocated > 0 && bucket.hours > 0 && variance > 0 ? variance : 0;
+    const peopleWithBonus = peopleArr.map((p) => {
+      const share = bucket.hours > 0 ? p.hours / bucket.hours : 0;
+      const bonusHours = bonusPool * share;
+      const bonusCost = bonusHours * p.rate;
+      return { ...p, bonusHours, bonusCost };
+    });
+
+    return {
+      position,
+      label: POSITION_LABEL[position] || position,
+      allocated,
+      actualHours: bucket.hours,
+      actualCost: bucket.cost,
+      variance,
+      bonusHours: bonusPool,
+      bonusCost: peopleWithBonus.reduce((s, p) => s + p.bonusCost, 0),
+      people: peopleWithBonus,
+    };
+  }).sort((a, b) => (b.allocated + b.actualHours) - (a.allocated + a.actualHours));
+
+  return roles;
+}
+
 async function fetchProjectCostBreakdown(jobId) {
   const [
     { data: ledgerRows },
@@ -8852,6 +8943,7 @@ async function fetchProjectCostBreakdown(jobId) {
     quoted,
     { data: extraCosts },
     { data: payments },
+    roles,
   ] = await Promise.all([
     sb.from('job_hours_ledger').select('person_id, department_id, hours').eq('job_id', jobId),
     sb.from('project_department_hours').select('department_id, allocated_hours').eq('job_id', jobId),
@@ -8860,6 +8952,7 @@ async function fetchProjectCostBreakdown(jobId) {
     fetchQuotedPrice(jobId),
     sb.from('project_extra_costs').select('*').eq('job_id', jobId).order('entry_date', { ascending: false }),
     sb.from('project_payments').select('*').eq('job_id', jobId).order('entry_date', { ascending: false }),
+    fetchRoleBreakdown(jobId),
   ]);
 
   const peopleMap = new Map((people || []).map((p) => [p.id, p]));
@@ -8916,6 +9009,7 @@ async function fetchProjectCostBreakdown(jobId) {
       .sort((a, b) => b.cost - a.cost),
     extraCosts: extraCosts || [],
     payments: payments || [],
+    roles,
   };
 }
 
@@ -8936,6 +9030,39 @@ function profitDeptRowHtml(d) {
           </div>
         `).join('')}
       </div>
+    </div>
+  `;
+}
+
+function profitRoleRowHtml(r) {
+  const hasBudget = r.allocated > 0;
+  const over = hasBudget && r.variance < 0;
+  const under = hasBudget && r.variance > 0;
+  const varianceLabel = !hasBudget
+    ? 'No budget set for this role yet'
+    : over
+      ? `Exceeded quoted hours by ${Math.abs(r.variance).toFixed(1)}h`
+      : under
+        ? `${r.variance.toFixed(1)}h under quote — bonus earned`
+        : 'Right on quote';
+  const varianceColor = over ? '#ff5470' : under ? '#39ffb0' : '#cfe8ff';
+  return `
+    <div class="card glass" style="margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;">
+        <strong style="font-size:13px;">${escapeHtml(r.label)}</strong>
+        <span class="hint">${r.actualHours.toFixed(1)}h${hasBudget ? ` / ${r.allocated.toFixed(1)}h quoted` : ''} · ${formatUSD(r.actualCost)}</span>
+      </div>
+      <div class="hint" style="color:${varianceColor}; margin-top:2px;">${varianceLabel}</div>
+      ${r.bonusHours > 0 ? `<div class="hint" style="color:#39ffb0; margin-top:2px;">🏆 Efficiency bonus pool: ${r.bonusHours.toFixed(1)}h · ${formatUSD(r.bonusCost)}</div>` : ''}
+      ${r.people.length ? `
+      <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;">
+        ${r.people.map((p) => `
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; gap:8px;">
+            <span>${escapeHtml(p.name)}</span>
+            <span class="hint">${p.hours.toFixed(1)}h × ${formatUSD(p.rate)}/hr = ${formatUSD(p.cost)}${p.bonusHours > 0 ? ` · 🏆 +${p.bonusHours.toFixed(1)}h / ${formatUSD(p.bonusCost)} bonus` : ''}</span>
+          </div>
+        `).join('')}
+      </div>` : ''}
     </div>
   `;
 }
@@ -8966,6 +9093,7 @@ function profitPaymentRowHtml(p) {
 
 let profitDeptDoughnutChart = null;
 let profitDeptBarChart = null;
+let profitRoleBarChart = null;
 
 function renderProfitCharts(data) {
   const doughnutEl = $('profitDeptDoughnut');
@@ -8973,6 +9101,7 @@ function renderProfitCharts(data) {
   if (typeof Chart === 'undefined' || !doughnutEl || !barEl) return;
   if (profitDeptDoughnutChart) { profitDeptDoughnutChart.destroy(); profitDeptDoughnutChart = null; }
   if (profitDeptBarChart) { profitDeptBarChart.destroy(); profitDeptBarChart = null; }
+  if (profitRoleBarChart) { profitRoleBarChart.destroy(); profitRoleBarChart = null; }
 
   const palette = ['#39ffb0', '#4dabff', '#ffb84d', '#ff5470', '#b98bff', '#5df2c8', '#f2d94d', '#ff8a5c'];
   const depts = data.departments;
@@ -9014,6 +9143,32 @@ function renderProfitCharts(data) {
       },
     },
   });
+
+  const roleBarEl = $('profitRoleBar');
+  const roles = (data.roles || []).filter((r) => r.allocated > 0 || r.actualHours > 0);
+  if (roleBarEl && roles.length) {
+    profitRoleBarChart = new Chart(roleBarEl.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: roles.map((r) => r.label),
+        datasets: [
+          { label: 'Quoted hrs', data: roles.map((r) => r.allocated), backgroundColor: 'rgba(77,171,255,0.5)' },
+          { label: 'Actual hrs', data: roles.map((r) => r.actualHours), backgroundColor: roles.map((r) => (r.allocated && r.actualHours > r.allocated ? '#ff5470' : '#39ffb0')) },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } },
+          title: { display: true, text: 'Quoted vs actual hours by role', color: '#cfe8ff' },
+        },
+        scales: {
+          x: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        },
+      },
+    });
+  }
 }
 
 function wireProfitDetailButtons(jobId, jobName) {
@@ -9070,7 +9225,7 @@ async function renderProfitDetail(jobId, jobName) {
   body.innerHTML = `
     <div class="profit-stat-grid">
       <div class="profit-stat-card">
-        <div class="hint">💵 Quoted price${data.quoted.source ? ` (${data.quoted.source === 'quotation' ? 'Quotation' : 'BOQ'})` : ''}</div>
+        <div class="hint">💵 Quoted price${data.quoted.source ? ` (${data.quoted.source === 'sheet' ? 'JOB DATA sheet' : data.quoted.source === 'quotation' ? 'Quotation' : 'BOQ'})` : ''}</div>
         <div class="profit-stat-value">${formatUSD(data.expected)}</div>
       </div>
       <div class="profit-stat-card">
@@ -9096,6 +9251,13 @@ async function renderProfitDetail(jobId, jobName) {
     <div style="margin-top:18px;">
       <strong style="font-size:14px;">👷 Department &amp; person breakdown</strong>
       <div id="profitDeptList" style="margin-top:8px;">${data.departments.length ? data.departments.map(profitDeptRowHtml).join('') : '<div class="empty">No hours logged yet.</div>'}</div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <strong style="font-size:14px;">🧮 Role totals, quoted-vs-actual &amp; bonus</strong>
+      <p class="hint" style="margin-top:2px;">Whole-project totals per role (Engineer, Technician, Supervisor, Foreman, Manager…), compared against the hours quoted for that role in the JOB DATA sheet. A role that finishes under its quoted hours turns the saved time into a bonus, split by hours logged among the people who worked it.</p>
+      <div class="profit-chart-card" style="margin-top:10px;"><canvas id="profitRoleBar" height="220"></canvas></div>
+      <div id="profitRoleList" style="margin-top:8px;">${(data.roles || []).length ? data.roles.map(profitRoleRowHtml).join('') : '<div class="empty">No role budget or hours yet.</div>'}</div>
     </div>
 
     <div style="margin-top:20px;">
