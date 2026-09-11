@@ -1030,9 +1030,9 @@ input.stage-pos-input::-webkit-outer-spin-button {
   transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   line-height: 1.2;
 }
-.mode-chip .emoji, .qsr-mode-chip .emoji, .sr-mode-chip .emoji { font-size: 19px; }
-.mode-chip:hover, .qsr-mode-chip:hover, .sr-mode-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
-.mode-chip.selected, .qsr-mode-chip.selected, .sr-mode-chip.selected {
+.mode-chip .emoji, .qsr-mode-chip .emoji, .sr-mode-chip .emoji, .sr-top-mode-chip .emoji, .leave-type-chip .emoji, .doc-type-chip .emoji { font-size: 19px; }
+.mode-chip:hover, .qsr-mode-chip:hover, .sr-mode-chip:hover, .sr-top-mode-chip:hover, .leave-type-chip:hover, .doc-type-chip:hover { border-color: var(--glass-border-strong); color: var(--text); }
+.mode-chip.selected, .qsr-mode-chip.selected, .sr-mode-chip.selected, .sr-top-mode-chip.selected, .leave-type-chip.selected, .doc-type-chip.selected {
   background: linear-gradient(160deg, rgba(224,138,95,0.22), rgba(204,120,92,0.14));
   border-color: var(--accent);
   color: var(--text);

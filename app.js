@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.44.0';
+const APP_VERSION = 'v3.44.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Leave calendar chart now prints each person's name directly on (or right next to) their colour bar, so it's obvious at a glance who each bar belongs to instead of hunting the axis label.";
+const APP_UPDATE_NOTES = "Fixed a styling bug: the Request Document type chips, leave-type chips, and the Late Entry/Leave/Document mode toggle had no visible highlight when tapped, making them look unresponsive. They now show the same orange selected-state as everywhere else in the app.";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
