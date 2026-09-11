@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.43.0';
+const APP_VERSION = 'v3.44.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Special Request now has a Request Document option: pick from admin-managed document types (Salary Certificate, Visa, Work Permit, NOC, etc. — managed in Data Feed), explain where it\'s going, and submit. Admin uploads the file once ready and you get a push notification, then download it from My document requests. Requires the accompanying SQL (adds document_types + document_requests) and a new private "document-requests" Storage bucket.';
+const APP_UPDATE_NOTES = "Leave calendar chart now prints each person's name directly on (or right next to) their colour bar, so it's obvious at a glance who each bar belongs to instead of hunting the axis label.";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -11588,6 +11588,52 @@ function monthLabelForDay(day, year) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// Draws each person's name directly on (or right next to) their colour
+// bar, rather than relying only on the cramped y-axis label margin — the
+// name and the bar it belongs to are meant to read as one unit at a
+// glance. Registered once, and only acts on a chart that explicitly opts
+// in via options.plugins.leaveNameLabelPlugin.enabled, so it never touches
+// the other Chart.js charts elsewhere in the app.
+let leaveNameLabelPluginRegistered = false;
+function ensureLeaveNameLabelPlugin() {
+  if (leaveNameLabelPluginRegistered || typeof Chart === 'undefined') return;
+  Chart.register({
+    id: 'leaveNameLabelPlugin',
+    afterDatasetsDraw(chart) {
+      if (!chart.options?.plugins?.leaveNameLabelPlugin?.enabled) return;
+      const meta = chart.getDatasetMeta(0);
+      if (!meta) return;
+      const { ctx } = chart;
+      ctx.save();
+      ctx.font = '600 11px sans-serif';
+      ctx.textBaseline = 'middle';
+      meta.data.forEach((bar, i) => {
+        const label = chart.data.labels[i];
+        if (!label || !bar) return;
+        const { x, y, base } = bar.getProps(['x', 'y', 'base'], true);
+        const left = Math.min(x, base);
+        const barWidth = Math.abs(x - base);
+        const text = String(label);
+        const textWidth = ctx.measureText(text).width;
+        if (textWidth + 10 <= barWidth) {
+          // Fits inside its own bar — dark text right on the colour.
+          ctx.fillStyle = '#0a0a14';
+          ctx.textAlign = 'left';
+          ctx.fillText(text, left + 5, y);
+        } else {
+          // Too long for the bar — print just past its end instead, still
+          // clearly paired with that bar rather than only on the axis.
+          ctx.fillStyle = '#e8f4ff';
+          ctx.textAlign = 'left';
+          ctx.fillText(text, Math.max(x, base) + 5, y);
+        }
+      });
+      ctx.restore();
+    },
+  });
+  leaveNameLabelPluginRegistered = true;
+}
+
 function populateLeaveCalendarYearSelect() {
   const sel = $('leaveCalendarYear');
   if (!sel || leaveCalendarYearPopulated) return;
@@ -11643,14 +11689,18 @@ async function renderLeaveCalendar() {
   ]);
   const colors = sorted.map((r) => LEAVE_TYPE_COLOR[r.leave_type] || '#39ffb0');
 
+  ensureLeaveNameLabelPlugin();
+
   leaveCalendarChart = new Chart(chartEl.getContext('2d'), {
     type: 'bar',
     data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
     options: {
       indexAxis: 'y',
       maintainAspectRatio: false,
+      layout: { padding: { right: 90 } },
       plugins: {
         legend: { display: false },
+        leaveNameLabelPlugin: { enabled: true },
         title: { display: true, text: `Who's on leave — ${year}`, color: '#cfe8ff' },
         tooltip: {
           callbacks: {
