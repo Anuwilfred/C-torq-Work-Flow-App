@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.45.0';
+const APP_VERSION = 'v3.46.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Leave/Vacation and Request Document are now admin-gated: both are OFF by default (Request Document especially — salary/visa documents are private) and only show up inside Special Request once an admin ticks 'Leave / Vacation requests' or 'Request Document' for that person in Map Access. Fixed a styling bug where the new chips had no visible highlight when tapped.";
+const APP_UPDATE_NOTES = "New Field Activities tile (admin-gated, off by default): marketing/field people tap Mission Start each morning, log client visits with a goal + GPS, then add a brief once each meeting is done, and tap Mission Stop at day's end. Admins get a Person activity view with tiles, a line graph, and a live map of who's currently in the field.";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2946,6 +2946,7 @@ const FEATURE_LIST = [
   { key: 'profit', label: 'Profit Analyzer (project cost/profit breakdown, hourly rates, payments)' },
   { key: 'leaveRequest', label: 'Leave / Vacation requests (inside Special Request)' },
   { key: 'documentRequest', label: 'Request Document (inside Special Request)' },
+  { key: 'fieldActivities', label: 'Field Activities (mission start/stop + client visit logging — for marketing/field people)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -5321,6 +5322,7 @@ const PANEL_IDS = {
   renewalManager: ['renewalManagerOverlay', 'renewalManagerOverlayBackdrop'],
   renewalEdit: ['renewalEditOverlay', 'renewalEditOverlayBackdrop'],
   renewalHistory: ['renewalHistoryOverlay', 'renewalHistoryOverlayBackdrop'],
+  fieldActivities: ['fieldActivitiesOverlay', 'fieldActivitiesOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   people: ['peopleOverlay', 'peopleOverlayBackdrop'],
@@ -5391,6 +5393,9 @@ function openPanel(name, opts = {}) {
     renderDocumentRequestForm();
     renderMyDocumentRequests();
     renderDocumentRequestApprovals();
+  }
+  if (name === 'fieldActivities') {
+    renderFieldActivitiesPanel();
   }
   if (name === 'people') {
     renderTeamList();
@@ -11919,6 +11924,488 @@ async function reviewDocumentRequest(requestId, action) {
     renderDocumentRequestApprovals();
   } catch (err) {
     showToast(`Couldn't reject: ${err.message || err}`);
+  }
+}
+
+// =====================================================================
+// FIELD ACTIVITIES — marketing/field people log client visits against a
+// day-long "mission" (Mission Start each morning, Mission Stop at day's
+// end). Each visit picks a client from the existing Clients list, states
+// a goal, captures GPS when heading there, then gets a brief + GPS again
+// once the meeting is done. Admin gets a per-person analytics view (tiles
+// + line graph) to see how effective each person is at bringing in
+// business, since the Project Tank depends on this team finding work.
+// In-app only for now — no Google Sheet sync.
+// =====================================================================
+
+let currentFieldMission = null; // the signed-in user's active mission row, or null
+let fieldMissionTimerIntervalId = null;
+let fieldLocationIntervalId = null;
+const FIELD_LOCATION_INTERVAL_MS = 2 * 60 * 1000; // every 2 minutes while a mission is active
+
+async function fetchActiveFieldMission() {
+  if (!currentUser) return null;
+  const { data, error } = await sb.from('field_missions')
+    .select('*')
+    .eq('person_id', currentUser.id)
+    .eq('status', 'active')
+    .order('start_at', { ascending: false })
+    .limit(1);
+  if (error || !data || !data.length) return null;
+  return data[0];
+}
+
+function fieldMissionTimerTick() {
+  if (!currentFieldMission || !$('fieldMissionTimer')) return;
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(currentFieldMission.start_at).getTime()) / 1000));
+  const h = String(Math.floor(secs / 3600)).padStart(2, '0');
+  const m = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+  const s = String(secs % 60).padStart(2, '0');
+  $('fieldMissionTimer').textContent = `${h}:${m}:${s}`;
+}
+
+function stopFieldMissionTimer() {
+  if (fieldMissionTimerIntervalId) { clearInterval(fieldMissionTimerIntervalId); fieldMissionTimerIntervalId = null; }
+}
+
+function startFieldMissionTimer() {
+  stopFieldMissionTimer();
+  fieldMissionTimerTick();
+  fieldMissionTimerIntervalId = setInterval(fieldMissionTimerTick, 1000);
+}
+
+// Same idea as updateMyDriverLocation()/startDriverLocationLoopIfNeeded(),
+// but scoped to "mission currently active" rather than "has Driver role",
+// and read-access is admin-or-self only (see field_locations RLS) rather
+// than visible to everyone the way driver_locations is.
+async function updateMyFieldLocation() {
+  if (!currentFieldMission || !currentUser) return;
+  const r = await fetchAndFillLocation({ silent: true, fillField: false });
+  if (!r.ok) return;
+  await sb.from('field_locations').upsert({
+    person_id: currentUser.id,
+    lat: r.lat,
+    lng: r.lng,
+    address: r.address,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'person_id' });
+}
+
+function startFieldLocationLoopIfNeeded() {
+  if (fieldLocationIntervalId || !currentFieldMission || !navigator.geolocation) return;
+  updateMyFieldLocation();
+  fieldLocationIntervalId = setInterval(updateMyFieldLocation, FIELD_LOCATION_INTERVAL_MS);
+}
+
+function stopFieldLocationLoop() {
+  if (fieldLocationIntervalId) { clearInterval(fieldLocationIntervalId); fieldLocationIntervalId = null; }
+}
+
+async function renderFieldMissionCard() {
+  const statusText = $('fieldMissionStatusText');
+  const toggleBtn = $('fieldMissionToggleBtn');
+  const timerEl = $('fieldMissionTimer');
+  const visitFormCard = $('fieldVisitFormCard');
+  const todayCard = $('fieldTodayCard');
+  if (!statusText || !toggleBtn) return;
+
+  currentFieldMission = await fetchActiveFieldMission();
+
+  if (currentFieldMission) {
+    const startTime = new Date(currentFieldMission.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    statusText.textContent = `Mission started at ${startTime} — good luck out there.`;
+    toggleBtn.textContent = '🛑 Mission Stop';
+    if (timerEl) timerEl.style.display = 'block';
+    startFieldMissionTimer();
+    if (visitFormCard) visitFormCard.style.display = '';
+    if (todayCard) todayCard.style.display = '';
+    startFieldLocationLoopIfNeeded();
+  } else {
+    statusText.textContent = 'Not started today.';
+    toggleBtn.textContent = '🚀 Start Mission';
+    if (timerEl) timerEl.style.display = 'none';
+    stopFieldMissionTimer();
+    if (visitFormCard) visitFormCard.style.display = 'none';
+    if (todayCard) todayCard.style.display = 'none';
+    stopFieldLocationLoop();
+  }
+}
+
+if ($('fieldMissionToggleBtn')) {
+  $('fieldMissionToggleBtn').addEventListener('click', async () => {
+    const btn = $('fieldMissionToggleBtn');
+    btn.disabled = true;
+    try {
+      if (!currentFieldMission) {
+        const r = await fetchAndFillLocation({ silent: true, fillField: false });
+        const { error } = await sb.from('field_missions').insert({
+          person_id: currentUser.id,
+          mission_date: new Date().toISOString().slice(0, 10),
+          start_lat: r.ok ? r.lat : null,
+          start_lng: r.ok ? r.lng : null,
+          start_address: r.ok ? r.address : null,
+        });
+        if (error) throw error;
+        showToast('Mission started — have a good day out there!');
+      } else {
+        const { data: openVisits } = await sb.from('field_visits')
+          .select('id').eq('mission_id', currentFieldMission.id).eq('status', 'traveling');
+        if (openVisits && openVisits.length) {
+          showToast('Finish your current visit (add a brief) before stopping the mission.');
+          return;
+        }
+        if (!confirm('Stop your mission for today?')) return;
+        const r = await fetchAndFillLocation({ silent: true, fillField: false });
+        const { error } = await sb.from('field_missions').update({
+          end_at: new Date().toISOString(),
+          end_lat: r.ok ? r.lat : null,
+          end_lng: r.ok ? r.lng : null,
+          end_address: r.ok ? r.address : null,
+          status: 'completed',
+        }).eq('id', currentFieldMission.id);
+        if (error) throw error;
+        showToast('Mission stopped — nice work today.');
+      }
+      await renderFieldMissionCard();
+      await renderFieldTodayVisits();
+    } catch (err) {
+      showToast(`Couldn't update mission: ${err.message || err}`);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// ---------- Log a visit (nested inside an active mission) ----------
+
+async function populateFieldVisitClientSelect() {
+  const sel = $('fieldVisitClientSelect');
+  if (!sel) return;
+  let rows = clientsCache;
+  if (!rows || !rows.length) {
+    const res = await fetchClients();
+    rows = res.rows;
+    clientsCache = rows;
+  }
+  sel.innerHTML = '<option value="">Choose a client…</option>' + rows.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+}
+
+if ($('fieldVisitStartBtn')) {
+  $('fieldVisitStartBtn').addEventListener('click', async () => {
+    if (!currentFieldMission) { showToast('Start your mission first.'); return; }
+    const clientId = $('fieldVisitClientSelect').value;
+    const goal = $('fieldVisitGoal').value.trim();
+    if (!clientId) { showToast('Pick a client.'); return; }
+    if (!goal) { showToast('What is the goal of this visit?'); return; }
+    const btn = $('fieldVisitStartBtn');
+    btn.disabled = true;
+    btn.textContent = '📍 Locating…';
+    try {
+      const r = await fetchAndFillLocation({ silent: true, fillField: false });
+      const { error } = await sb.from('field_visits').insert({
+        mission_id: currentFieldMission.id,
+        person_id: currentUser.id,
+        client_id: clientId,
+        goal,
+        start_lat: r.ok ? r.lat : null,
+        start_lng: r.ok ? r.lng : null,
+        start_address: r.ok ? r.address : null,
+      });
+      if (error) throw error;
+      showToast("On your way — don't forget to add a brief once you're done.");
+      $('fieldVisitClientSelect').value = '';
+      $('fieldVisitGoal').value = '';
+      renderFieldTodayVisits();
+    } catch (err) {
+      showToast(`Couldn't log visit: ${err.message || err}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "📍 I'm heading there";
+    }
+  });
+}
+
+async function finishFieldVisit(visitId) {
+  const brief = prompt('Quick brief about this meeting (what happened, next steps, etc.):');
+  if (brief === null) return;
+  if (!brief.trim()) { showToast('A brief is needed to close out the visit.'); return; }
+  try {
+    const r = await fetchAndFillLocation({ silent: true, fillField: false });
+    const { error } = await sb.from('field_visits').update({
+      visit_end_at: new Date().toISOString(),
+      end_lat: r.ok ? r.lat : null,
+      end_lng: r.ok ? r.lng : null,
+      end_address: r.ok ? r.address : null,
+      brief: brief.trim(),
+      status: 'completed',
+    }).eq('id', visitId);
+    if (error) throw error;
+    showToast('Visit closed out.');
+    renderFieldTodayVisits();
+  } catch (err) {
+    showToast(`Couldn't finish visit: ${err.message || err}`);
+  }
+}
+
+async function renderFieldTodayVisits() {
+  const statsEl = $('fieldTodayStats');
+  const listEl = $('fieldTodayVisitsList');
+  if (!listEl || !currentUser) return;
+  listEl.innerHTML = '<div class="empty">Loading…</div>';
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const { data, error } = await sb.from('field_visits')
+    .select('*, clients(name)')
+    .eq('person_id', currentUser.id)
+    .gte('visit_start_at', `${todayStr}T00:00:00`)
+    .order('visit_start_at', { ascending: false });
+  if (error) { listEl.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  const rows = data || [];
+  if (statsEl) {
+    const completed = rows.filter((r) => r.status === 'completed').length;
+    statsEl.innerHTML = `<span>👥 ${rows.length} visit${rows.length === 1 ? '' : 's'} today</span><span>✅ ${completed} completed</span>`;
+  }
+  if (!rows.length) { listEl.innerHTML = '<div class="empty">No visits logged yet today.</div>'; return; }
+  listEl.innerHTML = rows.map((r) => `
+    <div class="entry" style="align-items:flex-start;">
+      <span class="type-icon">${r.status === 'completed' ? '✅' : '📍'}</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.clients?.name || 'Client')}</div>
+        <div class="entry-meta">${escapeHtml(r.goal)}</div>
+        ${r.brief ? `<div class="entry-meta">📝 ${escapeHtml(r.brief)}</div>` : ''}
+        <div class="entry-meta">${new Date(r.visit_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${r.visit_end_at ? ' → ' + new Date(r.visit_end_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ' (in progress)'}</div>
+        ${r.status === 'traveling' ? `<button type="button" class="secondary" data-field-finish-visit="${r.id}" style="margin-top:8px;">Finished — add brief</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+  listEl.querySelectorAll('[data-field-finish-visit]').forEach((btn) => {
+    btn.addEventListener('click', () => finishFieldVisit(btn.dataset.fieldFinishVisit));
+  });
+}
+
+// ---------- Admin analytics: pick a person + period, see tiles + line graph ----------
+
+let fieldAdminSelectedPersonId = '';
+let fieldAdminSelectedPeriodDays = 30;
+let fieldAdminLineChart = null;
+
+async function populateFieldAdminPersonSelect() {
+  const sel = $('fieldAdminPersonSelect');
+  if (!sel) return;
+  const { data, error } = await sb.from('profiles').select('id, full_name, email').order('full_name', { ascending: true });
+  if (error || !data) return;
+  sel.innerHTML = '<option value="">Choose a person…</option>' + data.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+  if (fieldAdminSelectedPersonId) sel.value = fieldAdminSelectedPersonId;
+}
+
+if ($('fieldAdminPersonSelect')) {
+  $('fieldAdminPersonSelect').addEventListener('change', () => {
+    fieldAdminSelectedPersonId = $('fieldAdminPersonSelect').value;
+    renderFieldAdminAnalytics();
+  });
+}
+
+document.querySelectorAll('.field-period-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.field-period-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    fieldAdminSelectedPeriodDays = Number(btn.dataset.fieldPeriod) || 30;
+    renderFieldAdminAnalytics();
+  });
+});
+
+async function renderFieldAdminAnalytics() {
+  const summaryEl = $('fieldAdminSummary');
+  const tileGridEl = $('fieldAdminTileGrid');
+  const chartWrapEl = $('fieldAdminLineChartWrap');
+  if (!summaryEl) return;
+  if (!fieldAdminSelectedPersonId) {
+    summaryEl.innerHTML = '<div class="empty">Pick a person to see their activity.</div>';
+    if (tileGridEl) tileGridEl.innerHTML = '';
+    if (chartWrapEl) chartWrapEl.style.display = 'none';
+    return;
+  }
+  summaryEl.innerHTML = '<div class="empty">Loading…</div>';
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - fieldAdminSelectedPeriodDays);
+
+  const [{ data: missions, error: mErr }, { data: visits, error: vErr }] = await Promise.all([
+    sb.from('field_missions').select('*').eq('person_id', fieldAdminSelectedPersonId).gte('start_at', cutoff.toISOString()).order('start_at', { ascending: true }),
+    sb.from('field_visits').select('*, clients(name)').eq('person_id', fieldAdminSelectedPersonId).gte('visit_start_at', cutoff.toISOString()).order('visit_start_at', { ascending: true }),
+  ]);
+  if (mErr || vErr) { summaryEl.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml((mErr || vErr).message)}</div>`; return; }
+
+  const missionRows = missions || [];
+  const visitRows = visits || [];
+  const totalHours = missionRows.reduce((sum, m) => {
+    const end = m.end_at ? new Date(m.end_at).getTime() : Date.now();
+    return sum + Math.max(0, end - new Date(m.start_at).getTime()) / 3600000;
+  }, 0);
+  const completedVisits = visitRows.filter((v) => v.status === 'completed').length;
+  const uniqueClients = new Set(visitRows.map((v) => v.client_id)).size;
+  const missionDays = new Set(missionRows.map((m) => m.mission_date)).size;
+
+  summaryEl.innerHTML = `
+    <div class="profit-stat-grid">
+      <div class="profit-stat-card"><div class="hint">🗓️ Days in field</div><div class="profit-stat-value" style="color:#4dabff;">${missionDays}</div></div>
+      <div class="profit-stat-card"><div class="hint">👥 Customers met</div><div class="profit-stat-value" style="color:#39ffb0;">${completedVisits}</div></div>
+      <div class="profit-stat-card"><div class="hint">🧭 Total visits</div><div class="profit-stat-value" style="color:#ffb84d;">${visitRows.length}</div></div>
+      <div class="profit-stat-card"><div class="hint">🏢 Unique clients</div><div class="profit-stat-value" style="color:#b98bff;">${uniqueClients}</div></div>
+      <div class="profit-stat-card"><div class="hint">⏱️ Hours in field</div><div class="profit-stat-value" style="color:#f2d94d;">${totalHours.toFixed(1)}h</div></div>
+    </div>
+  `;
+
+  // Bucket by day for short periods, by month for long ones — used for
+  // both the tile grid and the line graph below it.
+  const byMonth = fieldAdminSelectedPeriodDays > 90;
+  const bucketKey = (dateStr) => (byMonth ? dateStr.slice(0, 7) : dateStr.slice(0, 10));
+  const bucketLabel = (key) => (byMonth
+    ? new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+    : new Date(`${key}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+
+  const bucket = new Map();
+  const ensureBucket = (key) => {
+    if (!bucket.has(key)) bucket.set(key, { visits: 0, customers: 0, hours: 0 });
+    return bucket.get(key);
+  };
+  missionRows.forEach((m) => {
+    const b = ensureBucket(bucketKey(m.mission_date));
+    const end = m.end_at ? new Date(m.end_at).getTime() : Date.now();
+    b.hours += Math.max(0, end - new Date(m.start_at).getTime()) / 3600000;
+  });
+  visitRows.forEach((v) => {
+    const b = ensureBucket(bucketKey(v.visit_start_at.slice(0, 10)));
+    b.visits += 1;
+    if (v.status === 'completed') b.customers += 1;
+  });
+
+  const sortedKeys = [...bucket.keys()].sort();
+
+  if (tileGridEl) {
+    tileGridEl.innerHTML = sortedKeys.length ? sortedKeys.map((k) => {
+      const b = bucket.get(k);
+      return `
+        <div class="profit-dept-card">
+          <div class="hint">${escapeHtml(bucketLabel(k))}</div>
+          <div style="font-size:13px; margin-top:4px;">🧭 ${b.visits} visits · 👥 ${b.customers} met</div>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">⏱️ ${b.hours.toFixed(1)}h</div>
+        </div>
+      `;
+    }).join('') : '<div class="empty">No activity in this period.</div>';
+  }
+
+  if (chartWrapEl) {
+    if (fieldAdminLineChart) { fieldAdminLineChart.destroy(); fieldAdminLineChart = null; }
+    if (sortedKeys.length && typeof Chart !== 'undefined') {
+      chartWrapEl.style.display = 'block';
+      const chartEl = $('fieldAdminLineChart');
+      fieldAdminLineChart = new Chart(chartEl.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: sortedKeys.map(bucketLabel),
+          datasets: [
+            { label: 'Visits', data: sortedKeys.map((k) => bucket.get(k).visits), borderColor: '#4dabff', backgroundColor: 'rgba(77,171,255,0.15)', fill: true, tension: 0.35 },
+            { label: 'Customers met', data: sortedKeys.map((k) => bucket.get(k).customers), borderColor: '#39ffb0', backgroundColor: 'rgba(57,255,176,0.15)', fill: true, tension: 0.35 },
+          ],
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { color: '#cfe8ff', boxWidth: 10, font: { size: 10 } } } },
+          scales: {
+            x: { ticks: { color: '#cfe8ff', maxRotation: sortedKeys.length > 12 ? 60 : 0 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+            y: { ticks: { color: '#cfe8ff' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          },
+        },
+      });
+    } else {
+      chartWrapEl.style.display = 'none';
+    }
+  }
+}
+
+// ---------- Live map: who's currently on an active mission right now ----------
+
+let fieldLiveMapInstance = null;
+
+async function renderFieldLiveMap() {
+  const listEl = $('fieldLiveMapList');
+  const mapWrap = $('fieldLiveMapArea');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="empty">Loading…</div>';
+
+  const { data: activeMissions, error: mErr } = await sb.from('field_missions').select('person_id').eq('status', 'active');
+  if (mErr) { listEl.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(mErr.message)}</div>`; return; }
+  const activePersonIds = [...new Set((activeMissions || []).map((m) => m.person_id))];
+  if (!activePersonIds.length) {
+    listEl.innerHTML = '<div class="empty">No one is on an active mission right now.</div>';
+    if (mapWrap) mapWrap.style.display = 'none';
+    return;
+  }
+
+  const { data, error } = await sb.from('field_locations')
+    .select('person_id, lat, lng, address, updated_at, profiles(full_name, email)')
+    .in('person_id', activePersonIds);
+  if (error) { listEl.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+
+  const rows = data || [];
+  listEl.innerHTML = rows.length ? rows.map((r) => `
+    <div class="entry">
+      <span class="type-icon">📍</span>
+      <div class="entry-body">
+        <div class="entry-desc">${escapeHtml(r.profiles?.full_name || r.profiles?.email || 'Field person')}</div>
+        <div class="entry-meta">${escapeHtml(r.address || '')} · ${escapeHtml(minutesAgoLabel(r.updated_at))}</div>
+      </div>
+    </div>
+  `).join('') : '<div class="empty">On a mission, but no location captured yet.</div>';
+
+  if (mapWrap && typeof L !== 'undefined' && rows.filter((r) => r.lat && r.lng).length) {
+    mapWrap.style.display = 'block';
+    if (!fieldLiveMapInstance) {
+      fieldLiveMapInstance = L.map(mapWrap);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles © Esri',
+      }).addTo(fieldLiveMapInstance);
+      fieldLiveMapInstance._markerLayer = L.layerGroup().addTo(fieldLiveMapInstance);
+    }
+    fieldLiveMapInstance._markerLayer.clearLayers();
+    const points = rows.filter((r) => r.lat && r.lng);
+    points.forEach((r) => {
+      const name = r.profiles?.full_name || r.profiles?.email || 'Field person';
+      const marker = L.marker([r.lat, r.lng]).addTo(fieldLiveMapInstance._markerLayer);
+      marker.bindTooltip(
+        `<div class="live-driver-tag"><b>${escapeHtml(name)}</b></div>`,
+        { permanent: true, direction: 'top', offset: [0, -30], className: 'live-driver-tooltip' }
+      );
+      marker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(name)}</b><br>${escapeHtml(r.address || '')}</div>`);
+    });
+    if (points.length) {
+      const bounds = L.latLngBounds(points.map((r) => [r.lat, r.lng]));
+      setTimeout(() => {
+        fieldLiveMapInstance.invalidateSize();
+        fieldLiveMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
+      }, 50);
+    }
+  } else if (mapWrap) {
+    mapWrap.style.display = 'none';
+  }
+}
+
+// ---------- Panel entry point (wired into openPanel('fieldActivities')) ----------
+
+async function renderFieldActivitiesPanel() {
+  const isAdmin = currentProfile?.role === 'admin';
+  if ($('fieldAdminCard')) $('fieldAdminCard').style.display = isAdmin ? 'block' : 'none';
+  if ($('fieldLiveMapCard')) $('fieldLiveMapCard').style.display = isAdmin ? 'block' : 'none';
+
+  await renderFieldMissionCard();
+  await populateFieldVisitClientSelect();
+  await renderFieldTodayVisits();
+
+  if (isAdmin) {
+    await populateFieldAdminPersonSelect();
+    const defaultBtn = document.querySelector(`.field-period-btn[data-field-period="${fieldAdminSelectedPeriodDays}"]`);
+    document.querySelectorAll('.field-period-btn').forEach((b) => b.classList.toggle('active', b === defaultBtn));
+    renderFieldAdminAnalytics();
+    renderFieldLiveMap();
   }
 }
 

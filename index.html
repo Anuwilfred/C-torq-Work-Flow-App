@@ -234,6 +234,10 @@
           <span class="home-tile-icon home-tile-icon-datafeed">📥</span>
           <span class="home-tile-label">Data Feed</span>
         </button>
+        <button type="button" class="home-tile" data-open="fieldActivities" data-feature="fieldActivities">
+          <span class="home-tile-icon home-tile-icon-field">🧭</span>
+          <span class="home-tile-label">Field Activities</span>
+        </button>
         <!-- RENEWAL MANAGER — visible to admins, and to anyone granted the
              'renewal' Map Access feature (full read/write on every
              employee's passport/visa/EID/work-permit data, same as an
@@ -1458,6 +1462,87 @@
           <div id="docRequestApprovalsList" style="margin-top:8px;"></div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- FIELD ACTIVITIES OVERLAY — marketing/field people log client visits
+     against a day-long "mission" (Mission Start in the morning, Mission
+     Stop at day's end); admin gets a per-person analytics view (tiles +
+     line graph) to see how effective each person is at finding business,
+     since the Project Tank depends on this team bringing in work. -->
+<div id="fieldActivitiesOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="fieldActivitiesOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🧭 Field Activities</strong>
+      <button type="button" class="ghost" data-close="fieldActivities">✕</button>
+    </div>
+    <div class="panel-body">
+
+      <!-- MY MISSION — personal start/stop, shown to anyone with
+           fieldActivities access (marketing/field people). -->
+      <div class="card glass" id="fieldMissionCard">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div>
+            <strong style="font-size:14px;">My mission</strong>
+            <p class="hint" style="margin-top:2px;" id="fieldMissionStatusText">Not started today.</p>
+          </div>
+          <button type="button" class="primary" id="fieldMissionToggleBtn" style="margin-top:0; white-space:nowrap;">🚀 Start Mission</button>
+        </div>
+        <div id="fieldMissionTimer" style="margin-top:10px; font-size:26px; font-weight:700; text-align:center; display:none;">00:00:00</div>
+      </div>
+
+      <!-- LOG A VISIT — only usable while a mission is active. -->
+      <div class="card glass" id="fieldVisitFormCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📍 Log a visit</strong>
+        <label for="fieldVisitClientSelect">Client</label>
+        <select id="fieldVisitClientSelect"><option value="">Choose a client…</option></select>
+        <label for="fieldVisitGoal">Goal of this visit</label>
+        <textarea id="fieldVisitGoal" placeholder="What are you trying to achieve at this visit?"></textarea>
+        <button type="button" class="primary" id="fieldVisitStartBtn" style="width:100%; margin-top:12px;">📍 I'm heading there</button>
+      </div>
+
+      <div class="card glass" id="fieldTodayCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">Today's visits</strong>
+        <div id="fieldTodayStats" style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap; font-size:12px; color:var(--text-muted);"></div>
+        <div id="fieldTodayVisitsList" style="margin-top:10px;"></div>
+      </div>
+
+      <!-- ADMIN ANALYTICS — per-person history, tiles + line graph. -->
+      <div class="card glass" id="fieldAdminCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📊 Person activity</strong>
+        <p class="hint" style="margin-top:2px;">See how effective each field/marketing person is — visits, customers met, and hours worked over a period.</p>
+        <label for="fieldAdminPersonSelect">Person</label>
+        <select id="fieldAdminPersonSelect"><option value="">Choose a person…</option></select>
+
+        <label style="margin-top:10px;">Period</label>
+        <div class="location-row" style="flex-wrap:wrap;">
+          <button type="button" class="secondary field-period-btn" data-field-period="30">1 month</button>
+          <button type="button" class="secondary field-period-btn" data-field-period="60">2 months</button>
+          <button type="button" class="secondary field-period-btn" data-field-period="90">3 months</button>
+          <button type="button" class="secondary field-period-btn" data-field-period="180">6 months</button>
+          <button type="button" class="secondary field-period-btn" data-field-period="365">1 year</button>
+          <button type="button" class="secondary field-period-btn" data-field-period="730">2 years</button>
+        </div>
+
+        <div id="fieldAdminSummary" style="margin-top:12px;"></div>
+
+        <div class="profit-chart-card" style="margin-top:14px; height:260px; display:none;" id="fieldAdminLineChartWrap"><canvas id="fieldAdminLineChart"></canvas></div>
+
+        <div style="margin-top:14px;">
+          <strong style="font-size:13px;">Breakdown</strong>
+          <div id="fieldAdminTileGrid" class="profit-dept-grid" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <!-- LIVE MAP — who's currently on an active mission right now. -->
+      <div class="card glass" id="fieldLiveMapCard" style="margin-top:14px; display:none;">
+        <strong style="font-size:14px;">📍 Currently in the field</strong>
+        <div id="fieldLiveMapArea" style="height:240px; border-radius: var(--r-md); overflow:hidden; margin-top:10px;"></div>
+        <div id="fieldLiveMapList" style="margin-top:10px;"></div>
+      </div>
+
     </div>
   </div>
 </div>
