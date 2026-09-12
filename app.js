@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.47.4';
+const APP_VERSION = 'v3.48.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Field Activities' 'Log a visit' can now handle a brand-new client on the spot — toggle to 'New client', type the company name, and it's added to Clients and logged as a visit in one step. (Needs the field_visit_new_client_migration.sql run once in Supabase for non-admin field people to use it.)";
+const APP_UPDATE_NOTES = 'Project Stage Timeline can now send a finished stage back for correction (shown as a red arc on the road) and raise cross-stage questions, with red/hard-red badges on any stage that has an open request against it. (Needs project_stage_requests_migration.sql run once in Supabase, and the updated advance-project-stage Edge Function redeployed.)';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -7898,6 +7898,44 @@ async function fetchStageState(jobId) {
   return { stagesStartedAt: project?.stages_started_at || null, byKey };
 }
 
+// ---- Stage requests: "send back for correction" + cross-stage comments ----
+// One row per ask, either kind:
+//   'query'     — a question aimed at another stage, doesn't touch the
+//                 roadmap, just sits open until that stage's head resolves it.
+//   'send_back' — reopens an earlier, already-completed stage for rework;
+//                 resolving it re-completes that stage and the roadmap
+//                 continues forward from wherever it paused.
+// Open ones (regardless of kind) are what drive a stage's red/hard-red
+// color on the road — see renderProjectStages/drawStageLadder below.
+async function fetchStageRequests(jobId) {
+  const { data, error } = await sb
+    .from('project_stage_requests')
+    .select('*')
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: false });
+  if (error) return [];
+  return data || [];
+}
+
+// Thin wrapper around the same advance-project-stage Edge Function used by
+// callAdvanceStage, just for the two new request actions — kept separate so
+// the existing start/advance call sites don't need to change shape.
+async function callStageRequestAction(jobId, extra) {
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { showToast('Please log in first.'); return null; }
+  try {
+    const { data, error } = await sb.functions.invoke('advance-project-stage', {
+      body: { jobId, ...extra },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error || data?.ok === false) throw new Error(data?.error || await readFunctionsError(error));
+    return data;
+  } catch (err) {
+    showToast(err.message || String(err));
+    return null;
+  }
+}
+
 // Wraps the advance-project-stage Edge Function call — shows the real
 // server-side error (e.g. "not your department's turn") via a toast rather
 // than swallowing it, and returns null on failure so callers can just
@@ -7960,7 +7998,9 @@ function splitStageLabel(label, maxChars) {
 // glass background — that's what made earlier text hard to read). The road
 // itself glows the accent color for every stretch where both ends are
 // done, so overall progress reads at a glance without checking every node.
-function drawStageLadder(container, templates, byKey, activeIdx) {
+function drawStageLadder(container, templates, byKey, activeIdx, requestInfo) {
+  const openCounts = requestInfo?.openCounts || {};
+  const sendBackArrows = requestInfo?.sendBackArrows || [];
   const R = 18;
   const SEG = 150;
   const PAD_X = 90;
@@ -8011,6 +8051,17 @@ function drawStageLadder(container, templates, byKey, activeIdx) {
   merge.appendChild(svgEl('feMergeNode', { in: 'SourceGraphic' }));
   glow.appendChild(merge);
   defs.appendChild(glow);
+  // Arrowhead for the "sent back" curves drawn below the loop — one open
+  // send_back request draws one dashed arc from the stage that raised it
+  // back to the stage it's aimed at, so the correction reads as a real
+  // backward motion on the road rather than just a colored dot.
+  const arrowMarker = svgEl('marker', {
+    id: 'sendBackArrow', viewBox: '0 0 10 10', refX: 8, refY: 5,
+    markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse',
+  });
+  const arrowPath = svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#c74a4a' });
+  arrowMarker.appendChild(arrowPath);
+  defs.appendChild(arrowMarker);
   svg.appendChild(defs);
 
   // ---- the road itself: dark asphalt base + a dashed centerline ----
@@ -8112,6 +8163,40 @@ function drawStageLadder(container, templates, byKey, activeIdx) {
       dur.textContent = durationText;
       svg.appendChild(dur);
     }
+
+    // Open-request badge: green (no badge) when clear, red for one open
+    // ask, progressively darker "hard red" the more open asks are stacked
+    // against this stage — independent of done/active, since a finished
+    // stage can still have an unresolved question sitting on it.
+    const openCount = openCounts[key] || 0;
+    if (openCount > 0) {
+      const badgeColor = openCount === 1 ? '#e06565' : (openCount === 2 ? '#c74a4a' : '#8b1e1e');
+      const badgeX = p.x + R * 0.78, badgeY = p.y - R * 0.78;
+      svg.appendChild(svgEl('circle', { cx: badgeX, cy: badgeY, r: 10, fill: badgeColor, stroke: '#1c1b19', 'stroke-width': 1.6 }));
+      const badgeText = svgEl('text', { x: badgeX, y: badgeY + 3.5, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: '#fff' });
+      badgeText.textContent = String(openCount);
+      svg.appendChild(badgeText);
+      const title = svgEl('title', {});
+      title.textContent = `${openCount} open request${openCount > 1 ? 's' : ''} on ${label}`;
+      badgeText.appendChild(title);
+    }
+  });
+
+  // ---- backward "sent back" curves — drawn last so they sit above
+  // everything else and are unmistakable. One dashed red arc per open
+  // send_back request, arcing above the road from the stage that raised it
+  // to the earlier stage it's aimed at. ----
+  sendBackArrows.forEach((arrow) => {
+    const fromPt = pts.find((p) => p.key === arrow.from);
+    const toPt = pts.find((p) => p.key === arrow.to);
+    if (!fromPt || !toPt) return;
+    const midX = (fromPt.x + toPt.x) / 2;
+    const arcY = Math.min(fromPt.y, toPt.y) - 70;
+    const d = `M ${fromPt.x} ${fromPt.y - R - 4} Q ${midX} ${arcY}, ${toPt.x} ${toPt.y - R - 4}`;
+    svg.appendChild(svgEl('path', {
+      d, fill: 'none', stroke: '#c74a4a', 'stroke-width': 3, 'stroke-dasharray': '7 6',
+      'marker-end': 'url(#sendBackArrow)', opacity: 0.9,
+    }));
   });
 
   container.appendChild(svg);
@@ -8157,45 +8242,203 @@ async function renderProjectStages(jobId) {
 
   const activeIdx = templates.findIndex((t) => !byKey[t.stage_key]?.completed);
   const roadmapComplete = activeIdx === -1;
+  const requests = await fetchStageRequests(jobId);
+  const openRequests = requests.filter((r) => r.status === 'open');
+  const openCounts = {};
+  openRequests.forEach((r) => { openCounts[r.to_stage_key] = (openCounts[r.to_stage_key] || 0) + 1; });
+  const sendBackArrows = openRequests.filter((r) => r.kind === 'send_back').map((r) => ({ from: r.from_stage_key, to: r.to_stage_key }));
 
   area.innerHTML = `
     <div class="card glass">
       <strong style="font-size:14px;">Project timeline</strong>
-      <p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road. ${roadmapComplete ? 'Every stage is complete.' : "The highlighted stage is what's active right now."}</p>
+      <p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road. ${roadmapComplete ? 'Every stage is complete.' : "The highlighted stage is what's active right now."} A red badge marks a stage with an open question or correction against it — darker red means more than one stacked up.</p>
       <div id="stageSvgWrap" class="stage-road-scroll"></div>
       <div id="stageActiveArea" style="margin-top:12px;"></div>
     </div>
-  `;
-  drawStageLadder($('stageSvgWrap'), templates, byKey, activeIdx);
-
-  const activeArea = $('stageActiveArea');
-  if (!activeArea || roadmapComplete) return;
-
-  const current = templates[activeIdx];
-  const currentRow = byKey[current.stage_key];
-  const deptId = currentRow?.department_id ?? current.department_id;
-  const dept = deptId ? deptHeads[deptId] : null;
-  const canAct = isAdmin || (dept && dept.head_id === currentUser?.id);
-  const elapsed = currentRow?.started_at ? formatStageDuration(Date.now() - new Date(currentRow.started_at)) : '';
-
-  activeArea.innerHTML = `
-    <div class="stage-active-card">
-      <div class="stage-active-top">
-        <span class="stage-active-label">🟥 Active now: ${escapeHtml(current.label)}</span>
-        <span class="stage-active-dept">${escapeHtml(dept?.name || 'No department assigned')}</span>
-      </div>
-      ${elapsed ? `<div class="stage-active-elapsed">${elapsed} so far</div>` : ''}
-      ${canAct
-        ? '<button type="button" id="advanceStageBtn" class="secondary" style="margin-top:8px; width:auto; padding:9px 18px;">✅ Mark finished &amp; hand off</button>'
-        : `<div class="hint" style="margin-top:6px;">Only ${escapeHtml(dept?.name || 'the assigned department')}'s head (or an admin) can acknowledge this stage.</div>`}
+    <div class="card glass" style="margin-top:10px;">
+      <strong style="font-size:14px;">📋 Stage requests</strong>
+      <p class="hint" style="margin-top:4px;">Ask another stage a question, or send an already-finished stage back for correction. Either way it stays open — and that stage shows red on the road above — until the stage it's aimed at marks it done.</p>
+      <div id="stageRequestFormArea" style="margin-top:8px;"></div>
+      <div id="stageRequestsListArea" style="margin-top:12px;"></div>
     </div>
   `;
-  $('advanceStageBtn')?.addEventListener('click', async (e) => {
-    if (!confirm(`Mark "${current.label}" finished and hand off to the next stage?`)) return;
-    e.target.disabled = true; e.target.textContent = 'Handing off…';
-    const res = await callAdvanceStage(jobId, 'advance', current.stage_key);
-    if (res) { showToast(res.roadmapComplete ? 'Roadmap complete!' : 'Handed off to the next stage.'); delete projectsStageCache[jobId]; renderProjectStages(jobId); }
-    else { e.target.disabled = false; e.target.textContent = '✅ Mark finished & hand off'; }
+  drawStageLadder($('stageSvgWrap'), templates, byKey, activeIdx, { openCounts, sendBackArrows });
+
+  const activeArea = $('stageActiveArea');
+  if (activeArea && !roadmapComplete) {
+    const current = templates[activeIdx];
+    const currentRow = byKey[current.stage_key];
+    const deptId = currentRow?.department_id ?? current.department_id;
+    const dept = deptId ? deptHeads[deptId] : null;
+    const canAct = isAdmin || (dept && dept.head_id === currentUser?.id);
+    const elapsed = currentRow?.started_at ? formatStageDuration(Date.now() - new Date(currentRow.started_at)) : '';
+
+    activeArea.innerHTML = `
+      <div class="stage-active-card">
+        <div class="stage-active-top">
+          <span class="stage-active-label">🟥 Active now: ${escapeHtml(current.label)}</span>
+          <span class="stage-active-dept">${escapeHtml(dept?.name || 'No department assigned')}</span>
+        </div>
+        ${elapsed ? `<div class="stage-active-elapsed">${elapsed} so far</div>` : ''}
+        ${canAct
+          ? '<button type="button" id="advanceStageBtn" class="secondary" style="margin-top:8px; width:auto; padding:9px 18px;">✅ Mark finished &amp; hand off</button>'
+          : `<div class="hint" style="margin-top:6px;">Only ${escapeHtml(dept?.name || 'the assigned department')}'s head (or an admin) can acknowledge this stage.</div>`}
+      </div>
+    `;
+    $('advanceStageBtn')?.addEventListener('click', async (e) => {
+      if (!confirm(`Mark "${current.label}" finished and hand off to the next stage?`)) return;
+      e.target.disabled = true; e.target.textContent = 'Handing off…';
+      const res = await callAdvanceStage(jobId, 'advance', current.stage_key);
+      if (res) { showToast(res.roadmapComplete ? 'Roadmap complete!' : 'Handed off to the next stage.'); delete projectsStageCache[jobId]; renderProjectStages(jobId); }
+      else { e.target.disabled = false; e.target.textContent = '✅ Mark finished & hand off'; }
+    });
+  }
+
+  renderStageRequestForm(jobId, templates, byKey, deptHeads, isAdmin, activeIdx);
+  renderStageRequestsList(jobId, templates, byKey, deptHeads, isAdmin, requests);
+}
+
+// Stages the current signed-in person may speak FOR — an admin can speak
+// for any of them; everyone else only for the stage(s) whose department
+// they head (mirrors the exact same rule the Edge Function enforces
+// server-side, so nothing shown here can be rejected as a surprise).
+function myActableStageKeys(templates, byKey, deptHeads, isAdmin) {
+  if (isAdmin) return templates.map((t) => t.stage_key);
+  return templates
+    .filter((t) => {
+      const deptId = byKey[t.stage_key]?.department_id ?? t.department_id;
+      const dept = deptId ? deptHeads[deptId] : null;
+      return dept && dept.head_id === currentUser?.id;
+    })
+    .map((t) => t.stage_key);
+}
+
+// The "Ask a question" / "Send back for correction" mini-form. Kind is a
+// toggle (like the Existing/New client toggle in Field Activities); the
+// "Directed at" options are recomputed whenever the kind or "From" stage
+// changes — send_back can only target an already-completed stage, query
+// can target any other stage.
+function renderStageRequestForm(jobId, templates, byKey, deptHeads, isAdmin, activeIdx) {
+  const formArea = $('stageRequestFormArea');
+  if (!formArea) return;
+  const actableKeys = myActableStageKeys(templates, byKey, deptHeads, isAdmin);
+  if (!actableKeys.length) {
+    formArea.innerHTML = `<p class="hint">You're not the head of any stage's department on this project, so you can't raise a request here — but you can still see what's open below.</p>`;
+    return;
+  }
+  const labelFor = (key) => templates.find((t) => t.stage_key === key)?.label || key;
+  const defaultFrom = (activeIdx >= 0 && actableKeys.includes(templates[activeIdx]?.stage_key))
+    ? templates[activeIdx].stage_key
+    : actableKeys[0];
+
+  formArea.innerHTML = `
+    <div class="location-row">
+      <button type="button" class="secondary active" id="stageReqKindQuery" style="flex:1; margin-top:0;">💬 Ask a question</button>
+      <button type="button" class="secondary" id="stageReqKindSendBack" style="flex:1; margin-top:0;">⏪ Send back for correction</button>
+    </div>
+    <label style="margin-top:8px; display:block;">From (you're speaking for)</label>
+    <select id="stageReqFrom">
+      ${actableKeys.map((k) => `<option value="${escapeHtml(k)}"${k === defaultFrom ? ' selected' : ''}>${escapeHtml(labelFor(k))}</option>`).join('')}
+    </select>
+    <label style="margin-top:6px; display:block;">Directed at</label>
+    <select id="stageReqTo"></select>
+    <textarea id="stageReqMessage" placeholder="What do you need?" style="margin-top:6px;"></textarea>
+    <button type="button" class="primary" id="stageReqSubmitBtn" style="width:100%; margin-top:8px;">Send</button>
+  `;
+
+  let kind = 'query';
+  const toSelect = $('stageReqTo');
+  const fromSelect = $('stageReqFrom');
+
+  function refreshToOptions() {
+    const fromKey = fromSelect.value;
+    const candidates = templates.filter((t) => {
+      if (t.stage_key === fromKey) return false;
+      if (kind === 'send_back') return !!byKey[t.stage_key]?.completed;
+      return true;
+    });
+    toSelect.innerHTML = candidates.length
+      ? candidates.map((t) => `<option value="${escapeHtml(t.stage_key)}">${escapeHtml(t.label)}</option>`).join('')
+      : '<option value="">(no eligible stage)</option>';
+  }
+  refreshToOptions();
+  fromSelect.addEventListener('change', refreshToOptions);
+
+  $('stageReqKindQuery').addEventListener('click', () => {
+    kind = 'query';
+    $('stageReqKindQuery').classList.add('active');
+    $('stageReqKindSendBack').classList.remove('active');
+    refreshToOptions();
+  });
+  $('stageReqKindSendBack').addEventListener('click', () => {
+    kind = 'send_back';
+    $('stageReqKindSendBack').classList.add('active');
+    $('stageReqKindQuery').classList.remove('active');
+    refreshToOptions();
+  });
+
+  $('stageReqSubmitBtn').addEventListener('click', async (e) => {
+    const fromStageKey = fromSelect.value;
+    const toStageKey = toSelect.value;
+    const message = $('stageReqMessage').value.trim();
+    if (!toStageKey) { showToast('Pick a stage to direct this at.'); return; }
+    if (!message) { showToast('Add a message describing what you need.'); return; }
+    e.target.disabled = true; e.target.textContent = 'Sending…';
+    const res = await callStageRequestAction(jobId, { action: 'raise_request', kind, fromStageKey, toStageKey, message });
+    if (res) {
+      showToast(kind === 'send_back' ? 'Sent back — that stage is active again.' : 'Question sent.');
+      delete projectsStageCache[jobId];
+      renderProjectStages(jobId);
+    } else {
+      e.target.disabled = false; e.target.textContent = 'Send';
+    }
+  });
+}
+
+// List of open (and recently resolved) requests for this project, each
+// with a "Mark done" button gated to the TO stage's head (or admin) — the
+// exact same check the Edge Function re-verifies server-side.
+function renderStageRequestsList(jobId, templates, byKey, deptHeads, isAdmin, requests) {
+  const listArea = $('stageRequestsListArea');
+  if (!listArea) return;
+  if (!requests.length) {
+    listArea.innerHTML = '<p class="hint">No questions or corrections have been raised on this project yet.</p>';
+    return;
+  }
+  const labelFor = (key) => templates.find((t) => t.stage_key === key)?.label || key;
+  const canResolve = (toStageKey) => {
+    if (isAdmin) return true;
+    const deptId = byKey[toStageKey]?.department_id ?? templates.find((t) => t.stage_key === toStageKey)?.department_id;
+    const dept = deptId ? deptHeads[deptId] : null;
+    return !!dept && dept.head_id === currentUser?.id;
+  };
+  const sorted = [...requests].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+    return new Date(b.created_at) - new Date(a.created_at);
+  });
+  listArea.innerHTML = sorted.slice(0, 25).map((r) => {
+    const ago = formatStageDuration(Date.now() - new Date(r.created_at));
+    const kindLabel = r.kind === 'send_back' ? '⏪ Sent back' : '💬 Question';
+    const resolvable = r.status === 'open' && canResolve(r.to_stage_key);
+    return `
+      <div class="card glass" style="margin-top:8px; ${r.status === 'resolved' ? 'opacity:0.65;' : ''}">
+        <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+          <strong style="font-size:13px;">${kindLabel}: ${escapeHtml(labelFor(r.from_stage_key))} → ${escapeHtml(labelFor(r.to_stage_key))}</strong>
+          <span class="hint">${r.status === 'resolved' ? '✅ done' : `${ago} ago`}</span>
+        </div>
+        <p style="margin-top:4px; font-size:13px;">${escapeHtml(r.message)}</p>
+        ${resolvable ? `<button type="button" class="secondary" data-resolve-request="${r.id}" style="margin-top:6px; width:auto; padding:7px 14px;">✅ Mark done</button>` : ''}
+      </div>
+    `;
+  }).join('');
+  listArea.querySelectorAll('[data-resolve-request]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const requestId = e.target.getAttribute('data-resolve-request');
+      e.target.disabled = true; e.target.textContent = 'Marking…';
+      const res = await callStageRequestAction(jobId, { action: 'resolve_request', requestId });
+      if (res) { showToast('Marked done.'); delete projectsStageCache[jobId]; renderProjectStages(jobId); }
+      else { e.target.disabled = false; e.target.textContent = '✅ Mark done'; }
+    });
   });
 }
 
