@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.46.0';
+const APP_VERSION = 'v3.47.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "New Field Activities tile (admin-gated, off by default): marketing/field people tap Mission Start each morning, log client visits with a goal + GPS, then add a brief once each meeting is done, and tap Mission Stop at day's end. Admins get a Person activity view with tiles, a line graph, and a live map of who's currently in the field.";
+const APP_UPDATE_NOTES = "Company Finder now runs on free OpenStreetMap search — no API key, no billing account, $0 to run. (Trade-off: listings are community-submitted, so coverage is patchier than a paid directory — well-known/larger companies usually show up, smaller specialized ones may not.)";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2947,6 +2947,7 @@ const FEATURE_LIST = [
   { key: 'leaveRequest', label: 'Leave / Vacation requests (inside Special Request)' },
   { key: 'documentRequest', label: 'Request Document (inside Special Request)' },
   { key: 'fieldActivities', label: 'Field Activities (mission start/stop + client visit logging — for marketing/field people)' },
+  { key: 'companyFinder', label: 'Company Finder (search real companies by industry/location, add as Client) — private, off by default' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -5323,6 +5324,7 @@ const PANEL_IDS = {
   renewalEdit: ['renewalEditOverlay', 'renewalEditOverlayBackdrop'],
   renewalHistory: ['renewalHistoryOverlay', 'renewalHistoryOverlayBackdrop'],
   fieldActivities: ['fieldActivitiesOverlay', 'fieldActivitiesOverlayBackdrop'],
+  companyFinder: ['companyFinderOverlay', 'companyFinderOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   people: ['peopleOverlay', 'peopleOverlayBackdrop'],
@@ -5396,6 +5398,9 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'fieldActivities') {
     renderFieldActivitiesPanel();
+  }
+  if (name === 'companyFinder') {
+    renderCompanyFinderIndustryChips();
   }
   if (name === 'people') {
     renderTeamList();
@@ -6301,13 +6306,19 @@ async function renderClientsList(isRetry = false) {
   if (!rows.length) { wrap.innerHTML = '<div class="empty">No clients yet.</div>'; return; }
   const isAdmin = currentProfile?.role === 'admin';
   wrap.innerHTML = rows.map((c) => `
-    <div class="entry">
+    <div class="entry" style="align-items:flex-start;">
       <span class="type-icon">🤝</span>
       <div class="entry-body">
         <div class="entry-desc">${escapeHtml(c.name)}</div>
         <div class="entry-meta">${[c.contact_name, c.email, c.phone].filter(Boolean).map(escapeHtml).join(' · ') || 'No contact details yet'}</div>
+        ${c.address ? `<div class="entry-meta">📍 ${escapeHtml(c.address)}${c.lat && c.lng ? ` · <a href="${liveMapUrl(c.lat, c.lng)}" target="_blank" rel="noopener">View map</a>` : ''}</div>` : ''}
       </div>
-      ${isAdmin ? `<button type="button" class="ghost" data-delete-client="${escapeHtml(c.id)}">✕</button>` : ''}
+      ${isAdmin ? `
+        <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+          <button type="button" class="ghost" data-set-client-location="${escapeHtml(c.id)}" title="Search / update this client's location">📍</button>
+          <button type="button" class="ghost" data-delete-client="${escapeHtml(c.id)}">✕</button>
+        </div>
+      ` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-delete-client]').forEach((btn) => {
@@ -6315,6 +6326,52 @@ async function renderClientsList(isRetry = false) {
       await sb.from('clients').delete().eq('id', btn.dataset.deleteClient);
       renderClientsList();
     });
+  });
+  wrap.querySelectorAll('[data-set-client-location]').forEach((btn) => {
+    btn.addEventListener('click', () => setClientLocation(btn.dataset.setClientLocation));
+  });
+}
+
+// Lets an admin search a real address for an EXISTING client (new clients
+// get this at creation time via the Address field below) — reuses the
+// same Google Places text search that powers Company Finder.
+async function setClientLocation(clientId) {
+  const q = prompt("Search an address for this client (e.g. 'Jebel Ali Free Zone, Dubai'):");
+  if (!q || !q.trim()) return;
+  const { ok, places, error } = await companyTextSearch(q.trim(), { maxResults: 1 });
+  if (!ok || !places.length) { showToast(error || "Couldn't find that address."); return; }
+  const p = places[0];
+  const { error: upErr } = await sb.from('clients').update({
+    address: p.formattedAddress || q.trim(),
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
+  }).eq('id', clientId);
+  if (upErr) { showToast(`Couldn't save location: ${upErr.message}`); return; }
+  showToast('Location updated.');
+  renderClientsList();
+}
+
+let newClientFoundLocation = null; // {lat, lng, address} once the address search below finds a match
+
+if ($('newClientAddressSearchBtn')) {
+  $('newClientAddressSearchBtn').addEventListener('click', async () => {
+    const q = $('newClientAddress').value.trim();
+    if (!q) { showToast('Type an address first.'); return; }
+    const btn = $('newClientAddressSearchBtn');
+    const preview = $('newClientAddressPreview');
+    btn.disabled = true;
+    btn.textContent = '🔍 …';
+    const { ok, places, error } = await companyTextSearch(q, { maxResults: 1 });
+    btn.disabled = false;
+    btn.textContent = '🔍 Search';
+    if (!ok || !places.length) {
+      newClientFoundLocation = null;
+      if (preview) { preview.style.display = 'block'; preview.textContent = error || "Couldn't find that address — you can still save the client without a map location."; }
+      return;
+    }
+    const p = places[0];
+    newClientFoundLocation = { lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null, address: p.formattedAddress || q };
+    if (preview) { preview.style.display = 'block'; preview.textContent = `📍 ${newClientFoundLocation.address}`; }
   });
 }
 
@@ -6328,10 +6385,15 @@ if ($('createClientBtn')) {
       email: $('newClientEmail').value.trim() || null,
       phone: $('newClientPhone').value.trim() || null,
       notes: $('newClientNotes').value.trim() || null,
+      address: newClientFoundLocation?.address || $('newClientAddress').value.trim() || null,
+      lat: newClientFoundLocation?.lat ?? null,
+      lng: newClientFoundLocation?.lng ?? null,
       created_by: currentUser.id,
     });
     if (error) { showToast(`Couldn't add client: ${error.message}`); return; }
-    ['newClientName', 'newClientContact', 'newClientEmail', 'newClientPhone', 'newClientNotes'].forEach((id) => { $(id).value = ''; });
+    ['newClientName', 'newClientContact', 'newClientEmail', 'newClientPhone', 'newClientNotes', 'newClientAddress'].forEach((id) => { $(id).value = ''; });
+    newClientFoundLocation = null;
+    if ($('newClientAddressPreview')) $('newClientAddressPreview').style.display = 'none';
     renderClientsList();
     showToast('Client added.');
   });
@@ -12090,6 +12152,19 @@ async function populateFieldVisitClientSelect() {
   sel.innerHTML = '<option value="">Choose a client…</option>' + rows.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 }
 
+if ($('fieldVisitClientSelect')) {
+  $('fieldVisitClientSelect').addEventListener('change', () => {
+    const infoEl = $('fieldVisitClientLocationInfo');
+    if (!infoEl) return;
+    const client = clientsCache.find((c) => c.id === $('fieldVisitClientSelect').value);
+    if (!client) { infoEl.style.display = 'none'; return; }
+    infoEl.style.display = 'block';
+    infoEl.innerHTML = (client.lat && client.lng)
+      ? `📍 ${escapeHtml(client.address || '')} · <a href="${liveMapUrl(client.lat, client.lng)}" target="_blank" rel="noopener">View on map</a>`
+      : 'No saved location for this client yet — search one in Clients or Company Finder.';
+  });
+}
+
 if ($('fieldVisitStartBtn')) {
   $('fieldVisitStartBtn').addEventListener('click', async () => {
     if (!currentFieldMission) { showToast('Start your mission first.'); return; }
@@ -12407,6 +12482,197 @@ async function renderFieldActivitiesPanel() {
     renderFieldAdminAnalytics();
     renderFieldLiveMap();
   }
+}
+
+// =====================================================================
+// COMPANY SEARCH — powers Company Finder (search real companies worldwide
+// by industry + location) and address search for Clients. Uses OpenStreet-
+// Map's free Nominatim search (the same free, no-key service already used
+// elsewhere in this app for reverse-geocoding clock-in/out locations) —
+// no API key, no billing account, $0, and searches run entirely inside
+// this app rather than opening Chrome/Google Maps.
+// TRADE-OFF: OSM's listings are community-submitted, not a paid business
+// directory — well-known/larger companies and named landmarks usually
+// show up, but a specific small or specialized business may not be listed
+// at all, and phone/website details generally aren't available through
+// this free endpoint (those fields are simply left blank when missing).
+// If richer, more complete coverage is ever needed, this is the one place
+// that would need to change — swap the fetch below for a paid provider
+// (e.g. Google Places) and keep returning the same { ok, places, error }
+// shape so nothing else in Company Finder or Clients has to change.
+// =====================================================================
+
+async function companyTextSearch(query, { maxResults = 12 } = {}) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=0&limit=${maxResults}&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return { ok: false, places: [], error: `Search failed (${res.status})` };
+    const data = await res.json();
+    const places = (data || [])
+      .filter((r) => r.lat && r.lon)
+      .map((r) => ({
+        id: `osm-${r.osm_type}-${r.osm_id}`,
+        displayName: { text: (r.display_name || 'Unnamed').split(',')[0].trim() },
+        formattedAddress: r.display_name || '',
+        location: { latitude: parseFloat(r.lat), longitude: parseFloat(r.lon) },
+        internationalPhoneNumber: null,
+        websiteUri: null,
+      }));
+    return { ok: true, places, error: null };
+  } catch (err) {
+    return { ok: false, places: [], error: err.message || String(err) };
+  }
+}
+
+// =====================================================================
+// COMPANY FINDER — search real companies worldwide by industry + location
+// (marine, oil & gas, manufacturers, shipping, ship builders, integration,
+// cloud, or a custom keyword), see them on a map, and save any of them
+// straight into Clients with one tap — ready for a Field Activities visit.
+// =====================================================================
+
+const COMPANY_FINDER_INDUSTRIES = [
+  { label: 'Marine Industries', emoji: '🚢' },
+  { label: 'Oil & Gas', emoji: '🛢️' },
+  { label: 'Manufacturers', emoji: '🏭' },
+  { label: 'Shipping Companies', emoji: '📦' },
+  { label: 'Ship Builders', emoji: '⚓' },
+  { label: 'Integration Companies', emoji: '🔧' },
+  { label: 'Cloud Companies', emoji: '☁️' },
+];
+
+let companyFinderSelectedIndustry = '';
+let companyFinderResults = [];
+let companyFinderMapInstance = null;
+
+function renderCompanyFinderIndustryChips() {
+  const wrap = $('companyFinderIndustryGrid');
+  if (!wrap || wrap.dataset.built) return; // build once — the grid itself never changes
+  wrap.dataset.built = '1';
+  wrap.innerHTML = COMPANY_FINDER_INDUSTRIES.map((i) => `
+    <div class="doc-type-chip" data-industry-label="${escapeHtml(i.label)}"><span class="emoji">${i.emoji}</span>${escapeHtml(i.label)}</div>
+  `).join('');
+  wrap.querySelectorAll('[data-industry-label]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      wrap.querySelectorAll('[data-industry-label]').forEach((c) => c.classList.toggle('selected', c === chip));
+      companyFinderSelectedIndustry = chip.dataset.industryLabel;
+      if ($('companyFinderKeyword')) $('companyFinderKeyword').value = '';
+    });
+  });
+}
+
+if ($('companyFinderSearchBtn')) {
+  $('companyFinderSearchBtn').addEventListener('click', async () => {
+    const location = $('companyFinderLocation').value.trim() || 'Dubai, UAE';
+    const keyword = $('companyFinderKeyword').value.trim();
+    const industry = keyword || companyFinderSelectedIndustry;
+    if (!industry) { showToast('Pick an industry, or type your own keyword.'); return; }
+    const btn = $('companyFinderSearchBtn');
+    const resultsEl = $('companyFinderResults');
+    btn.disabled = true;
+    btn.textContent = '🔍 Searching…';
+    resultsEl.innerHTML = '<div class="empty">Searching…</div>';
+    const { ok, places, error } = await companyTextSearch(`${industry} companies in ${location}`);
+    btn.disabled = false;
+    btn.textContent = '🔍 Search';
+    if (!ok) { resultsEl.innerHTML = `<div class="empty">${escapeHtml(error)}</div>`; return; }
+    companyFinderResults = places;
+    renderCompanyFinderResults();
+  });
+}
+
+async function renderCompanyFinderResults() {
+  const resultsEl = $('companyFinderResults');
+  const mapWrap = $('companyFinderMapArea');
+  if (!resultsEl) return;
+  if (!companyFinderResults.length) {
+    resultsEl.innerHTML = '<div class="empty">No companies found — try a different industry or location.</div>';
+    if (mapWrap) mapWrap.style.display = 'none';
+    return;
+  }
+
+  const placeIds = companyFinderResults.map((p) => p.id).filter(Boolean);
+  const { data: existing } = await sb.from('clients').select('place_id').in('place_id', placeIds);
+  const existingSet = new Set((existing || []).map((r) => r.place_id));
+
+  resultsEl.innerHTML = companyFinderResults.map((p, idx) => {
+    const already = existingSet.has(p.id);
+    return `
+      <div class="entry" style="align-items:flex-start;">
+        <span class="type-icon">🏢</span>
+        <div class="entry-body">
+          <div class="entry-desc">${escapeHtml(p.displayName?.text || 'Unnamed company')}</div>
+          <div class="entry-meta">${escapeHtml(p.formattedAddress || '')}</div>
+          ${p.internationalPhoneNumber ? `<div class="entry-meta">📞 ${escapeHtml(p.internationalPhoneNumber)}</div>` : ''}
+          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+            ${p.websiteUri ? `<a class="secondary" style="text-decoration:none; text-align:center; padding:8px 12px; border-radius:10px;" href="${escapeHtml(p.websiteUri)}" target="_blank" rel="noopener">🌐 Website</a>` : ''}
+            <button type="button" class="primary" style="margin-top:0;" data-add-company="${idx}" ${already ? 'disabled' : ''}>${already ? '✅ Already a client' : '➕ Add as Client'}</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  resultsEl.querySelectorAll('[data-add-company]').forEach((btn) => {
+    btn.addEventListener('click', () => addCompanyAsClient(Number(btn.dataset.addCompany), btn));
+  });
+
+  renderCompanyFinderMap();
+}
+
+async function addCompanyAsClient(idx, btn) {
+  const p = companyFinderResults[idx];
+  if (!p) return;
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+  try {
+    const { error } = await sb.from('clients').insert({
+      name: p.displayName?.text || 'Unnamed company',
+      address: p.formattedAddress || null,
+      lat: p.location?.latitude ?? null,
+      lng: p.location?.longitude ?? null,
+      phone: p.internationalPhoneNumber || null,
+      website: p.websiteUri || null,
+      industry: companyFinderSelectedIndustry || null,
+      source: 'openstreetmap',
+      place_id: p.id,
+      created_by: currentUser.id,
+    });
+    if (error) throw error;
+    btn.textContent = '✅ Added';
+    showToast(`${p.displayName?.text || 'Company'} added to Clients.`);
+    clientsCache = []; // stale — force a refresh next time it's needed
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = '➕ Add as Client';
+    showToast(`Couldn't add: ${err.message || err}`);
+  }
+}
+
+async function renderCompanyFinderMap() {
+  const mapWrap = $('companyFinderMapArea');
+  if (!mapWrap) return;
+  const points = companyFinderResults.filter((p) => p.location?.latitude && p.location?.longitude);
+  if (!points.length || typeof L === 'undefined') { mapWrap.style.display = 'none'; return; }
+  mapWrap.style.display = 'block';
+  if (!companyFinderMapInstance) {
+    companyFinderMapInstance = L.map(mapWrap);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles © Esri',
+    }).addTo(companyFinderMapInstance);
+    companyFinderMapInstance._markerLayer = L.layerGroup().addTo(companyFinderMapInstance);
+  }
+  companyFinderMapInstance._markerLayer.clearLayers();
+  points.forEach((p) => {
+    const marker = L.marker([p.location.latitude, p.location.longitude]).addTo(companyFinderMapInstance._markerLayer);
+    marker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(p.displayName?.text || '')}</b><br>${escapeHtml(p.formattedAddress || '')}</div>`);
+  });
+  const bounds = L.latLngBounds(points.map((p) => [p.location.latitude, p.location.longitude]));
+  setTimeout(() => {
+    companyFinderMapInstance.invalidateSize();
+    companyFinderMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
+  }, 50);
 }
 
 async function renderQueue() {

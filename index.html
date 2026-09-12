@@ -238,6 +238,10 @@
           <span class="home-tile-icon home-tile-icon-field">🧭</span>
           <span class="home-tile-label">Field Activities</span>
         </button>
+        <button type="button" class="home-tile" data-open="companyFinder" data-feature="companyFinder">
+          <span class="home-tile-icon home-tile-icon-field">🏢</span>
+          <span class="home-tile-label">Company Finder</span>
+        </button>
         <!-- RENEWAL MANAGER — visible to admins, and to anyone granted the
              'renewal' Map Access feature (full read/write on every
              employee's passport/visa/EID/work-permit data, same as an
@@ -1030,6 +1034,12 @@
         </div>
         <label for="newClientNotes">Notes (optional)</label>
         <textarea id="newClientNotes" placeholder="Anything worth remembering about this client"></textarea>
+        <label for="newClientAddress">Address / location (optional)</label>
+        <div class="location-row">
+          <input id="newClientAddress" type="text" placeholder="Type an address or area, then search" />
+          <button type="button" class="secondary" id="newClientAddressSearchBtn">🔍 Search</button>
+        </div>
+        <div id="newClientAddressPreview" class="hint" style="margin-top:6px; display:none;"></div>
         <button id="createClientBtn" class="primary" style="margin-top:12px;">Add client</button>
       </div>
       <div id="clientsListArea" style="margin-top:16px;"></div>
@@ -1498,6 +1508,7 @@
         <strong style="font-size:14px;">📍 Log a visit</strong>
         <label for="fieldVisitClientSelect">Client</label>
         <select id="fieldVisitClientSelect"><option value="">Choose a client…</option></select>
+        <div id="fieldVisitClientLocationInfo" class="hint" style="margin-top:6px; display:none;"></div>
         <label for="fieldVisitGoal">Goal of this visit</label>
         <textarea id="fieldVisitGoal" placeholder="What are you trying to achieve at this visit?"></textarea>
         <button type="button" class="primary" id="fieldVisitStartBtn" style="width:100%; margin-top:12px;">📍 I'm heading there</button>
@@ -1541,6 +1552,45 @@
         <strong style="font-size:14px;">📍 Currently in the field</strong>
         <div id="fieldLiveMapArea" style="height:240px; border-radius: var(--r-md); overflow:hidden; margin-top:10px;"></div>
         <div id="fieldLiveMapList" style="margin-top:10px;"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- COMPANY FINDER OVERLAY — search real companies worldwide by industry +
+     location (free OpenStreetMap search, called directly from here — no redirect out
+     to Chrome/Google Maps), then save any of them as a Client with one tap
+     so a Field Activities visit can be logged against it. -->
+<div id="companyFinderOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="companyFinderOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🏢 Company Finder</strong>
+      <button type="button" class="ghost" data-close="companyFinder">✕</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="card glass" id="companyFinderSearchCard">
+        <strong style="font-size:14px;">Search companies</strong>
+        <p class="hint" style="margin-top:2px;">Pick an industry (or type your own) and a location — anywhere in the world, Dubai/UAE by default.</p>
+
+        <label style="margin-top:8px;">Industry</label>
+        <div id="companyFinderIndustryGrid" class="mode-grid"></div>
+
+        <label for="companyFinderKeyword">Or type your own industry/keyword</label>
+        <input id="companyFinderKeyword" type="text" placeholder="e.g. Cloud computing providers" />
+
+        <label for="companyFinderLocation">Location</label>
+        <input id="companyFinderLocation" type="text" value="Dubai, UAE" placeholder="City, country — or leave as Dubai, UAE" />
+
+        <button type="button" class="primary" id="companyFinderSearchBtn" style="width:100%; margin-top:12px;">🔍 Search</button>
+      </div>
+
+      <div class="card glass" id="companyFinderResultsCard" style="margin-top:14px;">
+        <strong style="font-size:14px;">Results</strong>
+        <div id="companyFinderMapArea" style="height:220px; border-radius: var(--r-md); overflow:hidden; margin-top:10px; display:none;"></div>
+        <div id="companyFinderResults" style="margin-top:10px;"><div class="empty">Search above to see companies here.</div></div>
       </div>
 
     </div>
