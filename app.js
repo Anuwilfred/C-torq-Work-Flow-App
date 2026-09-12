@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.48.0';
+const APP_VERSION = 'v3.48.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project Stage Timeline can now send a finished stage back for correction (shown as a red arc on the road) and raise cross-stage questions, with red/hard-red badges on any stage that has an open request against it. (Needs project_stage_requests_migration.sql run once in Supabase, and the updated advance-project-stage Edge Function redeployed.)';
+const APP_UPDATE_NOTES = 'Stage requests can now target several stages in one go, e.g. a Drawing correction that also informs Programming and others in a single tap, grouped together in the requests list. (Needs project_stage_requests_multi_target_migration.sql run once in Supabase, and the updated advance-project-stage Edge Function redeployed.)';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -8246,7 +8246,10 @@ async function renderProjectStages(jobId) {
   const openRequests = requests.filter((r) => r.status === 'open');
   const openCounts = {};
   openRequests.forEach((r) => { openCounts[r.to_stage_key] = (openCounts[r.to_stage_key] || 0) + 1; });
-  const sendBackArrows = openRequests.filter((r) => r.kind === 'send_back').map((r) => ({ from: r.from_stage_key, to: r.to_stage_key }));
+  // Only rows that actually reopened a stage get the backward arrow — a
+  // send_back target that was merely "informed" (wasn't completed yet, so
+  // nothing was reopened) hasn't really moved backward on the road.
+  const sendBackArrows = openRequests.filter((r) => r.kind === 'send_back' && r.reopened).map((r) => ({ from: r.from_stage_key, to: r.to_stage_key }));
 
   area.innerHTML = `
     <div class="card glass">
@@ -8340,26 +8343,44 @@ function renderStageRequestForm(jobId, templates, byKey, deptHeads, isAdmin, act
     <select id="stageReqFrom">
       ${actableKeys.map((k) => `<option value="${escapeHtml(k)}"${k === defaultFrom ? ' selected' : ''}>${escapeHtml(labelFor(k))}</option>`).join('')}
     </select>
-    <label style="margin-top:6px; display:block;">Directed at</label>
-    <select id="stageReqTo"></select>
+    <label style="margin-top:6px; display:block;">Directed at — tap every stage this affects</label>
+    <div id="stageReqToGrid" class="mode-grid"></div>
+    <p class="hint" id="stageReqToHint" style="margin-top:4px;"></p>
     <textarea id="stageReqMessage" placeholder="What do you need?" style="margin-top:6px;"></textarea>
     <button type="button" class="primary" id="stageReqSubmitBtn" style="width:100%; margin-top:8px;">Send</button>
   `;
 
   let kind = 'query';
-  const toSelect = $('stageReqTo');
+  const selectedTargets = new Set();
+  const toGrid = $('stageReqToGrid');
+  const toHint = $('stageReqToHint');
   const fromSelect = $('stageReqFrom');
 
   function refreshToOptions() {
     const fromKey = fromSelect.value;
-    const candidates = templates.filter((t) => {
-      if (t.stage_key === fromKey) return false;
-      if (kind === 'send_back') return !!byKey[t.stage_key]?.completed;
-      return true;
+    selectedTargets.clear();
+    const candidates = templates.filter((t) => t.stage_key !== fromKey);
+    toGrid.innerHTML = candidates.length
+      ? candidates.map((t) => {
+          const eligibleForSendBack = !!byKey[t.stage_key]?.completed;
+          const dimmed = kind === 'send_back' && !eligibleForSendBack;
+          return `<div class="doc-type-chip" data-stage-key="${escapeHtml(t.stage_key)}" style="${dimmed ? 'opacity:0.55;' : ''}">${escapeHtml(t.label)}${dimmed ? ' <span class=\"hint\">(will just be informed)</span>' : ''}</div>`;
+        }).join('')
+      : '<p class="hint">(no other stage on this roadmap)</p>';
+    toGrid.querySelectorAll('[data-stage-key]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const key = chip.getAttribute('data-stage-key');
+        if (selectedTargets.has(key)) { selectedTargets.delete(key); chip.classList.remove('selected'); }
+        else { selectedTargets.add(key); chip.classList.add('selected'); }
+        updateToHint();
+      });
     });
-    toSelect.innerHTML = candidates.length
-      ? candidates.map((t) => `<option value="${escapeHtml(t.stage_key)}">${escapeHtml(t.label)}</option>`).join('')
-      : '<option value="">(no eligible stage)</option>';
+    updateToHint();
+  }
+  function updateToHint() {
+    toHint.textContent = kind === 'send_back'
+      ? 'Stages already finished will be reopened for rework; anything still ahead just gets informed, untouched.'
+      : 'Pick everyone who needs to see this question — each gets their own open item to clear.';
   }
   refreshToOptions();
   fromSelect.addEventListener('change', refreshToOptions);
@@ -8379,14 +8400,17 @@ function renderStageRequestForm(jobId, templates, byKey, deptHeads, isAdmin, act
 
   $('stageReqSubmitBtn').addEventListener('click', async (e) => {
     const fromStageKey = fromSelect.value;
-    const toStageKey = toSelect.value;
+    const toStageKeys = [...selectedTargets];
     const message = $('stageReqMessage').value.trim();
-    if (!toStageKey) { showToast('Pick a stage to direct this at.'); return; }
+    if (!toStageKeys.length) { showToast('Tap at least one stage to direct this at.'); return; }
     if (!message) { showToast('Add a message describing what you need.'); return; }
     e.target.disabled = true; e.target.textContent = 'Sending…';
-    const res = await callStageRequestAction(jobId, { action: 'raise_request', kind, fromStageKey, toStageKey, message });
+    const res = await callStageRequestAction(jobId, { action: 'raise_request', kind, fromStageKey, toStageKeys, message });
     if (res) {
-      showToast(kind === 'send_back' ? 'Sent back — that stage is active again.' : 'Question sent.');
+      const reopenedCount = (res.reopenedStages || []).length;
+      showToast(reopenedCount
+        ? `Sent back (${res.reopenedStages.join(', ')}) — active again. ${toStageKeys.length > reopenedCount ? 'Others informed.' : ''}`
+        : 'Sent.');
       delete projectsStageCache[jobId];
       renderProjectStages(jobId);
     } else {
@@ -8395,9 +8419,13 @@ function renderStageRequestForm(jobId, templates, byKey, deptHeads, isAdmin, act
   });
 }
 
-// List of open (and recently resolved) requests for this project, each
-// with a "Mark done" button gated to the TO stage's head (or admin) — the
-// exact same check the Edge Function re-verifies server-side.
+// List of open (and recently resolved) requests for this project. One
+// submit can target several stages at once (they share a batch_id), so
+// these are grouped back into a single card each — "Drawing sent back to:
+// Programming (reopened), QA (informed)" — rather than showing as several
+// unrelated-looking rows. Each target line still resolves independently,
+// gated to that target stage's head (or admin) — the exact same check the
+// Edge Function re-verifies server-side.
 function renderStageRequestsList(jobId, templates, byKey, deptHeads, isAdmin, requests) {
   const listArea = $('stageRequestsListArea');
   if (!listArea) return;
@@ -8412,22 +8440,50 @@ function renderStageRequestsList(jobId, templates, byKey, deptHeads, isAdmin, re
     const dept = deptId ? deptHeads[deptId] : null;
     return !!dept && dept.head_id === currentUser?.id;
   };
-  const sorted = [...requests].sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
-    return new Date(b.created_at) - new Date(a.created_at);
+
+  // Group rows that were raised together (same batch_id) back into one
+  // card; anything without a batch_id (shouldn't happen post-migration,
+  // but just in case) gets its own single-row group.
+  const groups = {};
+  const order = [];
+  requests.forEach((r) => {
+    const gid = r.batch_id || `single-${r.id}`;
+    if (!groups[gid]) { groups[gid] = []; order.push(gid); }
+    groups[gid].push(r);
   });
-  listArea.innerHTML = sorted.slice(0, 25).map((r) => {
-    const ago = formatStageDuration(Date.now() - new Date(r.created_at));
-    const kindLabel = r.kind === 'send_back' ? '⏪ Sent back' : '💬 Question';
-    const resolvable = r.status === 'open' && canResolve(r.to_stage_key);
-    return `
-      <div class="card glass" style="margin-top:8px; ${r.status === 'resolved' ? 'opacity:0.65;' : ''}">
-        <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
-          <strong style="font-size:13px;">${kindLabel}: ${escapeHtml(labelFor(r.from_stage_key))} → ${escapeHtml(labelFor(r.to_stage_key))}</strong>
-          <span class="hint">${r.status === 'resolved' ? '✅ done' : `${ago} ago`}</span>
+  const groupList = order.map((gid) => groups[gid]);
+  groupList.sort((a, b) => {
+    const aOpen = a.some((r) => r.status === 'open');
+    const bOpen = b.some((r) => r.status === 'open');
+    if (aOpen !== bOpen) return aOpen ? -1 : 1;
+    return new Date(b[0].created_at) - new Date(a[0].created_at);
+  });
+
+  listArea.innerHTML = groupList.slice(0, 25).map((group) => {
+    const first = group[0];
+    const ago = formatStageDuration(Date.now() - new Date(first.created_at));
+    const kindLabel = first.kind === 'send_back' ? '⏪ Sent back' : '💬 Question';
+    const allResolved = group.every((r) => r.status === 'resolved');
+    const targetRows = group.map((r) => {
+      const resolvable = r.status === 'open' && canResolve(r.to_stage_key);
+      const tag = r.kind === 'send_back' ? (r.reopened ? 'reopened' : 'informed only') : '';
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap;">
+          <span style="font-size:13px;">${escapeHtml(labelFor(r.to_stage_key))}${tag ? ` <span class="hint">(${tag})</span>` : ''}</span>
+          ${r.status === 'resolved'
+            ? '<span class="hint">✅ done</span>'
+            : (resolvable ? `<button type="button" class="secondary" data-resolve-request="${r.id}" style="width:auto; padding:6px 12px;">✅ Mark done</button>` : '<span class="hint">open</span>')}
         </div>
-        <p style="margin-top:4px; font-size:13px;">${escapeHtml(r.message)}</p>
-        ${resolvable ? `<button type="button" class="secondary" data-resolve-request="${r.id}" style="margin-top:6px; width:auto; padding:7px 14px;">✅ Mark done</button>` : ''}
+      `;
+    }).join('');
+    return `
+      <div class="card glass" style="margin-top:8px; ${allResolved ? 'opacity:0.65;' : ''}">
+        <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+          <strong style="font-size:13px;">${kindLabel}: ${escapeHtml(labelFor(first.from_stage_key))} → ${group.length} stage${group.length > 1 ? 's' : ''}</strong>
+          <span class="hint">${ago} ago</span>
+        </div>
+        <p style="margin-top:4px; font-size:13px;">${escapeHtml(first.message)}</p>
+        ${targetRows}
       </div>
     `;
   }).join('');
