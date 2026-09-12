@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.47.1';
+const APP_VERSION = 'v3.47.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Company Finder now runs on free OpenStreetMap search — no API key, no billing account, $0 to run. (Trade-off: listings are community-submitted, so coverage is patchier than a paid directory — well-known/larger companies usually show up, smaller specialized ones may not.)";
+const APP_UPDATE_NOTES = "Company Finder's location field and the Client address field now show live address suggestions as you type — same search-as-you-go style used in Job Allocation/driver trips — instead of typing then tapping a separate Search button.";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5362,6 +5362,7 @@ function openPanel(name, opts = {}) {
   if (name === 'clients') {
     $('newClientCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
     renderClientsList();
+    wireNewClientAddressSearch();
   }
   if (name === 'quotations') {
     $('newQuotationCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
@@ -5401,6 +5402,7 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'companyFinder') {
     renderCompanyFinderIndustryChips();
+    wireAddressSearch('companyFinderLocation', 'companyFinderLocationResults');
   }
   if (name === 'people') {
     renderTeamList();
@@ -6351,49 +6353,35 @@ async function setClientLocation(clientId) {
   renderClientsList();
 }
 
-let newClientFoundLocation = null; // {lat, lng, address} once the address search below finds a match
-
-if ($('newClientAddressSearchBtn')) {
-  $('newClientAddressSearchBtn').addEventListener('click', async () => {
-    const q = $('newClientAddress').value.trim();
-    if (!q) { showToast('Type an address first.'); return; }
-    const btn = $('newClientAddressSearchBtn');
-    const preview = $('newClientAddressPreview');
-    btn.disabled = true;
-    btn.textContent = '🔍 …';
-    const { ok, places, error } = await companyTextSearch(q, { maxResults: 1 });
-    btn.disabled = false;
-    btn.textContent = '🔍 Search';
-    if (!ok || !places.length) {
-      newClientFoundLocation = null;
-      if (preview) { preview.style.display = 'block'; preview.textContent = error || "Couldn't find that address — you can still save the client without a map location."; }
-      return;
-    }
-    const p = places[0];
-    newClientFoundLocation = { lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null, address: p.formattedAddress || q };
-    if (preview) { preview.style.display = 'block'; preview.textContent = `📍 ${newClientFoundLocation.address}`; }
-  });
-}
+// Same live as-you-type address dropdown used for driver trips / Job
+// Allocation locations (wireAddressSearch, defined further down) — picking
+// a suggestion stores lat/lon on the input itself via .dataset, which
+// createClientBtn below reads directly. Wired lazily wherever it's used,
+// since wireAddressSearch is declared later in this file but hoisting
+// makes that fine, and the function no-ops safely if called before the
+// panel's elements exist.
+function wireNewClientAddressSearch() { wireAddressSearch('newClientAddress', 'newClientAddressResults'); }
 
 if ($('createClientBtn')) {
   $('createClientBtn').addEventListener('click', async () => {
     const name = $('newClientName').value.trim();
     if (!name) { showToast('Enter a client name.'); return; }
+    const addressInput = $('newClientAddress');
     const { error } = await sb.from('clients').insert({
       name,
       contact_name: $('newClientContact').value.trim() || null,
       email: $('newClientEmail').value.trim() || null,
       phone: $('newClientPhone').value.trim() || null,
       notes: $('newClientNotes').value.trim() || null,
-      address: newClientFoundLocation?.address || $('newClientAddress').value.trim() || null,
-      lat: newClientFoundLocation?.lat ?? null,
-      lng: newClientFoundLocation?.lng ?? null,
+      address: addressInput.value.trim() || null,
+      lat: addressInput.dataset.lat ? parseFloat(addressInput.dataset.lat) : null,
+      lng: addressInput.dataset.lon ? parseFloat(addressInput.dataset.lon) : null,
       created_by: currentUser.id,
     });
     if (error) { showToast(`Couldn't add client: ${error.message}`); return; }
     ['newClientName', 'newClientContact', 'newClientEmail', 'newClientPhone', 'newClientNotes', 'newClientAddress'].forEach((id) => { $(id).value = ''; });
-    newClientFoundLocation = null;
-    if ($('newClientAddressPreview')) $('newClientAddressPreview').style.display = 'none';
+    addressInput.dataset.lat = '';
+    addressInput.dataset.lon = '';
     renderClientsList();
     showToast('Client added.');
   });

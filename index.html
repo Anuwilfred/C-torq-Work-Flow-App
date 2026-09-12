@@ -1035,11 +1035,10 @@
         <label for="newClientNotes">Notes (optional)</label>
         <textarea id="newClientNotes" placeholder="Anything worth remembering about this client"></textarea>
         <label for="newClientAddress">Address / location (optional)</label>
-        <div class="location-row">
-          <input id="newClientAddress" type="text" placeholder="Type an address or area, then search" />
-          <button type="button" class="secondary" id="newClientAddressSearchBtn">🔍 Search</button>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="newClientAddress" type="text" placeholder="Type an address or area, e.g. Jebel Ali Free Zone, Dubai" autocomplete="off" />
+          <div id="newClientAddressResults" class="job-search-results" style="display:none;"></div>
         </div>
-        <div id="newClientAddressPreview" class="hint" style="margin-top:6px; display:none;"></div>
         <button id="createClientBtn" class="primary" style="margin-top:12px;">Add client</button>
       </div>
       <div id="clientsListArea" style="margin-top:16px;"></div>
@@ -1582,7 +1581,10 @@
         <input id="companyFinderKeyword" type="text" placeholder="e.g. Cloud computing providers" />
 
         <label for="companyFinderLocation">Location</label>
-        <input id="companyFinderLocation" type="text" value="Dubai, UAE" placeholder="City, country — or leave as Dubai, UAE" />
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="companyFinderLocation" type="text" value="Dubai, UAE" placeholder="City, country — or leave as Dubai, UAE" autocomplete="off" />
+          <div id="companyFinderLocationResults" class="job-search-results" style="display:none;"></div>
+        </div>
 
         <button type="button" class="primary" id="companyFinderSearchBtn" style="width:100%; margin-top:12px;">🔍 Search</button>
       </div>
