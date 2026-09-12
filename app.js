@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.48.1';
+const APP_VERSION = 'v3.48.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Stage requests can now target several stages in one go, e.g. a Drawing correction that also informs Programming and others in a single tap, grouped together in the requests list. (Needs project_stage_requests_multi_target_migration.sql run once in Supabase, and the updated advance-project-stage Edge Function redeployed.)';
+const APP_UPDATE_NOTES = 'Project timeline: every stage picked in a send-back or question now draws its own line back to whoever raised it, not just the one that got reopened — solid red for a real send-back, dashed amber for an informed stage, dashed blue for a plain question.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -8000,7 +8000,14 @@ function splitStageLabel(label, maxChars) {
 // done, so overall progress reads at a glance without checking every node.
 function drawStageLadder(container, templates, byKey, activeIdx, requestInfo) {
   const openCounts = requestInfo?.openCounts || {};
-  const sendBackArrows = requestInfo?.sendBackArrows || [];
+  // Every stage picked in a request gets SOME line drawn back to whoever
+  // raised it — not just the one that actually got reopened. Three looks,
+  // so it's obvious at a glance which is which:
+  //   reopened — solid red, this stage really did get sent back
+  //   informed — dashed amber, this stage was just told about it (send_back
+  //              target that wasn't completed yet, so nothing moved)
+  //   query    — dashed blue-gray, a plain question, never touches state
+  const arrows = requestInfo?.arrows || [];
   const R = 18;
   const SEG = 150;
   const PAD_X = 90;
@@ -8051,17 +8058,23 @@ function drawStageLadder(container, templates, byKey, activeIdx, requestInfo) {
   merge.appendChild(svgEl('feMergeNode', { in: 'SourceGraphic' }));
   glow.appendChild(merge);
   defs.appendChild(glow);
-  // Arrowhead for the "sent back" curves drawn below the loop — one open
-  // send_back request draws one dashed arc from the stage that raised it
-  // back to the stage it's aimed at, so the correction reads as a real
-  // backward motion on the road rather than just a colored dot.
-  const arrowMarker = svgEl('marker', {
-    id: 'sendBackArrow', viewBox: '0 0 10 10', refX: 8, refY: 5,
-    markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse',
+  // Arrowheads for the request curves drawn below the loop — every stage
+  // picked in a request gets an arc from the stage that raised it, so it
+  // reads as a real line rather than just a colored badge. One marker per
+  // arrow style (colors match the arrow strokes below).
+  const ARROW_STYLES = {
+    reopened: '#c74a4a',
+    informed: '#d99a3c',
+    query: '#5b8bc7',
+  };
+  Object.entries(ARROW_STYLES).forEach(([key, color]) => {
+    const marker = svgEl('marker', {
+      id: `stageArrow-${key}`, viewBox: '0 0 10 10', refX: 8, refY: 5,
+      markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse',
+    });
+    marker.appendChild(svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color }));
+    defs.appendChild(marker);
   });
-  const arrowPath = svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#c74a4a' });
-  arrowMarker.appendChild(arrowPath);
-  defs.appendChild(arrowMarker);
   svg.appendChild(defs);
 
   // ---- the road itself: dark asphalt base + a dashed centerline ----
@@ -8182,20 +8195,30 @@ function drawStageLadder(container, templates, byKey, activeIdx, requestInfo) {
     }
   });
 
-  // ---- backward "sent back" curves — drawn last so they sit above
-  // everything else and are unmistakable. One dashed red arc per open
-  // send_back request, arcing above the road from the stage that raised it
-  // to the earlier stage it's aimed at. ----
-  sendBackArrows.forEach((arrow) => {
+  // ---- request curves — drawn last so they sit above everything else
+  // and are unmistakable. One arc per target picked in a request, arcing
+  // above the road from the stage that raised it to the stage it's aimed
+  // at — every selected target gets a line, styled by what actually
+  // happened to it (see ARROW_STYLES above). Arcs between the same pair of
+  // x-positions are nudged to different heights so several arrows fanning
+  // out of/into the same stage don't all draw exactly on top of each other. ----
+  const arrowsByPairHeight = {};
+  arrows.forEach((arrow) => {
     const fromPt = pts.find((p) => p.key === arrow.from);
     const toPt = pts.find((p) => p.key === arrow.to);
     if (!fromPt || !toPt) return;
+    const color = ARROW_STYLES[arrow.type] || ARROW_STYLES.query;
+    const pairKey = `${Math.min(fromPt.x, toPt.x)}-${Math.max(fromPt.x, toPt.x)}`;
+    const stack = arrowsByPairHeight[pairKey] || 0;
+    arrowsByPairHeight[pairKey] = stack + 1;
     const midX = (fromPt.x + toPt.x) / 2;
-    const arcY = Math.min(fromPt.y, toPt.y) - 70;
+    const arcY = Math.min(fromPt.y, toPt.y) - 70 - stack * 22;
     const d = `M ${fromPt.x} ${fromPt.y - R - 4} Q ${midX} ${arcY}, ${toPt.x} ${toPt.y - R - 4}`;
+    const dashed = arrow.type !== 'reopened' ? { 'stroke-dasharray': '5 5' } : { 'stroke-dasharray': '7 6' };
     svg.appendChild(svgEl('path', {
-      d, fill: 'none', stroke: '#c74a4a', 'stroke-width': 3, 'stroke-dasharray': '7 6',
-      'marker-end': 'url(#sendBackArrow)', opacity: 0.9,
+      d, fill: 'none', stroke: color, 'stroke-width': arrow.type === 'reopened' ? 3 : 2.2,
+      'marker-end': `url(#stageArrow-${arrow.type})`, opacity: arrow.type === 'reopened' ? 0.9 : 0.75,
+      ...dashed,
     }));
   });
 
@@ -8246,15 +8269,23 @@ async function renderProjectStages(jobId) {
   const openRequests = requests.filter((r) => r.status === 'open');
   const openCounts = {};
   openRequests.forEach((r) => { openCounts[r.to_stage_key] = (openCounts[r.to_stage_key] || 0) + 1; });
-  // Only rows that actually reopened a stage get the backward arrow — a
-  // send_back target that was merely "informed" (wasn't completed yet, so
-  // nothing was reopened) hasn't really moved backward on the road.
-  const sendBackArrows = openRequests.filter((r) => r.kind === 'send_back' && r.reopened).map((r) => ({ from: r.from_stage_key, to: r.to_stage_key }));
+  // Every open request draws SOME line back to whoever raised it, styled
+  // by what actually happened to that particular target: a reopened
+  // send_back target gets the solid red "really moved backward" line; a
+  // send_back target that was merely informed (wasn't completed yet, so
+  // nothing was reopened) gets a lighter dashed amber line; a plain
+  // question gets a dashed blue-gray line. See ARROW_STYLES in
+  // drawStageLadder.
+  const arrows = openRequests.map((r) => ({
+    from: r.from_stage_key,
+    to: r.to_stage_key,
+    type: r.kind === 'send_back' ? (r.reopened ? 'reopened' : 'informed') : 'query',
+  }));
 
   area.innerHTML = `
     <div class="card glass">
       <strong style="font-size:14px;">Project timeline</strong>
-      <p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road. ${roadmapComplete ? 'Every stage is complete.' : "The highlighted stage is what's active right now."} A red badge marks a stage with an open question or correction against it — darker red means more than one stacked up.</p>
+      <p class="hint" style="margin-top:4px;">Scroll sideways to see the whole road. ${roadmapComplete ? 'Every stage is complete.' : "The highlighted stage is what's active right now."} A red badge marks a stage with an open question or correction against it — darker red means more than one stacked up. Solid red lines are real send-backs; dashed amber/blue lines are just informing or asking a stage.</p>
       <div id="stageSvgWrap" class="stage-road-scroll"></div>
       <div id="stageActiveArea" style="margin-top:12px;"></div>
     </div>
@@ -8265,7 +8296,7 @@ async function renderProjectStages(jobId) {
       <div id="stageRequestsListArea" style="margin-top:12px;"></div>
     </div>
   `;
-  drawStageLadder($('stageSvgWrap'), templates, byKey, activeIdx, { openCounts, sendBackArrows });
+  drawStageLadder($('stageSvgWrap'), templates, byKey, activeIdx, { openCounts, arrows });
 
   const activeArea = $('stageActiveArea');
   if (activeArea && !roadmapComplete) {
