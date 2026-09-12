@@ -587,9 +587,15 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
   50% { opacity: 0.32; }
 }
 
-/* Active-stage summary card + hand-off action, rendered below the road. */
+/* Active-stage summary card + hand-off action, rendered below the road.
+   Was a fixed rgba(10,10,10,0.55) tint — the .stage-active-label child uses
+   var(--text) (dark in Light mode), so this card was never meant to be a
+   permanently-dark chip; that fixed tint just composited to a middling gray
+   in Light mode, which is exactly what made it look "not clear" there.
+   var(--glass-2) is the same adaptive surface used by .ring-card etc., so
+   var(--text)/var(--text-dim) children keep proper contrast in both schemes. */
 .stage-active-card {
-  background: rgba(10, 10, 10, 0.55);
+  background: var(--glass-2);
   border: 1px solid var(--glass-border);
   border-radius: var(--r-md, 12px);
   padding: 12px 14px;
@@ -600,13 +606,19 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
   font-size: 12px;
   font-weight: 650;
   color: rgba(245,244,240,0.95);
-  background: rgba(10,10,10,0.55);
+  /* This pill IS deliberately always-dark (own fixed near-white text, own
+     border) — bumped from 0.55 to stay genuinely dark instead of washing out
+     to gray over the card above, now that the card itself is a light-in-Light
+     -mode adaptive surface. */
+  background: rgba(10,10,10,0.88);
   border: 1px solid rgba(255,255,255,0.12);
   text-shadow: 0 1px 3px rgba(0,0,0,0.6);
   padding: 3px 9px;
   border-radius: 999px;
 }
-.stage-active-elapsed { font-size: 12px; color: rgba(245,244,240,0.7); margin-top: 4px; }
+/* Was a fixed near-white rgba — matched the old always-dark card assumption.
+   Now that .stage-active-card is an adaptive surface, this needs to adapt too. */
+.stage-active-elapsed { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 
 .card {
   padding: 20px;
@@ -2958,7 +2970,7 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .dept-ring-group-rings .ring-card { flex: 1 1 70px; max-width: 90px; background: transparent; border: none; padding: 4px; }
 .dept-ring-group { display: flex; flex-direction: column; align-items: center; }
 .dept-role-legend { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; align-self: stretch; }
-.dept-role-legend-row { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: rgba(245,244,240,0.78); }
+.dept-role-legend-row { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); }
 .dept-role-dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
 
 /* The one big "whole job" ring above the department grid. */
@@ -2978,16 +2990,16 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .big-total-ring-value.over { color: var(--err); }
 .big-total-ring-value.under { color: var(--ok); }
 .big-total-ring-value.dim { color: var(--text-dim); }
-.big-total-ring-card .ring-sub { font-size: 13px; color: rgba(245,244,240,0.78); margin-top: 5px; }
+.big-total-ring-card .ring-sub { font-size: 13px; color: var(--text-dim); margin-top: 5px; }
 .big-total-ring-warning { margin-top: 8px; font-size: 12.5px; font-weight: 700; color: var(--err); text-align: center; }
 .big-total-ring-stats { display: flex; gap: 10px; margin-top: 14px; width: 100%; max-width: 320px; }
 .big-total-ring-stat { flex: 1; text-align: center; padding: 8px 6px; background: var(--glass-1); border: 1px solid var(--glass-border); border-radius: var(--r-md); }
-.big-total-ring-stat-label { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: rgba(245,244,240,0.68); }
+.big-total-ring-stat-label { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-dim); }
 .big-total-ring-stat-value { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 3px; }
 
 .dept-ring-single-wrap { display: flex; flex-direction: column; align-items: center; }
 .dept-people-list { margin-top: 10px; width: 100%; display: flex; flex-direction: column; gap: 4px; }
-.dept-people-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: rgba(245,244,240,0.78); }
+.dept-people-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-dim); }
 .dept-people-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; }
 .dept-people-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dept-people-hours { font-weight: 700; color: var(--text); flex: none; }
@@ -3007,7 +3019,7 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .ring-center-value.under { color: var(--ok); }
 .ring-center-value.nobudget { color: var(--text); }
 .ring-center-value.dim { color: var(--text-dim); }
-.ring-sub { font-size: 10px; color: rgba(245,244,240,0.72); margin-top: 3px; line-height: 1.3; text-align: center; }
+.ring-sub { font-size: 10px; color: var(--text-dim); margin-top: 3px; line-height: 1.3; text-align: center; }
 
 /* Departments with no hours logged/allotted on this project yet — only the
    ring itself (drawn muted in ringSvg) and the card background dim; the
@@ -3041,9 +3053,13 @@ input.stage-pos-input::-webkit-outer-spin-button {
    ellipsis on BOTH lines so a long department or stage name truncates
    cleanly instead of pushing the row wider than the card. */
 .mini-stage-cell { margin-top: 6px; max-width: 100%; }
+/* Was a fixed rgba(10,10,10,0.45) tint — the default .active variant's
+   children (.mini-stage-dept / .mini-stage-meta) use var(--text)/var(--text-dim),
+   same adaptive-content-in-a-fixed-dark-box bug as .stage-active-card above.
+   var(--glass-2) keeps proper contrast in both schemes. */
 .mini-stage-chip {
   display: inline-flex; flex-direction: column; gap: 2px; max-width: 100%; min-width: 0;
-  background: rgba(10,10,10,0.45); border: 1px solid var(--glass-border);
+  background: var(--glass-2); border: 1px solid var(--glass-border);
   border-radius: 10px; padding: 5px 10px;
 }
 .mini-stage-chip.dim { color: var(--text-dim); font-size: 11px; font-weight: 600; }
@@ -3060,7 +3076,13 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .contrib-row {
   margin-bottom: 14px;
   padding: 10px 12px;
-  background: rgba(10, 9, 8, 0.35);
+  /* Was a fixed rgba(10,9,8,0.35) tint — over Light scheme's pale card that
+     composited to a medium gray close in value to var(--text-dim), which
+     is what made the "Xh logged — no budget set" sub-note unreadable.
+     var(--glass-2) is the same adaptive surface .ring-card/.dept-ring-group
+     already use, so var(--text)/var(--text-dim) inside keep the contrast
+     they're designed for in both schemes. */
+  background: var(--glass-2);
   border: 1px solid var(--glass-border);
   border-radius: var(--r-md);
 }
@@ -3099,11 +3121,21 @@ input.stage-pos-input::-webkit-outer-spin-button {
   /* Darker/more opaque than a typical glass card on purpose — this sits
      directly over the blurred, colorful rings/graphics above it on Project
      Detail, and a near-transparent chip made every label unreadable there. */
-  background: rgba(10,10,10,0.55); border: 1px solid var(--glass-border);
+  /* Solid-enough opacity that this stays a genuinely dark chip in BOTH
+     Light and Dark scheme — at 0.55 it read fine over the app's own dark
+     background but composited to a washed-out mid-gray over Light
+     scheme's pale card, which is exactly what made the near-white label
+     text below unreadable there. */
+  background: rgba(10,10,10,0.88); border: 1px solid var(--glass-border);
   border-radius: 20px; padding: 14px 16px;
 }
 .pa-stat-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(245,244,240,0.65); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
-.pa-stat-value { font-size: 20px; font-weight: 800; color: var(--text); margin-top: 5px; line-height: 1.25; overflow-wrap: anywhere; letter-spacing: -0.01em; }
+/* Fixed light color, not var(--text) — this chip is deliberately kept dark
+   in both schemes (see .pa-stat-chip background comment), so its text must
+   stay light regardless of app-wide scheme, same reasoning as .pa-stat-label
+   just above. Using var(--text) here rendered as near-black on this now
+   near-opaque-dark chip in Light mode. */
+.pa-stat-value { font-size: 20px; font-weight: 800; color: rgba(245,244,240,0.92); margin-top: 5px; line-height: 1.25; overflow-wrap: anywhere; letter-spacing: -0.01em; }
 .pa-stat-sub { font-size: 12px; font-weight: 700; color: var(--accent); margin-top: 3px; }
 
 .pa-section { margin-bottom: 24px; }
@@ -3121,7 +3153,10 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .pa-bar-label { color: var(--text); font-weight: 650; display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pa-bar-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .pa-bar-hours { color: var(--text); font-weight: 800; flex: none; font-size: 13px; }
-.pa-bar-sub { color: rgba(245,244,240,0.65); font-weight: 600; font-size: 11px; flex: none; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+/* Sits directly on the panel background (no dark box behind it, unlike the
+   SVG stage-road labels above) — was hardcoded near-white, invisible in
+   Light mode. */
+.pa-bar-sub { color: var(--text-dim); font-weight: 600; font-size: 11px; flex: none; }
 .pa-bar-track { height: 11px; border-radius: 999px; background: rgba(0,0,0,0.45); border: 1px solid var(--glass-border); overflow: hidden; }
 .pa-bar-fill { height: 100%; border-radius: 999px; min-width: 8px; transition: width 0.3s ease; }
 
@@ -3182,18 +3217,25 @@ input.stage-pos-input::-webkit-outer-spin-button {
   align-items: center; justify-content: center; text-align: center; pointer-events: none;
 }
 .pa-ring-center-value { font-size: 26px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; }
-.pa-ring-center-label { font-size: 11px; font-weight: 650; color: rgba(245,244,240,0.65); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+.pa-ring-center-label { font-size: 11px; font-weight: 650; color: var(--text-dim); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
 .pa-ring-legend { width: 100%; display: flex; flex-direction: column; gap: 10px; }
 .pa-ring-legend-row {
   display: flex; align-items: center; gap: 9px; font-size: 13px;
-  background: rgba(10,10,10,0.4); border: 1px solid var(--glass-border);
+  /* Same fix as .pa-stat-chip above — needs to be near-opaque to stay dark
+     (not wash out to gray) in Light scheme. */
+  background: rgba(10,10,10,0.85); border: 1px solid var(--glass-border);
   border-radius: 14px; padding: 9px 13px;
 }
 .pa-ring-legend-row.pa-ring-legend-active { border-color: rgba(255,255,255,0.16); }
 .pa-ring-legend-row.muted { opacity: 0.55; }
 .pa-ring-dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
-.pa-ring-legend-label { color: var(--text); font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pa-ring-legend-value { color: var(--text); font-weight: 800; flex: none; font-size: 12.5px; }
+/* Fixed light colors, not var(--text) — same reasoning as .pa-stat-value
+   above: .pa-ring-legend-row is deliberately kept dark in both schemes (see
+   its background comment), so this text must stay light regardless of
+   app-wide scheme. var(--text) rendered as near-black on this now
+   near-opaque-dark row in Light mode. */
+.pa-ring-legend-label { color: rgba(245,244,240,0.92); font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pa-ring-legend-value { color: rgba(245,244,240,0.92); font-weight: 800; flex: none; font-size: 12.5px; }
 .pa-ring-legend-pct { color: rgba(245,244,240,0.6); font-weight: 600; }
 .pa-ring-legend-note { font-size: 11px; color: rgba(245,244,240,0.55); font-weight: 550; text-align: center; margin-top: -2px; }
 
@@ -3204,14 +3246,14 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .pa-trend-svg { width: 100%; height: auto; display: block; overflow: visible; }
 .pa-trend-ytick, .pa-trend-xtick {
   font-size: 10px; font-weight: 700; color: rgba(245,244,240,0.85);
-  background: rgba(10,10,10,0.55); border-radius: 6px; padding: 2px 6px;
+  background: rgba(10,10,10,0.88); border-radius: 6px; padding: 2px 6px;
   display: inline-block; text-shadow: 0 1px 3px rgba(0,0,0,0.6); white-space: nowrap;
 }
-.pa-trend-total { font-size: 13px; font-weight: 650; color: rgba(245,244,240,0.8); margin-top: 12px; }
+.pa-trend-total { font-size: 13px; font-weight: 650; color: var(--text-muted); margin-top: 12px; }
 .pa-trend-total-value { font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: -0.01em; }
-.pa-trend-total-sub { color: rgba(245,244,240,0.55); font-weight: 550; }
+.pa-trend-total-sub { color: var(--text-dim); font-weight: 550; }
 .pa-trend-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
-.pa-trend-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: rgba(245,244,240,0.75); }
+.pa-trend-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--text-dim); }
 .pa-trend-swatch { width: 16px; height: 3px; border-radius: 2px; background: var(--accent, #e08a5f); flex: none; }
 .pa-trend-swatch.dashed { background: repeating-linear-gradient(90deg, #f2b755 0 5px, transparent 5px 9px); }
 
@@ -3260,11 +3302,11 @@ input.stage-pos-input::-webkit-outer-spin-button {
 .pa-stack-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; min-width: 0; }
 .pa-stack-legend-item {
   display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600;
-  color: rgba(245,244,240,0.8); max-width: 100%; min-width: 0;
+  color: var(--text-muted); max-width: 100%; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pa-stack-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.pa-stack-legend-hours { color: rgba(245,244,240,0.6); font-weight: 700; }
+.pa-stack-legend-hours { color: var(--text-dim); font-weight: 700; }
 .contrib-over-note { margin-top: 6px; font-size: 11.5px; font-weight: 700; color: var(--err); }
 .contrib-nobudget-note { font-size: 11.5px; color: var(--text-dim); }
 @media (max-width: 420px) {

@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.49';
+const APP_VERSION = 'v3.49.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Driver trips: your My Trips card now updates live the moment a new trip is assigned — no more needing to close and reopen the app to see it.';
+const APP_UPDATE_NOTES = 'Light mode readability fixes: several places (Project Analytics stat chips, ring legends, the active-stage card, department hour sub-labels) had text that was hard to read in Light mode — all fixed to stay clear in both Light and Dark.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
