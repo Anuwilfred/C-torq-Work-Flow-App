@@ -1508,6 +1508,11 @@
         <label for="fieldVisitClientSelect">Client</label>
         <select id="fieldVisitClientSelect"><option value="">Choose a client…</option></select>
         <div id="fieldVisitClientLocationInfo" class="hint" style="margin-top:6px; display:none;"></div>
+        <label for="fieldVisitLocationSearch">Location (optional — search it, or leave blank to use your GPS)</label>
+        <div class="job-search-wrap" style="position:relative;">
+          <input id="fieldVisitLocationSearch" type="text" placeholder="Type to search an address…" autocomplete="off" />
+          <div id="fieldVisitLocationSearchResults" class="job-search-results" style="display:none;"></div>
+        </div>
         <label for="fieldVisitGoal">Goal of this visit</label>
         <textarea id="fieldVisitGoal" placeholder="What are you trying to achieve at this visit?"></textarea>
         <button type="button" class="primary" id="fieldVisitStartBtn" style="width:100%; margin-top:12px;">📍 I'm heading there</button>

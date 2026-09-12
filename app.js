@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.47.2';
+const APP_VERSION = 'v3.47.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Company Finder's location field and the Client address field now show live address suggestions as you type — same search-as-you-go style used in Job Allocation/driver trips — instead of typing then tapping a separate Search button.";
+const APP_UPDATE_NOTES = "Field Activities' 'Log a visit' now has a live location search box too — type/pick a specific address for the visit, or leave it blank to keep using automatic GPS.";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -12161,23 +12161,37 @@ if ($('fieldVisitStartBtn')) {
     if (!clientId) { showToast('Pick a client.'); return; }
     if (!goal) { showToast('What is the goal of this visit?'); return; }
     const btn = $('fieldVisitStartBtn');
+    const locationInput = $('fieldVisitLocationSearch');
     btn.disabled = true;
     btn.textContent = '📍 Locating…';
     try {
-      const r = await fetchAndFillLocation({ silent: true, fillField: false });
+      // A searched-and-picked address takes priority over GPS (useful when
+      // heading somewhere GPS can't pin down yet, or a specific address is
+      // known); otherwise fall back to silently capturing the device's
+      // current location, same as everywhere else in the app.
+      let lat = null, lng = null, address = null;
+      if (locationInput?.dataset.lat && locationInput?.dataset.lon) {
+        lat = parseFloat(locationInput.dataset.lat);
+        lng = parseFloat(locationInput.dataset.lon);
+        address = locationInput.value.trim() || null;
+      } else {
+        const r = await fetchAndFillLocation({ silent: true, fillField: false });
+        if (r.ok) { lat = r.lat; lng = r.lng; address = r.address; }
+      }
       const { error } = await sb.from('field_visits').insert({
         mission_id: currentFieldMission.id,
         person_id: currentUser.id,
         client_id: clientId,
         goal,
-        start_lat: r.ok ? r.lat : null,
-        start_lng: r.ok ? r.lng : null,
-        start_address: r.ok ? r.address : null,
+        start_lat: lat,
+        start_lng: lng,
+        start_address: address,
       });
       if (error) throw error;
       showToast("On your way — don't forget to add a brief once you're done.");
       $('fieldVisitClientSelect').value = '';
       $('fieldVisitGoal').value = '';
+      if (locationInput) { locationInput.value = ''; locationInput.dataset.lat = ''; locationInput.dataset.lon = ''; }
       renderFieldTodayVisits();
     } catch (err) {
       showToast(`Couldn't log visit: ${err.message || err}`);
@@ -12462,6 +12476,7 @@ async function renderFieldActivitiesPanel() {
   await renderFieldMissionCard();
   await populateFieldVisitClientSelect();
   await renderFieldTodayVisits();
+  wireAddressSearch('fieldVisitLocationSearch', 'fieldVisitLocationSearchResults');
 
   if (isAdmin) {
     await populateFieldAdminPersonSelect();
