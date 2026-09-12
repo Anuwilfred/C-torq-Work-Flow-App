@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.48.2';
+const APP_VERSION = 'v3.49';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Project timeline: every stage picked in a send-back or question now draws its own line back to whoever raised it, not just the one that got reopened — solid red for a real send-back, dashed amber for an informed stage, dashed blue for a plain question.';
+const APP_UPDATE_NOTES = 'Driver trips: your My Trips card now updates live the moment a new trip is assigned — no more needing to close and reopen the app to see it.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -412,6 +412,7 @@ function resetClockState() {
 let clockSyncDirty = false;   // true if the last push attempt failed (offline etc.) — retried when connectivity returns
 let clockSyncPushTimer = null;
 let clockSessionChannel = null;
+let driverTripsChannel = null;
 
 // Applies a remote state WITHOUT re-pushing it back up (that would just
 // bounce the same update back and forth between devices) — used both by
@@ -1814,6 +1815,7 @@ $('logoutBtn').addEventListener('click', async () => {
   stopPresence();
   if (appAppearanceChannel) { sb.removeChannel(appAppearanceChannel); appAppearanceChannel = null; }
   stopClockSessionWatch();
+  stopDriverTripsWatch();
   stopLastSeenHeartbeat();
   stopGlobalMessageWatch();
   if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
@@ -1975,6 +1977,7 @@ async function enterApp(knownUser) {
     .then(renderJobBoard)
     .then(renderAdminScheduleBoard);
   renderMyTripsToday();
+  startDriverTripsWatch();
   initOwnTripLogging();
   refreshGeneralDescriptionChips();
   // Projects / Departments / Learning / Health / Clients / Quotations /
@@ -5197,6 +5200,30 @@ async function getPersonName(id) {
     tripPeopleNameCache = new Map((data || []).map((p) => [p.id, p.full_name || p.email]));
   }
   return tripPeopleNameCache.get(id) || '';
+}
+
+// Live refresh: renderMyTripsToday() only ran once, at app open — a driver
+// who already had the dashboard open when an admin/allocator assigned them
+// a trip never saw it appear (the row was really there, as Driver Activity
+// on the admin side confirmed) until they fully closed and reopened the
+// app. This subscribes to driver_trips changes for just this driver and
+// re-renders the card the moment a trip is added/started/completed, from
+// any device, while the dashboard is open — a push notification (if the
+// browser/OS allows it) is a nice-to-have on top, not the only way to find
+// out. A toast on brand-new trips covers the case where push permission was
+// never granted, so it still shows up on-screen right away.
+function startDriverTripsWatch() {
+  if (driverTripsChannel || !currentUser) return;
+  driverTripsChannel = sb
+    .channel(`driver-trips-watch-${currentUser.id}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_trips', filter: `driver_id=eq.${currentUser.id}` }, (payload) => {
+      if (payload.eventType === 'INSERT') showToast('🚗 New trip assigned — check My Trips.');
+      renderMyTripsToday();
+    })
+    .subscribe();
+}
+function stopDriverTripsWatch() {
+  if (driverTripsChannel) { sb.removeChannel(driverTripsChannel); driverTripsChannel = null; }
 }
 
 async function renderMyTripsToday() {
