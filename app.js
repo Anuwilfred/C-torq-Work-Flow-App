@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.47.3';
+const APP_VERSION = 'v3.47.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = "Field Activities' 'Log a visit' now has a live location search box too — type/pick a specific address for the visit, or leave it blank to keep using automatic GPS.";
+const APP_UPDATE_NOTES = "Field Activities' 'Log a visit' can now handle a brand-new client on the spot — toggle to 'New client', type the company name, and it's added to Clients and logged as a visit in one step. (Needs the field_visit_new_client_migration.sql run once in Supabase for non-admin field people to use it.)";
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -12153,12 +12153,33 @@ if ($('fieldVisitClientSelect')) {
   });
 }
 
+// Existing client (pick from the list) vs. New client (type a name on the
+// spot) — covers visiting a company that isn't in the system yet, without
+// having to stop and go add it elsewhere first.
+let fieldVisitIsNewClient = false;
+
+function setFieldVisitClientMode(isNew) {
+  fieldVisitIsNewClient = isNew;
+  if ($('fieldVisitExistingClientBtn')) $('fieldVisitExistingClientBtn').classList.toggle('active', !isNew);
+  if ($('fieldVisitNewClientBtn')) $('fieldVisitNewClientBtn').classList.toggle('active', isNew);
+  if ($('fieldVisitExistingClientWrap')) $('fieldVisitExistingClientWrap').style.display = isNew ? 'none' : '';
+  if ($('fieldVisitNewClientWrap')) $('fieldVisitNewClientWrap').style.display = isNew ? '' : 'none';
+}
+
+if ($('fieldVisitExistingClientBtn')) $('fieldVisitExistingClientBtn').addEventListener('click', () => setFieldVisitClientMode(false));
+if ($('fieldVisitNewClientBtn')) $('fieldVisitNewClientBtn').addEventListener('click', () => setFieldVisitClientMode(true));
+
 if ($('fieldVisitStartBtn')) {
   $('fieldVisitStartBtn').addEventListener('click', async () => {
     if (!currentFieldMission) { showToast('Start your mission first.'); return; }
-    const clientId = $('fieldVisitClientSelect').value;
     const goal = $('fieldVisitGoal').value.trim();
-    if (!clientId) { showToast('Pick a client.'); return; }
+    const newClientName = $('fieldVisitNewClientName')?.value.trim() || '';
+    let clientId = $('fieldVisitClientSelect').value;
+    if (fieldVisitIsNewClient) {
+      if (!newClientName) { showToast('Enter the new client / company name.'); return; }
+    } else if (!clientId) {
+      showToast('Pick a client.'); return;
+    }
     if (!goal) { showToast('What is the goal of this visit?'); return; }
     const btn = $('fieldVisitStartBtn');
     const locationInput = $('fieldVisitLocationSearch');
@@ -12178,6 +12199,20 @@ if ($('fieldVisitStartBtn')) {
         const r = await fetchAndFillLocation({ silent: true, fillField: false });
         if (r.ok) { lat = r.lat; lng = r.lng; address = r.address; }
       }
+
+      if (fieldVisitIsNewClient) {
+        const { data: newClient, error: clientErr } = await sb.from('clients').insert({
+          name: newClientName,
+          address,
+          lat,
+          lng,
+          created_by: currentUser.id,
+        }).select('id').single();
+        if (clientErr) throw clientErr;
+        clientId = newClient.id;
+        clientsCache = []; // stale — refreshed by populateFieldVisitClientSelect() below
+      }
+
       const { error } = await sb.from('field_visits').insert({
         mission_id: currentFieldMission.id,
         person_id: currentUser.id,
@@ -12188,10 +12223,17 @@ if ($('fieldVisitStartBtn')) {
         start_address: address,
       });
       if (error) throw error;
-      showToast("On your way — don't forget to add a brief once you're done.");
+      showToast(fieldVisitIsNewClient
+        ? `${newClientName} added to Clients — on your way. Don't forget to add a brief once you're done.`
+        : "On your way — don't forget to add a brief once you're done.");
       $('fieldVisitClientSelect').value = '';
       $('fieldVisitGoal').value = '';
+      if ($('fieldVisitNewClientName')) $('fieldVisitNewClientName').value = '';
       if (locationInput) { locationInput.value = ''; locationInput.dataset.lat = ''; locationInput.dataset.lon = ''; }
+      if (fieldVisitIsNewClient) {
+        setFieldVisitClientMode(false);
+        await populateFieldVisitClientSelect();
+      }
       renderFieldTodayVisits();
     } catch (err) {
       showToast(`Couldn't log visit: ${err.message || err}`);

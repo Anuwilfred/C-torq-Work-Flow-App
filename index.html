@@ -1505,9 +1505,19 @@
       <!-- LOG A VISIT — only usable while a mission is active. -->
       <div class="card glass" id="fieldVisitFormCard" style="margin-top:14px; display:none;">
         <strong style="font-size:14px;">📍 Log a visit</strong>
-        <label for="fieldVisitClientSelect">Client</label>
-        <select id="fieldVisitClientSelect"><option value="">Choose a client…</option></select>
-        <div id="fieldVisitClientLocationInfo" class="hint" style="margin-top:6px; display:none;"></div>
+        <label>Client</label>
+        <div class="location-row">
+          <button type="button" class="secondary active" id="fieldVisitExistingClientBtn" style="flex:1; margin-top:0;">Existing client</button>
+          <button type="button" class="secondary" id="fieldVisitNewClientBtn" style="flex:1; margin-top:0;">➕ New client</button>
+        </div>
+        <div id="fieldVisitExistingClientWrap" style="margin-top:8px;">
+          <select id="fieldVisitClientSelect"><option value="">Choose a client…</option></select>
+          <div id="fieldVisitClientLocationInfo" class="hint" style="margin-top:6px; display:none;"></div>
+        </div>
+        <div id="fieldVisitNewClientWrap" style="margin-top:8px; display:none;">
+          <input id="fieldVisitNewClientName" type="text" placeholder="New client / company name" />
+          <p class="hint" style="margin-top:4px;">This adds them to Clients too, using the location below as their address.</p>
+        </div>
         <label for="fieldVisitLocationSearch">Location (optional — search it, or leave blank to use your GPS)</label>
         <div class="job-search-wrap" style="position:relative;">
           <input id="fieldVisitLocationSearch" type="text" placeholder="Type to search an address…" autocomplete="off" />
