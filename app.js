@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.1';
+const APP_VERSION = 'v3.52.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fleet brain-map redesigned: curved, colour-coded branch lines instead of plain grey ones, and the company hub now shows phone/email/website right on the map when the team has them on file.';
+const APP_UPDATE_NOTES = 'Area Watch simplified: opening it now shows live data immediately (no typing/search needed), typed locations resolve automatically, and results are now a brain-map diagram (hub + colour-coded branches) instead of a plain list.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5438,6 +5438,17 @@ function openPanel(name, opts = {}) {
   if (name === 'areaWatch') {
     renderAreaWatchPresets();
     wireAddressSearch('areaWatchLocation', 'areaWatchLocationResults');
+    // Zero-click default: show real live data the instant the panel opens,
+    // no typing or extra tap needed — the very first thing the team asked
+    // for was "just show me the data, one click". Only auto-runs the first
+    // time; once something has been searched, reopening the panel keeps
+    // showing that instead of resetting back to the default port.
+    if (!areaWatchLastQuery && AREA_WATCH_PRESETS.length) {
+      const first = AREA_WATCH_PRESETS[0];
+      const firstChip = document.querySelector('#areaWatchPresetGrid [data-preset-idx="0"]');
+      if (firstChip) firstChip.classList.add('selected');
+      searchAreaWatch(first.lat, first.lng, first.radiusKm, first.label);
+    }
   }
   if (name === 'people') {
     renderTeamList();
@@ -13450,7 +13461,7 @@ let areaWatchMapInstance = null;
 // area (manual re-search, or Live Watch polling) can tell "still here" from
 // "just arrived" from "just left" — reset whenever the searched area itself
 // changes, since comparing vessels across two different ports isn't
-// meaningful. { cardEl, marker, ...latest vessel fields, departing }
+// meaningful. { marker, ...latest vessel fields, departing, status, isNew }
 let areaWatchKnownVessels = new Map();
 // Separate from the above and NEVER reset — a light cross-port memory so
 // that if a vessel that left one port later turns up in a different one the
@@ -13515,6 +13526,67 @@ function areaWatchStatus(v) {
   return (v.speedKnots != null && v.speedKnots > AREA_WATCH_STATIONARY_KNOTS) ? 'underway' : 'docked';
 }
 
+function areaWatchStatusColor(status) {
+  return status === 'underway' ? '#f2b755' : (status === 'departed' ? '#f27d70' : '#63d197');
+}
+
+// Same curved-branch hub diagram as the Company Fleet brain-map (see
+// renderFleetBrainMap / FLEET_BRANCH_COLORS above), reused here so "what's
+// live in this area" reads as one connected picture instead of a flat list —
+// the branch/border color is each vessel's live STATUS, not a fixed palette,
+// since status is the thing worth seeing at a glance here.
+function renderAreaWatchBrainMap(vesselList, label) {
+  const wrap = $('areaWatchBrainMap');
+  if (!wrap) return;
+  const n = vesselList.length;
+  if (!n) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  const W = wrap.clientWidth || 320;
+  const H = Math.max(260, Math.min(560, 100 + n * 40));
+  wrap.style.height = `${H}px`;
+  const cx = W / 2, cy = H / 2;
+  const radius = Math.max(90, Math.min(W, H) / 2 - 78);
+
+  let linesSvg = '';
+  let nodesHtml = '';
+  vesselList.forEach((v, i) => {
+    const color = areaWatchStatusColor(v.status);
+    const angle = (2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2;
+    const x = Math.round(cx + radius * Math.cos(angle));
+    const y = Math.round(cy + radius * Math.sin(angle));
+    const dx = x - cx, dy = y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = len * 0.18;
+    const ctrlX = Math.round((cx + x) / 2 - (dy / len) * bow);
+    const ctrlY = Math.round((cy + y) / 2 + (dx / len) * bow);
+    linesSvg += `<path d="M ${cx} ${cy} Q ${ctrlX} ${ctrlY} ${x} ${y}" fill="none" stroke="${color}" stroke-width="2" opacity="${v.status === 'departed' ? '0.35' : '0.75'}" />`;
+
+    const statusLabel = v.status === 'underway' ? 'Under way' : (v.status === 'departed' ? 'Just left' : 'Docked');
+    nodesHtml += `
+      <div class="fleet-vessel-node${v.status === 'departed' ? ' area-watch-node-departing' : ''}${v.isNew ? ' arriving' : ''}" style="left:${x}px; top:${y}px; border-left: 3px solid ${color};">
+        <span class="area-watch-status-chip ${v.status}">${statusLabel}</span>
+        <div class="fleet-vessel-name">🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</div>
+        <div class="fleet-vessel-meta">🏢 ${v.owner ? escapeHtml(v.owner) : 'Owner not found'}</div>
+        <div class="fleet-vessel-meta">MMSI ${escapeHtml(v.mmsi)}${v.imo ? ` · IMO ${escapeHtml(v.imo)}` : ''}</div>
+        <div class="fleet-vessel-meta fleet-vessel-pos">${v.speedKnots != null ? `${Number(v.speedKnots).toFixed(1)} kn` : ''}</div>
+        ${v.arrivedFromElsewhere ? `<div class="fleet-vessel-meta">↪ last seen at ${escapeHtml(v.arrivedFromElsewhere)}</div>` : ''}
+      </div>`;
+  });
+
+  const docked = vesselList.filter((v) => v.status === 'docked').length;
+  const underway = vesselList.filter((v) => v.status === 'underway').length;
+
+  wrap.innerHTML = `
+    <svg width="${W}" height="${H}" style="position:absolute; left:0; top:0; pointer-events:none;">${linesSvg}</svg>
+    <div class="fleet-hub-node" style="left:${cx}px; top:${cy}px;">
+      <div class="fleet-hub-icon">⚓</div>
+      <div class="fleet-hub-name">${escapeHtml(label)}</div>
+      <div class="fleet-hub-meta">${n} vessel${n === 1 ? '' : 's'} · ${docked} docked, ${underway} under way</div>
+    </div>
+    ${nodesHtml}
+  `;
+}
+
 // A small ship-arrow marker, coloured by status and rotated to point the way
 // the vessel is actually heading (when AIS gave us one) instead of every
 // marker facing the same fixed direction — the "realistic" part of the ask.
@@ -13555,12 +13627,10 @@ function renderAreaWatchResults(vessels, centerLat, centerLng, label) {
   // Switching to a different area (not just refreshing the same one) starts
   // clean — comparing "who's still here" only makes sense within one place.
   if (label !== areaWatchCurrentLabel) {
-    areaWatchKnownVessels.forEach((known) => { if (known.cardEl) known.cardEl.remove(); });
     if (areaWatchMapInstance?._markerLayer) areaWatchMapInstance._markerLayer.clearLayers();
     if (areaWatchMapInstance) areaWatchMapInstance._centerMarker = null;
     areaWatchKnownVessels = new Map();
     areaWatchCurrentLabel = label;
-    resultsEl.innerHTML = '';
   }
 
   if (mapReady && !areaWatchMapInstance) {
@@ -13576,28 +13646,24 @@ function renderAreaWatchResults(vessels, centerLat, centerLng, label) {
   const seenMmsi = new Set(vessels.map((v) => v.mmsi));
 
   // Anyone we knew about last refresh who isn't in this one has left the
-  // area — turn the card/marker red, fade it out, then drop it. They may
-  // well be the same vessel that turns up if the team checks another port.
+  // area — turn the marker/branch red, fade it out on the brain-map, then
+  // drop it. They may well be the same vessel that turns up if the team
+  // checks another port.
   areaWatchKnownVessels.forEach((known, mmsi) => {
     if (seenMmsi.has(mmsi) || known.departing) return;
     known.departing = true;
-    if (known.cardEl) known.cardEl.className = 'area-watch-vessel-card status-departed';
+    known.status = 'departed';
+    known.isNew = false;
     if (known.marker) known.marker.setIcon(areaWatchShipIcon('departed', known.course));
     setTimeout(() => {
       const still = areaWatchKnownVessels.get(mmsi);
       if (still && still.departing) {
         if (still.marker && areaWatchMapInstance?._markerLayer) areaWatchMapInstance._markerLayer.removeLayer(still.marker);
-        if (still.cardEl) still.cardEl.remove();
         areaWatchKnownVessels.delete(mmsi);
       }
+      renderAreaWatchBrainMap([...areaWatchKnownVessels.values()], areaWatchCurrentLabel || label);
     }, 1400);
   });
-
-  if (!vessels.length && !areaWatchKnownVessels.size) {
-    resultsEl.innerHTML = '<div class="empty">No AIS positions heard here just now — busy yards report often, but a quiet moment (or a vessel just out of AIS range) is normal. Try again shortly, or turn on Live Watch.</div>';
-  } else if (resultsEl.querySelector('.empty')) {
-    resultsEl.innerHTML = '';
-  }
 
   const points = mapReady ? [[centerLat, centerLng]] : [];
 
@@ -13605,35 +13671,20 @@ function renderAreaWatchResults(vessels, centerLat, centerLng, label) {
     const status = areaWatchStatus(v);
     const wasKnownHere = areaWatchKnownVessels.has(v.mmsi);
     const priorSighting = areaWatchGlobalHistory.get(v.mmsi);
-    const arrivedFromElsewhere = !wasKnownHere && priorSighting && priorSighting.area !== label;
+    const arrivedFromElsewhere = !wasKnownHere && priorSighting && priorSighting.area !== label ? priorSighting.area : null;
     areaWatchGlobalHistory.set(v.mmsi, { area: label, seenAt: Date.now() });
 
     let known = areaWatchKnownVessels.get(v.mmsi);
     if (!known) {
-      known = { cardEl: null, marker: null };
+      known = { marker: null };
       areaWatchKnownVessels.set(v.mmsi, known);
     }
     known.departing = false;
-    Object.assign(known, v, { status });
-
-    let card = known.cardEl;
-    if (!card || !card.isConnected) {
-      card = document.createElement('div');
-      resultsEl.appendChild(card);
-      known.cardEl = card;
-    }
-    card.className = `area-watch-vessel-card status-${status}${!wasKnownHere ? ' arriving' : ''}`;
-    const statusLabel = status === 'underway' ? 'Under way' : 'Docked / stationary';
-    card.innerHTML = `
-      <div class="fleet-vessel-name">🚢 Vessel: ${escapeHtml(v.name || 'Unnamed / not yet heard')}<span class="area-watch-status-chip ${status}">${statusLabel}</span></div>
-      <div class="fleet-vessel-meta">🏢 Owner: ${v.owner ? escapeHtml(v.owner) : 'not found in free databases'}</div>
-      <div class="fleet-vessel-meta fleet-vessel-pos">📍 Location: near ${escapeHtml(label)} (${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)})${v.speedKnots != null ? ` · ${Number(v.speedKnots).toFixed(1)} kn` : ''}</div>
-      <div class="fleet-vessel-meta">MMSI ${escapeHtml(v.mmsi)}${v.imo ? ` · IMO ${escapeHtml(v.imo)}` : ''}</div>
-      ${arrivedFromElsewhere ? `<div class="fleet-vessel-meta">↪ Just appeared here — last seen at ${escapeHtml(priorSighting.area)}</div>` : ''}
-    `;
+    Object.assign(known, v, { status, isNew: !wasKnownHere, arrivedFromElsewhere });
 
     if (mapReady) {
       points.push([v.lat, v.lng]);
+      const statusLabel = status === 'underway' ? 'Under way' : 'Docked / stationary';
       if (!known.marker) {
         known.marker = L.marker([v.lat, v.lng], { icon: areaWatchShipIcon(status, v.course) }).addTo(areaWatchMapInstance._markerLayer);
       } else {
@@ -13643,6 +13694,20 @@ function renderAreaWatchResults(vessels, centerLat, centerLng, label) {
       known.marker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(v.name || 'Unnamed vessel')}</b><br>Owner: ${v.owner ? escapeHtml(v.owner) : 'unknown'}<br>Status: ${statusLabel}<br>MMSI ${escapeHtml(v.mmsi)}</div>`);
     }
   });
+
+  // One connected diagram (hub = the area, branches = vessels) instead of a
+  // flat list — reads the results the same "brain map" way the team already
+  // liked for a company's fleet.
+  const known = [...areaWatchKnownVessels.values()];
+  if (!known.length) {
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = '<div class="empty">No AIS positions heard here just now — busy yards report often, but a quiet moment (or a vessel just out of AIS range) is normal. Try again shortly, or turn on Live Watch.</div>';
+    renderAreaWatchBrainMap([], label);
+  } else {
+    resultsEl.style.display = 'none';
+    resultsEl.innerHTML = '';
+    renderAreaWatchBrainMap(known, label);
+  }
 
   if (!mapReady) return;
   if (!points.length) { mapWrap.style.display = 'none'; return; }
@@ -13688,17 +13753,35 @@ function stopAreaWatchLive() {
 if ($('areaWatchLiveBtn')) $('areaWatchLiveBtn').addEventListener('click', toggleAreaWatchLive);
 
 if ($('areaWatchSearchBtn')) {
-  $('areaWatchSearchBtn').addEventListener('click', () => {
+  $('areaWatchSearchBtn').addEventListener('click', async () => {
     const input = $('areaWatchLocation');
-    const lat = parseFloat(input?.dataset.lat || '');
-    const lon = parseFloat(input?.dataset.lon || '');
+    let lat = parseFloat(input?.dataset.lat || '');
+    let lon = parseFloat(input?.dataset.lon || '');
     const radiusKm = parseFloat($('areaWatchRadius')?.value || '3');
+    const typed = input?.value.trim() || '';
+    const btn = $('areaWatchSearchBtn');
+    // Typed something but didn't tap one of the autocomplete suggestions —
+    // instead of bouncing them back with "pick a suggestion", just look the
+    // typed text up ourselves and use the best match. Note: a broad name
+    // like "Dubai" resolves to that city's general centroid, which can land
+    // well inland/away from any actual port — a specific place name (or one
+    // of the presets above, which carry exact port coordinates) works much
+    // better than a bare city name.
+    if ((!Number.isFinite(lat) || !Number.isFinite(lon)) && typed) {
+      btn.disabled = true; btn.textContent = 'Finding…';
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typed)}&limit=1`, { headers: { Accept: 'application/json' } });
+        const results = await res.json();
+        if (results?.[0]) { lat = parseFloat(results[0].lat); lon = parseFloat(results[0].lon); }
+      } catch { /* stays not-a-number — handled below */ }
+      btn.disabled = false; btn.textContent = '🔍 Search this area';
+    }
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      showToast('Pick a shipyard/port above, or type a location and choose one of the suggestions.');
+      showToast(typed ? "Couldn't find that location — try a more specific name (e.g. a port or yard, not just a city)." : 'Type a location, or tap a shipyard/port above.');
       return;
     }
     document.querySelectorAll('#areaWatchPresetGrid [data-preset-idx]').forEach((c) => c.classList.remove('selected'));
-    searchAreaWatch(lat, lon, radiusKm, input.value.trim() || 'Searched location');
+    searchAreaWatch(lat, lon, radiusKm, typed || 'Searched location');
   });
 }
 

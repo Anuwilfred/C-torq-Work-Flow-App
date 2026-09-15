@@ -3857,3 +3857,11 @@ img.chat-img { max-width: 100%; height: auto; border-radius: 10px; display: bloc
 .area-watch-status-chip.docked { color: var(--ok); }
 .area-watch-status-chip.underway { color: var(--warn); }
 .area-watch-status-chip.departed { color: var(--err); }
+
+/* Area Watch brain-map mode — reuses the exact fleet-hub-node/fleet-vessel-
+   node visuals from the Company Fleet brain-map so live port data reads as
+   one connected diagram instead of a plain list. Branch/border color here is
+   the vessel's live STATUS (green=docked, amber=underway, red=just left),
+   not a fixed per-vessel palette, since that's the meaningful signal here. */
+#areaWatchBrainMap .fleet-vessel-node.arriving { animation: areaWatchArrive 1.4s ease; }
+#areaWatchBrainMap .fleet-vessel-node.area-watch-node-departing { opacity: 0.35; transition: opacity 1.1s ease; }
