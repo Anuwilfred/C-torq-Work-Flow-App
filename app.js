@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.2';
+const APP_VERSION = 'v3.52.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Area Watch simplified: opening it now shows live data immediately (no typing/search needed), typed locations resolve automatically, and results are now a brain-map diagram (hub + colour-coded branches) instead of a plain list.';
+const APP_UPDATE_NOTES = 'Fixed Company Finder: typing a specific company/place name (e.g. "Drydocks World") now searches for it directly instead of being wrongly wrapped into a nonsense phrase like "Drydocks World companies in Dubai" that never matched anything.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -13023,7 +13023,14 @@ if ($('companyFinderSearchBtn')) {
     btn.disabled = true;
     btn.textContent = '🔍 Searching…';
     resultsEl.innerHTML = '<div class="empty">Searching…</div>';
-    const { ok, places, error } = await companyTextSearch(`${industry} companies in ${location}`);
+    // A typed keyword is very often a specific real name (e.g. "Drydocks
+    // World"), not a category — wrapping it as "X companies in Y" turns a
+    // real, findable place into a nonsense phrase nothing matches ("Drydocks
+    // World companies in Dubai, UAE"). Only apply that category-style
+    // wrapping when searching by a picked industry tile; a typed name is
+    // searched as itself, just with the location appended for context.
+    const query = keyword ? `${keyword}, ${location}` : `${industry} companies in ${location}`;
+    const { ok, places, error } = await companyTextSearch(query);
     btn.disabled = false;
     btn.textContent = '🔍 Search';
     if (!ok) { resultsEl.innerHTML = `<div class="empty">${escapeHtml(error)}</div>`; return; }
