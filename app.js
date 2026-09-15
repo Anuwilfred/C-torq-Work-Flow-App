@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.3';
+const APP_VERSION = 'v3.52.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed Company Finder: typing a specific company/place name (e.g. "Drydocks World") now searches for it directly instead of being wrongly wrapped into a nonsense phrase like "Drydocks World companies in Dubai" that never matched anything.';
+const APP_UPDATE_NOTES = 'Fleet map: when 0 vessels are found automatically, you can now retry the free Wikidata lookup under a shorter/known company name (e.g. "Drydocks World" instead of the exact map listing name) — no cost, often finds real vessels the first search missed.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -13165,6 +13165,7 @@ async function openCompanyFleet(p) {
   if (body) body.textContent = 'Loading…';
   const mapWrap = $('fleetBrainMap');
   if (mapWrap) mapWrap.innerHTML = '';
+  if ($('fleetRetryName')) $('fleetRetryName').value = ''; // clear any leftover text from the previously viewed company
   await loadCompanyFleet(p);
 }
 
@@ -13219,7 +13220,55 @@ async function loadCompanyFleet(p) {
   }
   currentFleetVessels = vessels;
   renderFleetBrainMap(profile, vessels);
+
+  // Wikidata only matches when the OSM-derived name we searched under
+  // (often a specific facility/branch name like "JADAF - Drydock world
+  // Dubai") is a literal substring of how the company is actually labelled
+  // on Wikidata (often its shorter, more famous name, e.g. "Drydocks
+  // World") — so a real, well-documented company can still come back with
+  // 0 vessels on the first try. Offer a free retry under a different name
+  // instead of treating that as a dead end.
+  const retryRow = $('fleetRetrySearchRow');
+  if (retryRow) retryRow.style.display = 'block';
 }
+
+async function retryWikidataFleetSearch() {
+  const input = $('fleetRetryName');
+  const altName = input?.value.trim();
+  if (!altName || !currentFleetCompany) return;
+  const btn = $('fleetRetrySearchBtn');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const found = await fetchWikidataFleet(altName);
+    if (!found.length) {
+      showToast(`No Wikidata match under "${altName}" either — add vessels manually below as your team researches this company.`);
+      return;
+    }
+    const key = currentFleetCompany.id;
+    const existingNames = new Set(currentFleetVessels.map((v) => (v.vessel_name || '').toLowerCase()));
+    const rows = found
+      .filter((v) => !existingNames.has((v.name || '').toLowerCase()))
+      .map((v) => ({
+        company_key: key, vessel_name: v.name, imo_number: v.imo || null, mmsi: v.mmsi || null,
+        source: 'wikidata', created_by: currentUser?.id || null,
+      }));
+    if (!rows.length) { showToast('Found the same vessels already on the map.'); return; }
+    try {
+      const { data, error } = await sb.from('company_vessels').insert(rows).select();
+      if (error) throw error;
+      currentFleetVessels = currentFleetVessels.concat(data || []);
+    } catch (err) {
+      currentFleetVessels = currentFleetVessels.concat(rows); // still show them even if saving failed
+    }
+    renderFleetBrainMap(currentFleetProfile, currentFleetVessels);
+    showToast(`Found ${rows.length} vessel${rows.length === 1 ? '' : 's'} under "${altName}".`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔎 Try this name';
+  }
+}
+if ($('fleetRetrySearchBtn')) $('fleetRetrySearchBtn').addEventListener('click', retryWikidataFleetSearch);
 
 function renderFleetProfile(profile, p) {
   const body = $('fleetProfileBody');

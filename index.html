@@ -1644,6 +1644,13 @@
         <strong style="font-size:14px;">Fleet map</strong>
         <p class="hint" style="margin-top:2px;">Auto-found from Wikidata where possible — add or fix anything below; the team's own research always wins.</p>
         <div id="fleetBrainMap" style="position:relative; margin-top:10px;"></div>
+        <div id="fleetRetrySearchRow" style="margin-top:12px; display:none;">
+          <label for="fleetRetryName" style="font-size:12px;">0 found automatically? The map's exact name often isn't how the company is registered — try its shorter/known name instead</label>
+          <div style="display:flex; gap:8px;">
+            <input id="fleetRetryName" type="text" placeholder="e.g. Drydocks World" style="flex:1;" />
+            <button type="button" class="secondary" id="fleetRetrySearchBtn" style="white-space:nowrap;">🔎 Try this name</button>
+          </div>
+        </div>
       </div>
 
       <div class="card glass" id="fleetAddVesselCard" style="margin-top:14px;">
