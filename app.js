@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.4';
+const APP_VERSION = 'v3.52.6';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fleet map: when 0 vessels are found automatically, you can now retry the free Wikidata lookup under a shorter/known company name (e.g. "Drydocks World" instead of the exact map listing name) — no cost, often finds real vessels the first search missed.';
+const APP_UPDATE_NOTES = 'AEON Ai\'s fleet answers now include an "Open Mind Map (Web Page)" button — a standalone page with the same curved mind-map diagram plus a written profile per vessel (owner, IMO/MMSI, last known position), opened in a new tab, free of charge.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -14213,6 +14213,193 @@ function addAiMessage(role, text) {
   return div;
 }
 
+// Builds a downloadable CSV of a fleetTable straight in the browser — no
+// server round trip, no cost. Matches the columns shown in the on-screen
+// table so what you see is exactly what you get in the file.
+function downloadFleetCsv(fleetTable) {
+  const rows = [['Vessel', 'IMO', 'MMSI', 'Owner', 'Last known location', 'Source']];
+  (fleetTable.vessels || []).forEach((v) => {
+    const loc = (v.lat != null && v.lng != null) ? `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}` : 'Unknown';
+    rows.push([v.name || '', v.imo || '', v.mmsi || '', v.owner || '', loc, v.source === 'wikidata' ? 'Auto (Wikidata)' : 'Manual']);
+  });
+  const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(fleetTable.companyName || 'fleet').replace(/[^a-z0-9]+/gi, '_')}_vessels.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Renders the vessel/owner table AEON Ai attaches under its spoken reply
+// when a chat question matches a company already saved in Company Finder —
+// same underlying data as the Fleet brain-map, just shown as a plain table
+// here since a table (unlike prose) isn't something worth reading aloud.
+function renderFleetTableCard(fleetTable) {
+  const card = document.createElement('div');
+  card.className = 'ai-fleet-card';
+  card.style.cssText = 'margin-top:8px; padding:12px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-border);';
+
+  const vessels = fleetTable.vessels || [];
+  const rowsHtml = vessels.length
+    ? vessels.map((v) => `
+        <tr>
+          <td>${escapeHtml(v.name || 'Unnamed')}</td>
+          <td>${escapeHtml(v.imo || v.mmsi || '—')}</td>
+          <td>${escapeHtml(v.owner || fleetTable.companyName || '—')}</td>
+          <td>${v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'Unknown'}</td>
+          <td>${v.source === 'wikidata' ? 'Auto' : 'Manual'}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="5" style="text-align:center; opacity:0.7;">No vessels saved yet — add them from the Fleet map.</td></tr>`;
+
+  card.innerHTML = `
+    <strong style="font-size:13px;">🧠 ${escapeHtml(fleetTable.companyName)}</strong>
+    <div style="overflow-x:auto; margin-top:8px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
+        <thead>
+          <tr style="text-align:left; opacity:0.7;">
+            <th style="padding:4px 6px;">Vessel</th>
+            <th style="padding:4px 6px;">IMO / MMSI</th>
+            <th style="padding:4px 6px;">Owner</th>
+            <th style="padding:4px 6px;">Last location</th>
+            <th style="padding:4px 6px;">Source</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+      <button type="button" class="secondary ai-fleet-download-btn" style="margin-top:0;">⬇ Download CSV</button>
+      <button type="button" class="secondary ai-fleet-open-btn" style="margin-top:0;">🧠 Open Fleet Map</button>
+      <button type="button" class="secondary ai-fleet-webpage-btn" style="margin-top:0;">🌐 Open Mind Map (Web Page)</button>
+    </div>
+  `;
+
+  card.querySelector('.ai-fleet-download-btn')?.addEventListener('click', () => downloadFleetCsv(fleetTable));
+  card.querySelector('.ai-fleet-open-btn')?.addEventListener('click', () => {
+    if (typeof closeAiChat === 'function') closeAiChat();
+    openCompanyFleet({
+      id: fleetTable.companyKey,
+      displayName: { text: fleetTable.companyName },
+      formattedAddress: '',
+      websiteUri: fleetTable.website || null,
+      internationalPhoneNumber: fleetTable.contactPhone || null,
+    });
+  });
+  card.querySelector('.ai-fleet-webpage-btn')?.addEventListener('click', () => {
+    const html = buildFleetMindMapHtml(fleetTable);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
+
+  return card;
+}
+
+// Builds a standalone, self-contained HTML page (no external assets, no
+// server, no cost) with the same curved hub-and-branch mind-map visual as
+// the in-app Fleet map, PLUS a plain-English written profile per vessel —
+// opened in a new browser tab from a Blob URL, so it can be viewed full
+// screen, printed, or the tab's own "Save Page As" used to keep a copy.
+// Deliberately honest about what "availability" means here: this is
+// ownership/fleet data (who owns what), not a live position feed — that's
+// a different feature (Area Watch) with its own, separate coverage limits.
+function buildFleetMindMapHtml(fleetTable) {
+  const vessels = fleetTable.vessels || [];
+  const n = vessels.length;
+  const W = 900, H = Math.max(420, Math.min(1000, 160 + n * 60));
+  const cx = W / 2, cy = H / 2;
+  const radius = Math.max(140, Math.min(W, H) / 2 - 120);
+
+  let linesSvg = '';
+  let nodesHtml = '';
+  let profilesHtml = '';
+  vessels.forEach((v, i) => {
+    const color = FLEET_BRANCH_COLORS[i % FLEET_BRANCH_COLORS.length];
+    const angle = (2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2;
+    const x = Math.round(cx + radius * Math.cos(angle));
+    const y = Math.round(cy + radius * Math.sin(angle));
+    const dx = x - cx, dy = y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = len * 0.18;
+    const ctrlX = Math.round((cx + x) / 2 - (dy / len) * bow);
+    const ctrlY = Math.round((cy + y) / 2 + (dx / len) * bow);
+    linesSvg += `<path d="M ${cx} ${cy} Q ${ctrlX} ${ctrlY} ${x} ${y}" fill="none" stroke="${color}" stroke-width="2" opacity="0.75" />`;
+
+    const hasPos = v.lat != null && v.lng != null;
+    const posLabel = hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'unknown';
+    nodesHtml += `
+      <div class="node" style="left:${x}px; top:${y}px; border-left-color:${color};">
+        <span class="badge">${v.source === 'wikidata' ? 'auto' : 'manual'}</span>
+        <div class="vname">🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</div>
+        ${v.imo ? `<div class="meta">IMO ${escapeHtml(v.imo)}</div>` : ''}
+        ${v.mmsi ? `<div class="meta">MMSI ${escapeHtml(v.mmsi)}</div>` : ''}
+        <div class="meta pos">📍 ${posLabel}</div>
+      </div>`;
+
+    profilesHtml += `
+      <div class="profile">
+        <h3>🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</h3>
+        <p>Owned by <strong>${escapeHtml(v.owner || fleetTable.companyName)}</strong>.
+        ${v.imo ? `IMO number ${escapeHtml(v.imo)}. ` : ''}${v.mmsi ? `MMSI ${escapeHtml(v.mmsi)}. ` : ''}
+        ${hasPos ? `Last recorded position was ${posLabel}. ` : 'No position has been recorded for this vessel yet. '}
+        This entry was ${v.source === 'wikidata' ? 'found automatically from Wikidata' : "added manually by your team's own research"} —
+        it reflects the ownership record on file, not a live, real-time location; for that, use Area Watch instead.</p>
+      </div>`;
+  });
+
+  const hubContact = [
+    fleetTable.contactPhone ? `📞 ${escapeHtml(fleetTable.contactPhone)}` : '',
+    fleetTable.contactEmail ? `✉️ ${escapeHtml(fleetTable.contactEmail)}` : '',
+    fleetTable.website ? `🌐 ${escapeHtml(fleetTable.website)}` : '',
+  ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+
+  const summary = `<strong>${escapeHtml(fleetTable.companyName)}</strong> has ${n} vessel${n === 1 ? '' : 's'} on file` +
+    (fleetTable.website || fleetTable.contactPhone || fleetTable.contactEmail ? `, with contact details on record below. ` : `. `) +
+    `This data comes from Wikidata (free, best-effort — not every company is covered) plus anything your own team has ` +
+    `researched and typed in manually. It describes fleet ownership, not live vessel positions.`;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(fleetTable.companyName)} — Fleet Mind Map</title>
+<style>
+  body { margin:0; padding:24px; background:#0b0d12; color:#eee; font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  h1 { text-align:center; font-size:22px; margin-bottom:6px; }
+  .summary { max-width:640px; margin:0 auto 10px; text-align:center; opacity:0.85; font-size:13.5px; line-height:1.5; }
+  .contact { text-align:center; font-size:12.5px; opacity:0.8; margin-bottom:20px; }
+  .wrap { position:relative; width:${W}px; max-width:100%; height:${H}px; margin:0 auto; }
+  .hub { position:absolute; left:${cx}px; top:${cy}px; transform:translate(-50%,-50%); width:170px; background:rgba(255,255,255,0.08); border:1.5px solid rgba(255,255,255,0.25); border-radius:20px; padding:16px 12px; text-align:center; }
+  .node { position:absolute; transform:translate(-50%,-50%); width:150px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); border-left:3px solid #888; border-radius:16px; padding:10px; font-size:12px; }
+  .badge { position:absolute; top:-8px; right:6px; font-size:8px; text-transform:uppercase; letter-spacing:0.04em; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:999px; }
+  .vname { font-weight:700; margin-bottom:4px; }
+  .meta { opacity:0.75; margin-top:2px; }
+  .profiles { max-width:640px; margin:40px auto 0; }
+  .profile { border-top:1px solid rgba(255,255,255,0.12); padding:14px 0; }
+  .profile h3 { margin:0 0 6px; font-size:14.5px; }
+  .profile p { margin:0; font-size:13px; line-height:1.6; opacity:0.9; }
+  .footer { text-align:center; opacity:0.55; font-size:11.5px; margin-top:30px; }
+</style></head>
+<body>
+  <h1>${escapeHtml(fleetTable.companyName)} — Fleet Mind Map</h1>
+  <div class="summary">${summary}</div>
+  ${hubContact ? `<div class="contact">${hubContact}</div>` : ''}
+  <div class="wrap">
+    <svg width="${W}" height="${H}" style="position:absolute; left:0; top:0;">${linesSvg}</svg>
+    <div class="hub">
+      <div style="font-size:24px;">🏢</div>
+      <div style="font-weight:800; margin-top:6px;">${escapeHtml(fleetTable.companyName)}</div>
+      <div style="opacity:0.7; font-size:11px; margin-top:4px;">${n} vessel${n === 1 ? '' : 's'}</div>
+    </div>
+    ${nodesHtml}
+  </div>
+  <div class="profiles">${profilesHtml || '<p style="text-align:center; opacity:0.7;">No vessels on file yet.</p>'}</div>
+  <div class="footer">Generated by AEON Ai from C-TORQ Digital Organization — free data, not independently verified. Treat as a research lead, not a confirmed fact.</div>
+</body></html>`;
+}
+
 // Cleans up AEON Ai's reply so it reads like a real person typed it, both on
 // screen and out loud — the model is already instructed not to use markdown/
 // symbols, but this is a second, guaranteed line of defense so a stray "**"
@@ -14266,6 +14453,11 @@ async function sendAiMessage() {
     const cleanReply = humanizeAiReply(data.reply);
     loadingEl.textContent = cleanReply;
     loadingEl.className = 'ai-msg assistant';
+    if (data.fleetTable) {
+      loadingEl.appendChild(renderFleetTableCard(data.fleetTable));
+      const wrap = $('aiMessages');
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    }
     aiHistory.push({ role: 'user', text }, { role: 'assistant', text: cleanReply });
     aiHistory = aiHistory.slice(-16);
     speakText(cleanReply);
