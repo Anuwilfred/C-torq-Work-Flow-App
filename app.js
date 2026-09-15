@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.6';
+const APP_VERSION = 'v3.52.7';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'AEON Ai\'s fleet answers now include an "Open Mind Map (Web Page)" button — a standalone page with the same curved mind-map diagram plus a written profile per vessel (owner, IMO/MMSI, last known position), opened in a new tab, free of charge.';
+const APP_UPDATE_NOTES = 'AEON Ai can now answer country-wide fleet questions (e.g. "what ships are docked in UAE, with owners") via a live web search — a paid, opt-in feature an admin turns on separately (roughly 20 cents per question). Its fleet answers also now offer a "Download PDF" button (vessel table + written profiles) instead of the old web-page mind map.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -14220,7 +14220,7 @@ function downloadFleetCsv(fleetTable) {
   const rows = [['Vessel', 'IMO', 'MMSI', 'Owner', 'Last known location', 'Source']];
   (fleetTable.vessels || []).forEach((v) => {
     const loc = (v.lat != null && v.lng != null) ? `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}` : 'Unknown';
-    rows.push([v.name || '', v.imo || '', v.mmsi || '', v.owner || '', loc, v.source === 'wikidata' ? 'Auto (Wikidata)' : 'Manual']);
+    rows.push([v.name || '', v.imo || '', v.mmsi || '', v.owner || '', loc, v.source === 'wikidata' ? 'Auto (Wikidata)' : v.source === 'live' ? 'Live web search' : 'Manual']);
   });
   const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -14250,13 +14250,14 @@ function renderFleetTableCard(fleetTable) {
           <td>${escapeHtml(v.name || 'Unnamed')}</td>
           <td>${escapeHtml(v.imo || v.mmsi || '—')}</td>
           <td>${escapeHtml(v.owner || fleetTable.companyName || '—')}</td>
-          <td>${v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'Unknown'}</td>
-          <td>${v.source === 'wikidata' ? 'Auto' : 'Manual'}</td>
+          <td>${v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port ? escapeHtml(v.port) : 'Unknown')}</td>
+          <td>${v.source === 'wikidata' ? 'Auto' : v.source === 'live' ? 'Live search' : 'Manual'}</td>
         </tr>`).join('')
     : `<tr><td colspan="5" style="text-align:center; opacity:0.7;">No vessels saved yet — add them from the Fleet map.</td></tr>`;
 
   card.innerHTML = `
     <strong style="font-size:13px;">🧠 ${escapeHtml(fleetTable.companyName)}</strong>
+    ${fleetTable.isLive ? `<div style="font-size:11px; opacity:0.7; margin-top:2px;">Live web search snapshot — not a complete or guaranteed-current list, double-check before acting on it.</div>` : ''}
     <div style="overflow-x:auto; margin-top:8px;">
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead>
@@ -14273,31 +14274,173 @@ function renderFleetTableCard(fleetTable) {
     </div>
     <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
       <button type="button" class="secondary ai-fleet-download-btn" style="margin-top:0;">⬇ Download CSV</button>
-      <button type="button" class="secondary ai-fleet-open-btn" style="margin-top:0;">🧠 Open Fleet Map</button>
-      <button type="button" class="secondary ai-fleet-webpage-btn" style="margin-top:0;">🌐 Open Mind Map (Web Page)</button>
+      ${fleetTable.companyKey ? `<button type="button" class="secondary ai-fleet-open-btn" style="margin-top:0;">🧠 Open Fleet Map</button>` : ''}
+      <button type="button" class="secondary ai-fleet-pdf-btn" style="margin-top:0;">📄 Download PDF</button>
     </div>
   `;
 
   card.querySelector('.ai-fleet-download-btn')?.addEventListener('click', () => downloadFleetCsv(fleetTable));
-  card.querySelector('.ai-fleet-open-btn')?.addEventListener('click', () => {
-    if (typeof closeAiChat === 'function') closeAiChat();
-    openCompanyFleet({
-      id: fleetTable.companyKey,
-      displayName: { text: fleetTable.companyName },
-      formattedAddress: '',
-      websiteUri: fleetTable.website || null,
-      internationalPhoneNumber: fleetTable.contactPhone || null,
+  if (fleetTable.companyKey) {
+    card.querySelector('.ai-fleet-open-btn')?.addEventListener('click', () => {
+      if (typeof closeAiChat === 'function') closeAiChat();
+      openCompanyFleet({
+        id: fleetTable.companyKey,
+        displayName: { text: fleetTable.companyName },
+        formattedAddress: '',
+        websiteUri: fleetTable.website || null,
+        internationalPhoneNumber: fleetTable.contactPhone || null,
+      });
     });
-  });
-  card.querySelector('.ai-fleet-webpage-btn')?.addEventListener('click', () => {
-    const html = buildFleetMindMapHtml(fleetTable);
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  });
+  }
+  card.querySelector('.ai-fleet-pdf-btn')?.addEventListener('click', () => downloadFleetPdf(fleetTable));
 
   return card;
+}
+
+// Builds and downloads a real PDF (vessel table + a written profile per
+// vessel) using jsPDF, loaded from CDN — replaces the earlier "open as a
+// web page" mind-map button: a PDF is easier to save, print, and forward
+// than a page opened in a browser tab. Runs entirely client-side, no
+// server cost either way. Same honesty rule as the old web-page version:
+// this is ownership/fleet data (who owns what), or for a live country-wide
+// search result, a snapshot of what was found just now — never a live,
+// real-time position feed.
+function downloadFleetPdf(fleetTable) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    if (typeof showToast === 'function') showToast('PDF tool is still loading — try again in a moment.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const marginX = 40;
+  let y = 50;
+
+  const ensureRoom = (need) => {
+    if (y + need > pageH - 36) {
+      doc.addPage();
+      y = 50;
+    }
+  };
+
+  const vessels = fleetTable.vessels || [];
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text(String(fleetTable.companyName || 'Fleet'), marginX, y, { maxWidth: pageW - marginX * 2 });
+  y += 24;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  const summary = fleetTable.isLive
+    ? `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} found via a live web search just now. This is a snapshot, not a complete or guaranteed-current list — verify before acting on it.`
+    : `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} on file. This reflects fleet ownership on record, not live vessel positions — use Area Watch for that.`;
+  const summaryLines = doc.splitTextToSize(summary, pageW - marginX * 2);
+  doc.text(summaryLines, marginX, y);
+  y += summaryLines.length * 12 + 6;
+
+  const contactBits = [
+    fleetTable.contactPhone ? `Phone: ${fleetTable.contactPhone}` : '',
+    fleetTable.contactEmail ? `Email: ${fleetTable.contactEmail}` : '',
+    fleetTable.website ? `Website: ${fleetTable.website}` : '',
+  ].filter(Boolean).join('    ');
+  if (contactBits) {
+    doc.text(contactBits, marginX, y);
+    y += 16;
+  }
+  y += 8;
+
+  // ---- Table ----
+  const cols = [
+    { label: 'Vessel', x: marginX, w: 125 },
+    { label: 'IMO / MMSI', x: marginX + 125, w: 85 },
+    { label: 'Owner', x: marginX + 210, w: 130 },
+    { label: 'Location', x: marginX + 340, w: 100 },
+    { label: 'Source', x: marginX + 440, w: 60 },
+  ];
+  const drawTableHeader = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    cols.forEach((c) => doc.text(c.label, c.x, y));
+    y += 6;
+    doc.setLineWidth(0.5);
+    doc.line(marginX, y, pageW - marginX, y);
+    y += 12;
+  };
+  ensureRoom(30);
+  drawTableHeader();
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  if (!vessels.length) {
+    doc.text('No vessels found.', marginX, y);
+    y += 14;
+  }
+  vessels.forEach((v) => {
+    if (y + 14 > pageH - 36) {
+      doc.addPage();
+      y = 50;
+      drawTableHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+    }
+    const loc = v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port || '-');
+    const src = v.source === 'wikidata' ? 'Auto' : v.source === 'live' ? 'Live' : 'Manual';
+    const cells = [v.name || 'Unnamed', v.imo || v.mmsi || '-', v.owner || fleetTable.companyName || '-', loc, src];
+    cols.forEach((c, i) => {
+      const clipped = doc.splitTextToSize(String(cells[i]), c.w - 4)[0] || '';
+      doc.text(clipped, c.x, y);
+    });
+    y += 13;
+  });
+
+  // ---- Vessel profiles ----
+  y += 14;
+  ensureRoom(24);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('Vessel profiles', marginX, y);
+  y += 18;
+
+  doc.setFontSize(9.5);
+  vessels.forEach((v) => {
+    ensureRoom(24);
+    doc.setFont('helvetica', 'bold');
+    doc.text(String(v.name || 'Unnamed vessel'), marginX, y);
+    y += 13;
+    doc.setFont('helvetica', 'normal');
+    const hasPos = v.lat != null && v.lng != null;
+    const posText = hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port || 'not recorded');
+    const sourceText = v.source === 'wikidata'
+      ? 'found automatically from Wikidata'
+      : v.source === 'live'
+        ? 'found via a live web search just now — treat as a snapshot, not a guaranteed-current record'
+        : "added manually by your team's own research";
+    const para = `Owned by ${v.owner || fleetTable.companyName || 'unknown'}. ` +
+      `${v.imo ? `IMO ${v.imo}. ` : ''}${v.mmsi ? `MMSI ${v.mmsi}. ` : ''}` +
+      `Last known location: ${posText}. This entry was ${sourceText}.`;
+    const paraLines = doc.splitTextToSize(para, pageW - marginX * 2);
+    paraLines.forEach((line) => {
+      ensureRoom(12);
+      doc.text(line, marginX, y);
+      y += 12;
+    });
+    y += 8;
+  });
+
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(130);
+    doc.text('Generated by AEON Ai, C-TORQ Digital Organization — for internal reference; verify before acting on it.', marginX, pageH - 20);
+    doc.setTextColor(0);
+  }
+
+  const safeName = String(fleetTable.companyName || 'fleet').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'fleet';
+  doc.save(`${safeName}.pdf`);
 }
 
 // Builds a standalone, self-contained HTML page (no external assets, no
@@ -14331,10 +14474,11 @@ function buildFleetMindMapHtml(fleetTable) {
     linesSvg += `<path d="M ${cx} ${cy} Q ${ctrlX} ${ctrlY} ${x} ${y}" fill="none" stroke="${color}" stroke-width="2" opacity="0.75" />`;
 
     const hasPos = v.lat != null && v.lng != null;
-    const posLabel = hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'unknown';
+    const posLabel = hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port || 'unknown');
+    const sourceBadge = v.source === 'wikidata' ? 'auto' : v.source === 'live' ? 'live search' : 'manual';
     nodesHtml += `
       <div class="node" style="left:${x}px; top:${y}px; border-left-color:${color};">
-        <span class="badge">${v.source === 'wikidata' ? 'auto' : 'manual'}</span>
+        <span class="badge">${sourceBadge}</span>
         <div class="vname">🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</div>
         ${v.imo ? `<div class="meta">IMO ${escapeHtml(v.imo)}</div>` : ''}
         ${v.mmsi ? `<div class="meta">MMSI ${escapeHtml(v.mmsi)}</div>` : ''}
@@ -14346,9 +14490,9 @@ function buildFleetMindMapHtml(fleetTable) {
         <h3>🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</h3>
         <p>Owned by <strong>${escapeHtml(v.owner || fleetTable.companyName)}</strong>.
         ${v.imo ? `IMO number ${escapeHtml(v.imo)}. ` : ''}${v.mmsi ? `MMSI ${escapeHtml(v.mmsi)}. ` : ''}
-        ${hasPos ? `Last recorded position was ${posLabel}. ` : 'No position has been recorded for this vessel yet. '}
-        This entry was ${v.source === 'wikidata' ? 'found automatically from Wikidata' : "added manually by your team's own research"} —
-        it reflects the ownership record on file, not a live, real-time location; for that, use Area Watch instead.</p>
+        ${hasPos ? `Last recorded position was ${posLabel}. ` : v.port ? `Reported at ${escapeHtml(v.port)}. ` : 'No position has been recorded for this vessel yet. '}
+        This entry was ${v.source === 'wikidata' ? 'found automatically from Wikidata' : v.source === 'live' ? 'found via a live web search just now' : "added manually by your team's own research"} —
+        ${v.source === 'live' ? 'treat it as a snapshot, not a guaranteed-current or complete record; verify before acting on it.' : 'it reflects the ownership record on file, not a live, real-time location; for that, use Area Watch instead.'}</p>
       </div>`;
   });
 
@@ -14455,6 +14599,11 @@ async function sendAiMessage() {
     loadingEl.className = 'ai-msg assistant';
     if (data.fleetTable) {
       loadingEl.appendChild(renderFleetTableCard(data.fleetTable));
+      const wrap = $('aiMessages');
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    }
+    if (data.liveFleetTable) {
+      loadingEl.appendChild(renderFleetTableCard(data.liveFleetTable));
       const wrap = $('aiMessages');
       if (wrap) wrap.scrollTop = wrap.scrollHeight;
     }
