@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.8';
+const APP_VERSION = 'v3.53.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed AEON Ai wrongly saying "timed out" on longer answers (like a live country-wide fleet search), and fixed a raw crash if your sign-in briefly fails to load — it now says plainly to refresh and try again.';
+const APP_UPDATE_NOTES = 'AEON Ai can now find vessels currently in for repair or maintenance at named shipyards/drydocks (ADSB, Drydocks World, and more). Live fleet searches now also show a real address/location and the exact date and time the snapshot was taken, in the chat table, the PDF, and the Mind Map page.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -14217,10 +14217,16 @@ function addAiMessage(role, text) {
 // server round trip, no cost. Matches the columns shown in the on-screen
 // table so what you see is exactly what you get in the file.
 function downloadFleetCsv(fleetTable) {
-  const rows = [['Vessel', 'IMO', 'MMSI', 'Owner', 'Last known location', 'Source']];
+  const header = ['Vessel', 'IMO', 'MMSI', 'Owner', 'Status', 'Address / Location', 'Coordinates', 'Source'];
+  const rows = [header];
+  if (fleetTable.isLive && fleetTable.searchedAt) {
+    rows.push([`Live search snapshot taken ${new Date(fleetTable.searchedAt).toLocaleString()}`]);
+  }
+  if (fleetTable.address) rows.push([`Address on file: ${fleetTable.address}`]);
   (fleetTable.vessels || []).forEach((v) => {
-    const loc = (v.lat != null && v.lng != null) ? `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}` : 'Unknown';
-    rows.push([v.name || '', v.imo || '', v.mmsi || '', v.owner || '', loc, v.source === 'wikidata' ? 'Auto (Wikidata)' : v.source === 'live' ? 'Live web search' : 'Manual']);
+    const coords = (v.lat != null && v.lng != null) ? `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}` : '';
+    const addr = v.address || v.port || fleetTable.address || 'Unknown';
+    rows.push([v.name || '', v.imo || '', v.mmsi || '', v.owner || '', v.status || '', addr, coords, v.source === 'wikidata' ? 'Auto (Wikidata)' : v.source === 'live' ? 'Live web search' : 'Manual']);
   });
   const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -14250,14 +14256,20 @@ function renderFleetTableCard(fleetTable) {
           <td>${escapeHtml(v.name || 'Unnamed')}</td>
           <td>${escapeHtml(v.imo || v.mmsi || '—')}</td>
           <td>${escapeHtml(v.owner || fleetTable.companyName || '—')}</td>
-          <td>${v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port ? escapeHtml(v.port) : 'Unknown')}</td>
+          <td>${v.status ? escapeHtml(v.status) : '—'}</td>
+          <td>${escapeHtml(v.address || v.port || fleetTable.address || (v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'Unknown'))}</td>
           <td>${v.source === 'wikidata' ? 'Auto' : v.source === 'live' ? 'Live search' : 'Manual'}</td>
         </tr>`).join('')
-    : `<tr><td colspan="5" style="text-align:center; opacity:0.7;">No vessels saved yet — add them from the Fleet map.</td></tr>`;
+    : `<tr><td colspan="6" style="text-align:center; opacity:0.7;">No vessels saved yet — add them from the Fleet map.</td></tr>`;
+
+  const searchedAtLabel = fleetTable.isLive && fleetTable.searchedAt
+    ? `Snapshot taken ${new Date(fleetTable.searchedAt).toLocaleString()} — `
+    : '';
 
   card.innerHTML = `
     <strong style="font-size:13px;">🧠 ${escapeHtml(fleetTable.companyName)}</strong>
-    ${fleetTable.isLive ? `<div style="font-size:11px; opacity:0.7; margin-top:2px;">Live web search snapshot — not a complete or guaranteed-current list, double-check before acting on it.</div>` : ''}
+    ${fleetTable.address ? `<div style="font-size:11px; opacity:0.75; margin-top:2px;">📍 ${escapeHtml(fleetTable.address)}</div>` : ''}
+    ${fleetTable.isLive ? `<div style="font-size:11px; opacity:0.7; margin-top:2px;">${searchedAtLabel}live web search snapshot — not a complete or guaranteed-current list, double-check before acting on it.</div>` : ''}
     <div style="overflow-x:auto; margin-top:8px;">
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead>
@@ -14265,7 +14277,8 @@ function renderFleetTableCard(fleetTable) {
             <th style="padding:4px 6px;">Vessel</th>
             <th style="padding:4px 6px;">IMO / MMSI</th>
             <th style="padding:4px 6px;">Owner</th>
-            <th style="padding:4px 6px;">Last location</th>
+            <th style="padding:4px 6px;">Status</th>
+            <th style="padding:4px 6px;">Address / location</th>
             <th style="padding:4px 6px;">Source</th>
           </tr>
         </thead>
@@ -14276,6 +14289,7 @@ function renderFleetTableCard(fleetTable) {
       <button type="button" class="secondary ai-fleet-download-btn" style="margin-top:0;">⬇ Download CSV</button>
       ${fleetTable.companyKey ? `<button type="button" class="secondary ai-fleet-open-btn" style="margin-top:0;">🧠 Open Fleet Map</button>` : ''}
       <button type="button" class="secondary ai-fleet-pdf-btn" style="margin-top:0;">📄 Download PDF</button>
+      <button type="button" class="secondary ai-fleet-webpage-btn" style="margin-top:0;">🌐 Open Mind Map (Web Page)</button>
     </div>
   `;
 
@@ -14293,6 +14307,16 @@ function renderFleetTableCard(fleetTable) {
     });
   }
   card.querySelector('.ai-fleet-pdf-btn')?.addEventListener('click', () => downloadFleetPdf(fleetTable));
+  // Re-added per request: marketing wants the animated hub-and-branch page
+  // to actually show live, on a screen — the PDF/CSV are for keeping a
+  // record, this is for a "look, here it is" moment in front of people.
+  card.querySelector('.ai-fleet-webpage-btn')?.addEventListener('click', () => {
+    const html = buildFleetMindMapHtml(fleetTable);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
 
   return card;
 }
@@ -14333,31 +14357,34 @@ function downloadFleetPdf(fleetTable) {
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
+  const searchedAtText = fleetTable.isLive && fleetTable.searchedAt ? ` Snapshot taken ${new Date(fleetTable.searchedAt).toLocaleString()}.` : '';
   const summary = fleetTable.isLive
-    ? `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} found via a live web search just now. This is a snapshot, not a complete or guaranteed-current list — verify before acting on it.`
+    ? `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} found via a live web search just now.${searchedAtText} This is a snapshot, not a complete or guaranteed-current list — verify before acting on it.`
     : `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} on file. This reflects fleet ownership on record, not live vessel positions — use Area Watch for that.`;
   const summaryLines = doc.splitTextToSize(summary, pageW - marginX * 2);
   doc.text(summaryLines, marginX, y);
   y += summaryLines.length * 12 + 6;
 
   const contactBits = [
+    fleetTable.address ? `Address: ${fleetTable.address}` : '',
     fleetTable.contactPhone ? `Phone: ${fleetTable.contactPhone}` : '',
     fleetTable.contactEmail ? `Email: ${fleetTable.contactEmail}` : '',
     fleetTable.website ? `Website: ${fleetTable.website}` : '',
   ].filter(Boolean).join('    ');
   if (contactBits) {
-    doc.text(contactBits, marginX, y);
-    y += 16;
+    const contactLines = doc.splitTextToSize(contactBits, pageW - marginX * 2);
+    doc.text(contactLines, marginX, y);
+    y += contactLines.length * 12 + 4;
   }
   y += 8;
 
   // ---- Table ----
   const cols = [
-    { label: 'Vessel', x: marginX, w: 125 },
-    { label: 'IMO / MMSI', x: marginX + 125, w: 85 },
-    { label: 'Owner', x: marginX + 210, w: 130 },
-    { label: 'Location', x: marginX + 340, w: 100 },
-    { label: 'Source', x: marginX + 440, w: 60 },
+    { label: 'Vessel', x: marginX, w: 110 },
+    { label: 'IMO / MMSI', x: marginX + 110, w: 75 },
+    { label: 'Owner', x: marginX + 185, w: 105 },
+    { label: 'Status', x: marginX + 290, w: 60 },
+    { label: 'Address / Location', x: marginX + 350, w: 130 },
   ];
   const drawTableHeader = () => {
     doc.setFont('helvetica', 'bold');
@@ -14385,9 +14412,8 @@ function downloadFleetPdf(fleetTable) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
     }
-    const loc = v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port || '-');
-    const src = v.source === 'wikidata' ? 'Auto' : v.source === 'live' ? 'Live' : 'Manual';
-    const cells = [v.name || 'Unnamed', v.imo || v.mmsi || '-', v.owner || fleetTable.companyName || '-', loc, src];
+    const loc = v.address || v.port || fleetTable.address || (v.lat != null && v.lng != null ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : '-');
+    const cells = [v.name || 'Unnamed', v.imo || v.mmsi || '-', v.owner || fleetTable.companyName || '-', v.status || '-', loc];
     cols.forEach((c, i) => {
       const clipped = doc.splitTextToSize(String(cells[i]), c.w - 4)[0] || '';
       doc.text(clipped, c.x, y);
@@ -14411,15 +14437,16 @@ function downloadFleetPdf(fleetTable) {
     y += 13;
     doc.setFont('helvetica', 'normal');
     const hasPos = v.lat != null && v.lng != null;
-    const posText = hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port || 'not recorded');
+    const posText = v.address || v.port || fleetTable.address || (hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'not recorded');
     const sourceText = v.source === 'wikidata'
       ? 'found automatically from Wikidata'
       : v.source === 'live'
-        ? 'found via a live web search just now — treat as a snapshot, not a guaranteed-current record'
+        ? `found via a live web search${fleetTable.searchedAt ? ` on ${new Date(fleetTable.searchedAt).toLocaleString()}` : ' just now'} — treat as a snapshot, not a guaranteed-current record`
         : "added manually by your team's own research";
     const para = `Owned by ${v.owner || fleetTable.companyName || 'unknown'}. ` +
       `${v.imo ? `IMO ${v.imo}. ` : ''}${v.mmsi ? `MMSI ${v.mmsi}. ` : ''}` +
-      `Last known location: ${posText}. This entry was ${sourceText}.`;
+      `${v.status ? `Current status: ${v.status}. ` : ''}` +
+      `Address / location: ${posText}. This entry was ${sourceText}.`;
     const paraLines = doc.splitTextToSize(para, pageW - marginX * 2);
     paraLines.forEach((line) => {
       ensureRoom(12);
@@ -14474,7 +14501,8 @@ function buildFleetMindMapHtml(fleetTable) {
     linesSvg += `<path d="M ${cx} ${cy} Q ${ctrlX} ${ctrlY} ${x} ${y}" fill="none" stroke="${color}" stroke-width="2" opacity="0.75" />`;
 
     const hasPos = v.lat != null && v.lng != null;
-    const posLabel = hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : (v.port || 'unknown');
+    const addressLabel = v.address || v.port || fleetTable.address || null;
+    const posLabel = addressLabel || (hasPos ? `${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)}` : 'unknown');
     const sourceBadge = v.source === 'wikidata' ? 'auto' : v.source === 'live' ? 'live search' : 'manual';
     nodesHtml += `
       <div class="node" style="left:${x}px; top:${y}px; border-left-color:${color};">
@@ -14482,7 +14510,9 @@ function buildFleetMindMapHtml(fleetTable) {
         <div class="vname">🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</div>
         ${v.imo ? `<div class="meta">IMO ${escapeHtml(v.imo)}</div>` : ''}
         ${v.mmsi ? `<div class="meta">MMSI ${escapeHtml(v.mmsi)}</div>` : ''}
-        <div class="meta pos">📍 ${posLabel}</div>
+        ${v.status ? `<div class="meta">🛠 ${escapeHtml(v.status)}</div>` : ''}
+        <div class="meta pos">📍 ${escapeHtml(posLabel)}</div>
+        ${hasPos ? `<div class="meta"><a href="https://www.google.com/maps?q=${Number(v.lat)},${Number(v.lng)}" target="_blank" rel="noopener" style="color:inherit;">Open in Maps</a></div>` : ''}
       </div>`;
 
     profilesHtml += `
@@ -14490,22 +14520,31 @@ function buildFleetMindMapHtml(fleetTable) {
         <h3>🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</h3>
         <p>Owned by <strong>${escapeHtml(v.owner || fleetTable.companyName)}</strong>.
         ${v.imo ? `IMO number ${escapeHtml(v.imo)}. ` : ''}${v.mmsi ? `MMSI ${escapeHtml(v.mmsi)}. ` : ''}
-        ${hasPos ? `Last recorded position was ${posLabel}. ` : v.port ? `Reported at ${escapeHtml(v.port)}. ` : 'No position has been recorded for this vessel yet. '}
-        This entry was ${v.source === 'wikidata' ? 'found automatically from Wikidata' : v.source === 'live' ? 'found via a live web search just now' : "added manually by your team's own research"} —
+        ${v.status ? `Current status: ${escapeHtml(v.status)}. ` : ''}
+        ${addressLabel ? `Address / location: ${escapeHtml(addressLabel)}. ` : hasPos ? `Last recorded position was ${posLabel}. ` : 'No location has been recorded for this vessel yet. '}
+        This entry was ${v.source === 'wikidata' ? 'found automatically from Wikidata' : v.source === 'live' ? `found via a live web search${fleetTable.searchedAt ? ` on ${new Date(fleetTable.searchedAt).toLocaleString()}` : ' just now'}` : "added manually by your team's own research"} —
         ${v.source === 'live' ? 'treat it as a snapshot, not a guaranteed-current or complete record; verify before acting on it.' : 'it reflects the ownership record on file, not a live, real-time location; for that, use Area Watch instead.'}</p>
       </div>`;
   });
 
   const hubContact = [
+    fleetTable.address ? `📍 ${escapeHtml(fleetTable.address)}` : '',
     fleetTable.contactPhone ? `📞 ${escapeHtml(fleetTable.contactPhone)}` : '',
     fleetTable.contactEmail ? `✉️ ${escapeHtml(fleetTable.contactEmail)}` : '',
     fleetTable.website ? `🌐 ${escapeHtml(fleetTable.website)}` : '',
   ].filter(Boolean).join(' &nbsp;·&nbsp; ');
 
-  const summary = `<strong>${escapeHtml(fleetTable.companyName)}</strong> has ${n} vessel${n === 1 ? '' : 's'} on file` +
-    (fleetTable.website || fleetTable.contactPhone || fleetTable.contactEmail ? `, with contact details on record below. ` : `. `) +
-    `This data comes from Wikidata (free, best-effort — not every company is covered) plus anything your own team has ` +
-    `researched and typed in manually. It describes fleet ownership, not live vessel positions.`;
+  const searchedAtLine = fleetTable.isLive && fleetTable.searchedAt
+    ? `<div class="contact">🕒 Live snapshot taken ${escapeHtml(new Date(fleetTable.searchedAt).toLocaleString())}</div>`
+    : '';
+
+  const summary = fleetTable.isLive
+    ? `<strong>${escapeHtml(fleetTable.companyName)}</strong> — ${n} vessel${n === 1 ? '' : 's'} found via a live web search. ` +
+      `This is a snapshot from one point in time, not a continuously live or guaranteed-complete feed — verify before acting on it.`
+    : `<strong>${escapeHtml(fleetTable.companyName)}</strong> has ${n} vessel${n === 1 ? '' : 's'} on file` +
+      (fleetTable.website || fleetTable.contactPhone || fleetTable.contactEmail || fleetTable.address ? `, with contact details on record below. ` : `. `) +
+      `This data comes from Wikidata (free, best-effort — not every company is covered) plus anything your own team has ` +
+      `researched and typed in manually. It describes fleet ownership, not live vessel positions.`;
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(fleetTable.companyName)} — Fleet Mind Map</title>
@@ -14530,6 +14569,7 @@ function buildFleetMindMapHtml(fleetTable) {
   <h1>${escapeHtml(fleetTable.companyName)} — Fleet Mind Map</h1>
   <div class="summary">${summary}</div>
   ${hubContact ? `<div class="contact">${hubContact}</div>` : ''}
+  ${searchedAtLine}
   <div class="wrap">
     <svg width="${W}" height="${H}" style="position:absolute; left:0; top:0;">${linesSvg}</svg>
     <div class="hub">
