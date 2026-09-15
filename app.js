@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.49.1';
+const APP_VERSION = 'v3.52.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Light mode readability fixes: several places (Project Analytics stat chips, ring legends, the active-stage card, department hour sub-labels) had text that was hard to read in Light mode — all fixed to stay clear in both Light and Dark.';
+const APP_UPDATE_NOTES = 'Fleet brain-map redesigned: curved, colour-coded branch lines instead of plain grey ones, and the company hub now shows phone/email/website right on the map when the team has them on file.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2951,6 +2951,7 @@ const FEATURE_LIST = [
   { key: 'documentRequest', label: 'Request Document (inside Special Request)' },
   { key: 'fieldActivities', label: 'Field Activities (mission start/stop + client visit logging — for marketing/field people)' },
   { key: 'companyFinder', label: 'Company Finder (search real companies by industry/location, add as Client) — private, off by default' },
+  { key: 'areaWatch', label: 'Area Watch (live AIS view of vessels currently at UAE shipyards/ports) — private, off by default' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -5352,6 +5353,8 @@ const PANEL_IDS = {
   renewalHistory: ['renewalHistoryOverlay', 'renewalHistoryOverlayBackdrop'],
   fieldActivities: ['fieldActivitiesOverlay', 'fieldActivitiesOverlayBackdrop'],
   companyFinder: ['companyFinderOverlay', 'companyFinderOverlayBackdrop'],
+  companyFleet: ['companyFleetOverlay', 'companyFleetOverlayBackdrop'],
+  areaWatch: ['areaWatchOverlay', 'areaWatchOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   people: ['peopleOverlay', 'peopleOverlayBackdrop'],
@@ -5429,7 +5432,12 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'companyFinder') {
     renderCompanyFinderIndustryChips();
+    populateCompanyFinderCountries();
     wireAddressSearch('companyFinderLocation', 'companyFinderLocationResults');
+  }
+  if (name === 'areaWatch') {
+    renderAreaWatchPresets();
+    wireAddressSearch('areaWatchLocation', 'areaWatchLocationResults');
   }
   if (name === 'people') {
     renderTeamList();
@@ -5459,6 +5467,10 @@ function closePanel(name) {
   if (!ids) return;
   $(ids[0]).classList.remove('show');
   $(ids[1]).classList.remove('show');
+  // Live Watch polls AIS every 20s in the background — stop it the moment
+  // the panel closes so it doesn't keep running (and burning AIS lookups)
+  // once nobody's looking at it.
+  if (name === 'areaWatch' && typeof stopAreaWatchLive === 'function') stopAreaWatchLive();
 }
 document.querySelectorAll('[data-open]').forEach((btn) => {
   btn.addEventListener('click', () => openPanel(btn.dataset.open, { hideCreate: btn.dataset.hideCreate === 'true' }));
@@ -12947,6 +12959,31 @@ let companyFinderSelectedIndustry = '';
 let companyFinderResults = [];
 let companyFinderMapInstance = null;
 
+// Full country list for the "narrow to a whole country" dropdown — plain
+// English names, since that's what gets appended straight into the OSM
+// Nominatim text search query (e.g. "Ship Builders companies in Norway").
+const COMPANY_FINDER_COUNTRIES = [
+  'United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Bahrain', 'Kuwait', 'Oman',
+  'India', 'Pakistan', 'Bangladesh', 'Sri Lanka', 'Singapore', 'Malaysia',
+  'Indonesia', 'Philippines', 'Vietnam', 'Thailand', 'China', 'Hong Kong',
+  'Taiwan', 'South Korea', 'Japan',
+  'United Kingdom', 'Ireland', 'Norway', 'Sweden', 'Denmark', 'Finland',
+  'Netherlands', 'Belgium', 'Germany', 'France', 'Spain', 'Portugal', 'Italy',
+  'Greece', 'Cyprus', 'Malta', 'Turkey', 'Poland', 'Croatia', 'Switzerland',
+  'United States', 'Canada', 'Mexico', 'Brazil', 'Argentina', 'Chile',
+  'Panama', 'Bahamas', 'Liberia', 'Marshall Islands',
+  'Egypt', 'Nigeria', 'South Africa', 'Kenya', 'Morocco', 'Algeria',
+  'Australia', 'New Zealand',
+  'Russia', 'Ukraine', 'Iran', 'Iraq', 'Israel', 'Jordan', 'Lebanon',
+].sort();
+
+function populateCompanyFinderCountries() {
+  const sel = $('companyFinderCountry');
+  if (!sel || sel.dataset.built) return;
+  sel.dataset.built = '1';
+  sel.insertAdjacentHTML('beforeend', COMPANY_FINDER_COUNTRIES.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join(''));
+}
+
 function renderCompanyFinderIndustryChips() {
   const wrap = $('companyFinderIndustryGrid');
   if (!wrap || wrap.dataset.built) return; // build once — the grid itself never changes
@@ -12965,7 +13002,8 @@ function renderCompanyFinderIndustryChips() {
 
 if ($('companyFinderSearchBtn')) {
   $('companyFinderSearchBtn').addEventListener('click', async () => {
-    const location = $('companyFinderLocation').value.trim() || 'Dubai, UAE';
+    const country = $('companyFinderCountry')?.value || '';
+    const location = country || $('companyFinderLocation').value.trim() || 'Dubai, UAE';
     const keyword = $('companyFinderKeyword').value.trim();
     const industry = keyword || companyFinderSelectedIndustry;
     if (!industry) { showToast('Pick an industry, or type your own keyword.'); return; }
@@ -13009,6 +13047,7 @@ async function renderCompanyFinderResults() {
           <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
             ${p.websiteUri ? `<a class="secondary" style="text-decoration:none; text-align:center; padding:8px 12px; border-radius:10px;" href="${escapeHtml(p.websiteUri)}" target="_blank" rel="noopener">🌐 Website</a>` : ''}
             <button type="button" class="primary" style="margin-top:0;" data-add-company="${idx}" ${already ? 'disabled' : ''}>${already ? '✅ Already a client' : '➕ Add as Client'}</button>
+            <button type="button" class="secondary" style="margin-top:0;" data-view-fleet="${idx}">🧠 View Fleet</button>
           </div>
         </div>
       </div>
@@ -13017,6 +13056,9 @@ async function renderCompanyFinderResults() {
 
   resultsEl.querySelectorAll('[data-add-company]').forEach((btn) => {
     btn.addEventListener('click', () => addCompanyAsClient(Number(btn.dataset.addCompany), btn));
+  });
+  resultsEl.querySelectorAll('[data-view-fleet]').forEach((btn) => {
+    btn.addEventListener('click', () => openCompanyFleet(companyFinderResults[Number(btn.dataset.viewFleet)]));
   });
 
   renderCompanyFinderMap();
@@ -13075,6 +13117,589 @@ async function renderCompanyFinderMap() {
     companyFinderMapInstance.invalidateSize();
     companyFinderMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
   }, 50);
+}
+
+// =====================================================================
+// COMPANY FLEET BRAIN-MAP — opened from a Company Finder result (ship
+// builder / vessel owner / shipping company). Shows the company as a hub
+// with its vessels radiating out, each with IMO/MMSI and, where a live
+// lookup succeeds, its most recent AIS position. Data comes from two
+// places, both shown with a small badge so the sales team knows which is
+// which: 'wikidata' (auto-found the moment this company is first opened,
+// via Wikidata's free public SPARQL endpoint — no key, no scraping, no
+// ToS issue) and 'manual' (typed in by the team after their own research —
+// Equasis/GISIS/etc. can be looked up by a person, just not wired into the
+// app directly, since Equasis's terms forbid exactly this kind of
+// commercial/automated use). Keyed by company_key (the OSM place id), not
+// by whether the company has been "Added as Client" yet — a fleet can be
+// built up before that decision is made.
+// =====================================================================
+
+let currentFleetCompany = null;
+let currentFleetProfile = null;
+let currentFleetVessels = [];
+
+async function openCompanyFleet(p) {
+  if (!p) return;
+  currentFleetCompany = p;
+  openPanel('companyFleet');
+  const body = $('fleetProfileBody');
+  if (body) body.textContent = 'Loading…';
+  const mapWrap = $('fleetBrainMap');
+  if (mapWrap) mapWrap.innerHTML = '';
+  await loadCompanyFleet(p);
+}
+
+async function loadCompanyFleet(p) {
+  const key = p.id;
+  let profile = null;
+  try {
+    const { data } = await sb.from('company_profiles').select('*').eq('company_key', key).maybeSingle();
+    profile = data || null;
+  } catch (err) { console.warn('company_profiles lookup failed:', err); }
+
+  if (!profile) {
+    const insertRow = {
+      company_key: key,
+      company_name: p.displayName?.text || 'Unnamed company',
+      website: p.websiteUri || null,
+      contact_phone: p.internationalPhoneNumber || null,
+      updated_by: currentUser?.id || null,
+    };
+    try {
+      const { data, error } = await sb.from('company_profiles').insert(insertRow).select().single();
+      if (error) throw error;
+      profile = data;
+    } catch (err) {
+      profile = insertRow; // still render something even if the insert failed (e.g. RLS not deployed yet)
+    }
+  }
+  currentFleetProfile = profile;
+  renderFleetProfile(profile, p);
+
+  let vessels = [];
+  try {
+    const { data } = await sb.from('company_vessels').select('*').eq('company_key', key).order('created_at', { ascending: true });
+    vessels = data || [];
+  } catch (err) { console.warn('company_vessels lookup failed:', err); }
+
+  if (!vessels.length) {
+    const found = await fetchWikidataFleet(profile.company_name);
+    if (found.length) {
+      const rows = found.map((v) => ({
+        company_key: key, vessel_name: v.name, imo_number: v.imo || null, mmsi: v.mmsi || null,
+        source: 'wikidata', created_by: currentUser?.id || null,
+      }));
+      try {
+        const { data, error } = await sb.from('company_vessels').insert(rows).select();
+        if (error) throw error;
+        vessels = data || [];
+      } catch (err) {
+        vessels = rows; // show what was found even if saving them failed
+      }
+    }
+  }
+  currentFleetVessels = vessels;
+  renderFleetBrainMap(profile, vessels);
+}
+
+function renderFleetProfile(profile, p) {
+  const body = $('fleetProfileBody');
+  if (!body) return;
+  body.innerHTML = `
+    <strong style="font-size:16px;">${escapeHtml(profile.company_name)}</strong>
+    <div class="entry-meta" style="margin-top:4px;">${escapeHtml(p?.formattedAddress || profile.country || '')}</div>
+    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+      ${profile.website ? `<a class="secondary" style="text-decoration:none; padding:8px 12px; border-radius:10px;" href="${escapeHtml(profile.website)}" target="_blank" rel="noopener">🌐 Website</a>` : ''}
+      ${profile.contact_phone ? `<span class="chip">📞 ${escapeHtml(profile.contact_phone)}</span>` : ''}
+    </div>
+    <label for="fleetContactName" style="margin-top:12px;">Contact name</label>
+    <input id="fleetContactName" type="text" value="${escapeHtml(profile.contact_name || '')}" placeholder="Who to ask for" />
+    <label for="fleetContactEmail">Contact email</label>
+    <input id="fleetContactEmail" type="text" value="${escapeHtml(profile.contact_email || '')}" placeholder="name@company.com" />
+    <label for="fleetNotes">Notes</label>
+    <textarea id="fleetNotes" rows="2" placeholder="Anything worth remembering">${escapeHtml(profile.notes || '')}</textarea>
+    <button type="button" class="primary" id="fleetSaveProfileBtn" style="width:100%; margin-top:10px;">💾 Save contact details</button>
+  `;
+  const saveBtn = $('fleetSaveProfileBtn');
+  if (saveBtn) saveBtn.addEventListener('click', saveFleetProfile);
+}
+
+async function saveFleetProfile() {
+  if (!currentFleetCompany) return;
+  const patch = {
+    contact_name: $('fleetContactName').value.trim() || null,
+    contact_email: $('fleetContactEmail').value.trim() || null,
+    notes: $('fleetNotes').value.trim() || null,
+    updated_by: currentUser?.id || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await sb.from('company_profiles').update(patch).eq('company_key', currentFleetCompany.id);
+  if (error) { showToast('Could not save — ' + error.message); return; }
+  if (currentFleetProfile) Object.assign(currentFleetProfile, patch);
+  showToast('Saved.');
+}
+
+// Radial "brain map" layout — the company sits at the centre, vessels are
+// spaced evenly around it in a circle, and an SVG line connects each one
+// back to the hub. Positions are computed in JS (not pure CSS) so the
+// circle stays a circle regardless of how wide the panel is.
+// One accent colour per vessel branch — carried through its curved line,
+// its node's left border, and its badge, the way a mind-map colours each
+// branch differently so the eye can trace a leaf back to its line.
+const FLEET_BRANCH_COLORS = ['#e08a5f', '#63d197', '#7f77dd', '#378add', '#d4537e', '#f2b755', '#1d9e75', '#d85a30'];
+
+function renderFleetBrainMap(profile, vessels) {
+  const wrap = $('fleetBrainMap');
+  if (!wrap) return;
+  const W = wrap.clientWidth || 320;
+  const H = Math.max(280, Math.min(520, 90 + vessels.length * 40));
+  wrap.style.height = `${H}px`;
+  const cx = W / 2, cy = H / 2;
+  const n = vessels.length;
+  const radius = Math.max(90, Math.min(W, H) / 2 - 74);
+
+  let linesSvg = '';
+  let nodesHtml = '';
+  vessels.forEach((v, i) => {
+    const color = FLEET_BRANCH_COLORS[i % FLEET_BRANCH_COLORS.length];
+    const angle = (2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2;
+    const x = Math.round(cx + radius * Math.cos(angle));
+    const y = Math.round(cy + radius * Math.sin(angle));
+
+    // A gentle bow instead of a straight line — the same curved-branch feel
+    // as a classic mind map, just wrapped around a circle instead of a tree.
+    const dx = x - cx, dy = y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = len * 0.18;
+    const ctrlX = Math.round((cx + x) / 2 - (dy / len) * bow);
+    const ctrlY = Math.round((cy + y) / 2 + (dx / len) * bow);
+    linesSvg += `<path d="M ${cx} ${cy} Q ${ctrlX} ${ctrlY} ${x} ${y}" fill="none" stroke="${color}" stroke-width="2" opacity="0.75" />`;
+
+    const hasPos = v.last_position_at && v.last_lat != null && v.last_lng != null;
+    const posLabel = hasPos
+      ? `📍 ${Number(v.last_lat).toFixed(2)}, ${Number(v.last_lng).toFixed(2)}`
+      : '📍 Position unknown';
+    nodesHtml += `
+      <div class="fleet-vessel-node" style="left:${x}px; top:${y}px; border-left: 3px solid ${color};">
+        <span class="fleet-vessel-badge ${v.source === 'wikidata' ? 'auto' : 'manual'}">${v.source === 'wikidata' ? 'auto' : 'manual'}</span>
+        <div class="fleet-vessel-name">🚢 ${escapeHtml(v.vessel_name)}</div>
+        ${v.imo_number ? `<div class="fleet-vessel-meta">IMO ${escapeHtml(v.imo_number)}</div>` : ''}
+        ${v.mmsi ? `<div class="fleet-vessel-meta">MMSI ${escapeHtml(v.mmsi)}</div>` : ''}
+        <div class="fleet-vessel-meta fleet-vessel-pos">${posLabel}</div>
+        ${v.mmsi ? `<button type="button" class="ghost fleet-locate-btn" data-locate-vessel="${v.id}">🔄 Locate</button>` : ''}
+      </div>`;
+  });
+
+  // The hub carries whatever contact details the team actually has for this
+  // company — website/phone often come free from the original Company
+  // Finder search result (a real business listing), while contact name/
+  // email are only ever there if someone on the team typed them in below;
+  // there's no source that hands us a vessel owner's email or phone number
+  // automatically, so this always reflects what's genuinely on file, never
+  // a guess.
+  const hubContactRows = [
+    profile.contact_phone ? `<div class="fleet-hub-contact">📞 ${escapeHtml(profile.contact_phone)}</div>` : '',
+    profile.contact_email ? `<div class="fleet-hub-contact">✉️ ${escapeHtml(profile.contact_email)}</div>` : '',
+    profile.website ? `<div class="fleet-hub-contact">🌐 ${escapeHtml(profile.website)}</div>` : '',
+  ].filter(Boolean).join('');
+
+  wrap.innerHTML = `
+    <svg width="${W}" height="${H}" style="position:absolute; left:0; top:0; pointer-events:none;">${linesSvg}</svg>
+    <div class="fleet-hub-node" style="left:${cx}px; top:${cy}px;">
+      <div class="fleet-hub-icon">🏢</div>
+      <div class="fleet-hub-name">${escapeHtml(profile.company_name)}</div>
+      <div class="fleet-hub-meta">${vessels.length} vessel${vessels.length === 1 ? '' : 's'}</div>
+      ${hubContactRows || '<div class="fleet-hub-contact fleet-hub-contact-missing">No phone/email on file yet</div>'}
+    </div>
+    ${nodesHtml}
+    ${!vessels.length ? '<div class="empty" style="position:absolute; left:50%; top:80%; transform:translate(-50%,-50%); width:80%; text-align:center;">No vessels found automatically — add one below as your team researches this company.</div>' : ''}
+  `;
+  wrap.querySelectorAll('[data-locate-vessel]').forEach((btn) => {
+    btn.addEventListener('click', () => locateVessel(btn.dataset.locateVessel, btn));
+  });
+}
+
+// Calls the get-vessel-position Edge Function (a short-lived AIS lookup by
+// MMSI — see supabase/functions/get-vessel-position) and caches whatever it
+// finds onto the vessel row so the brain-map has something to show next
+// time even before another live lookup is made.
+async function locateVessel(vesselId, btn) {
+  const v = currentFleetVessels.find((x) => String(x.id) === String(vesselId));
+  if (!v || !v.mmsi) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const { data, error } = await sb.functions.invoke('get-vessel-position', { body: { mmsi: v.mmsi } });
+    if (error) throw error;
+    if (data?.lat != null && data?.lng != null) {
+      const patch = {
+        last_lat: data.lat, last_lng: data.lng,
+        last_speed_knots: data.speedKnots ?? null,
+        last_position_at: new Date().toISOString(),
+      };
+      if (v.id) await sb.from('company_vessels').update(patch).eq('id', v.id);
+      Object.assign(v, patch);
+      renderFleetBrainMap(currentFleetProfile, currentFleetVessels);
+      showToast(`${v.vessel_name}: position updated.`);
+    } else {
+      showToast('No recent AIS position heard for this vessel.');
+    }
+  } catch (err) {
+    showToast("Live position isn't set up yet, or the vessel hasn't broadcast recently.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+if ($('fleetAddVesselBtn')) {
+  $('fleetAddVesselBtn').addEventListener('click', async () => {
+    if (!currentFleetCompany) return;
+    const name = $('fleetVesselName').value.trim();
+    if (!name) { showToast('Enter a vessel name.'); return; }
+    const row = {
+      company_key: currentFleetCompany.id,
+      vessel_name: name,
+      imo_number: $('fleetVesselImo').value.trim() || null,
+      mmsi: $('fleetVesselMmsi').value.trim() || null,
+      source: 'manual',
+      created_by: currentUser?.id || null,
+    };
+    const btn = $('fleetAddVesselBtn');
+    btn.disabled = true;
+    try {
+      const { data, error } = await sb.from('company_vessels').insert(row).select().single();
+      if (error) throw error;
+      currentFleetVessels.push(data);
+      renderFleetBrainMap(currentFleetProfile, currentFleetVessels);
+      $('fleetVesselName').value = '';
+      $('fleetVesselImo').value = '';
+      $('fleetVesselMmsi').value = '';
+      showToast('Vessel added.');
+    } catch (err) {
+      showToast('Could not add — ' + (err.message || err));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// Free, public, no-key Wikidata lookup: ships whose operator, manufacturer,
+// or owner label contains the company name. Best-effort only — Wikidata's
+// ship coverage is nowhere near complete, so an empty result here is
+// normal and just means the team adds vessels by hand as they research
+// each lead (the 'manual' badge marks those clearly).
+async function fetchWikidataFleet(companyName) {
+  if (!companyName) return [];
+  const escaped = companyName.replace(/["\\]/g, '');
+  const sparql = `SELECT DISTINCT ?shipLabel ?imo ?mmsi WHERE {
+    ?ship wdt:P31/wdt:P279* wd:Q11446 .
+    { ?ship wdt:P137 ?op . } UNION { ?ship wdt:P176 ?op . } UNION { ?ship wdt:P127 ?op . }
+    ?op rdfs:label ?opLabel . FILTER(LANG(?opLabel) = "en")
+    FILTER(CONTAINS(LCASE(?opLabel), LCASE("${escaped}")))
+    OPTIONAL { ?ship wdt:P458 ?imo. }
+    OPTIONAL { ?ship wdt:P587 ?mmsi. }
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+  } LIMIT 20`;
+  try {
+    const url = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/sparql-results+json' } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const rows = data?.results?.bindings || [];
+    const seen = new Set();
+    const out = [];
+    rows.forEach((r) => {
+      const name = r.shipLabel?.value;
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      out.push({ name, imo: r.imo?.value || null, mmsi: r.mmsi?.value || null });
+    });
+    return out;
+  } catch (err) {
+    console.warn('Wikidata fleet lookup failed (treated as no results):', err);
+    return [];
+  }
+}
+
+// =====================================================================
+// AREA WATCH — live "who's currently sitting here" over any point, via the
+// same aisstream.io feed as the fleet brain-map's Locate button, but as an
+// area search instead of a single-vessel lookup. Presets cover the major
+// UAE shipyards/ports (from the "we need all the Dubai service centres
+// like DMC, Drydocks, etc." request); "search any location" (reusing the
+// same free Nominatim address search as Company Finder/Clients) covers
+// everywhere else. This is the closest free/legal proxy to "who's in for
+// repair or build" — AIS only reports position, not why a vessel is
+// somewhere, so results are a lead to follow up on, not a confirmed status.
+// =====================================================================
+
+const AREA_WATCH_PRESETS = [
+  { label: 'Drydocks World, Dubai', lat: 25.2686, lng: 55.2708, radiusKm: 3 },
+  { label: 'Dubai Maritime City (DMC)', lat: 25.2441, lng: 55.2820, radiusKm: 3 },
+  { label: 'Jebel Ali Port', lat: 25.0134, lng: 55.0617, radiusKm: 8 },
+  { label: 'Khalifa Port, Abu Dhabi', lat: 24.8073, lng: 54.6339, radiusKm: 8 },
+  { label: 'Port Khalid, Sharjah', lat: 25.3600, lng: 55.3550, radiusKm: 3 },
+  { label: 'Saqr Port, Ras Al Khaimah', lat: 25.7300, lng: 55.9400, radiusKm: 3 },
+];
+
+let areaWatchMapInstance = null;
+// Per-area vessel tracking, keyed by MMSI, so a repeated search of the SAME
+// area (manual re-search, or Live Watch polling) can tell "still here" from
+// "just arrived" from "just left" — reset whenever the searched area itself
+// changes, since comparing vessels across two different ports isn't
+// meaningful. { cardEl, marker, ...latest vessel fields, departing }
+let areaWatchKnownVessels = new Map();
+// Separate from the above and NEVER reset — a light cross-port memory so
+// that if a vessel that left one port later turns up in a different one the
+// team happens to search, we can say so ("last seen at X"). Session-only
+// (in-memory), not saved anywhere.
+let areaWatchGlobalHistory = new Map(); // mmsi -> { area, seenAt }
+let areaWatchCurrentLabel = null;
+let areaWatchLastQuery = null; // { lat, lng, radiusKm, label } — lets Live Watch repeat the last search
+let areaWatchLiveTimer = null;
+let areaWatchLiveActive = false;
+const AREA_WATCH_POLL_MS = 20000; // each refresh already spends ~12s listening to AIS + a Wikidata lookup, so polling faster than this would just overlap requests
+const AREA_WATCH_STATIONARY_KNOTS = 0.4; // AIS speed noise for a moored vessel rarely drifts above this
+
+function renderAreaWatchPresets() {
+  const wrap = $('areaWatchPresetGrid');
+  if (!wrap || wrap.dataset.built) return;
+  wrap.dataset.built = '1';
+  wrap.innerHTML = AREA_WATCH_PRESETS.map((p, i) => `
+    <div class="doc-type-chip" data-preset-idx="${i}"><span class="emoji">⚓</span>${escapeHtml(p.label)}</div>
+  `).join('');
+  wrap.querySelectorAll('[data-preset-idx]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      wrap.querySelectorAll('[data-preset-idx]').forEach((c) => c.classList.toggle('selected', c === chip));
+      const preset = AREA_WATCH_PRESETS[Number(chip.dataset.presetIdx)];
+      if ($('areaWatchLocation')) { $('areaWatchLocation').value = ''; $('areaWatchLocation').dataset.lat = ''; $('areaWatchLocation').dataset.lon = ''; }
+      if ($('areaWatchRadius')) $('areaWatchRadius').value = String(preset.radiusKm);
+      searchAreaWatch(preset.lat, preset.lng, preset.radiusKm, preset.label);
+    });
+  });
+}
+
+async function searchAreaWatch(lat, lng, radiusKm, label) {
+  areaWatchLastQuery = { lat, lng, radiusKm, label };
+  const resultsEl = $('areaWatchResults');
+  const titleEl = $('areaWatchResultsTitle');
+  const liveBtn = $('areaWatchLiveBtn');
+  if (titleEl) titleEl.textContent = `Results — ${label}`;
+  if (liveBtn) liveBtn.style.display = 'inline-block';
+  // A Live Watch poll re-fetches quietly in the background — no "Listening…"
+  // wipe of the list and no disabling the search button, since the whole
+  // point is that the existing cards/map keep showing while it refreshes.
+  const isBackgroundPoll = areaWatchLiveActive;
+  if (!isBackgroundPoll && resultsEl) resultsEl.innerHTML = '<div class="empty">Listening for AIS positions in this area (a few seconds)…</div>';
+  const btn = $('areaWatchSearchBtn');
+  if (btn && !isBackgroundPoll) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const { data, error } = await sb.functions.invoke('get-area-vessels', { body: { lat, lng, radiusKm } });
+    if (error) throw error;
+    if (data?.ok === false && data?.error) {
+      if (!isBackgroundPoll && resultsEl) resultsEl.innerHTML = `<div class="empty">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+    renderAreaWatchResults(data?.vessels || [], lat, lng, label);
+  } catch (err) {
+    if (!isBackgroundPoll && resultsEl) resultsEl.innerHTML = `<div class="empty">Couldn't reach live AIS right now — ${escapeHtml(err.message || String(err))}</div>`;
+  } finally {
+    if (btn && !isBackgroundPoll) { btn.disabled = false; btn.textContent = '🔍 Search this area'; }
+  }
+}
+
+function areaWatchStatus(v) {
+  return (v.speedKnots != null && v.speedKnots > AREA_WATCH_STATIONARY_KNOTS) ? 'underway' : 'docked';
+}
+
+// A small ship-arrow marker, coloured by status and rotated to point the way
+// the vessel is actually heading (when AIS gave us one) instead of every
+// marker facing the same fixed direction — the "realistic" part of the ask.
+function areaWatchShipIcon(status, course) {
+  const color = status === 'underway' ? '#f2b755' : (status === 'departed' ? '#f27d70' : '#63d197');
+  const rotation = typeof course === 'number' ? course : 0;
+  return L.divIcon({
+    className: 'area-watch-ship-icon',
+    html: `<div style="width:22px; height:22px; transform: rotate(${rotation}deg); transition: transform 1s linear;">
+      <svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 1 L20 21 L12 16.5 L4 21 Z" fill="${color}" stroke="rgba(0,0,0,0.35)" stroke-width="1"/></svg>
+    </div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+}
+
+// Slides a marker to its new position over time instead of snapping there —
+// between two Live Watch refreshes this reads as the vessel actually moving,
+// not teleporting.
+function animateAreaWatchMarker(marker, toLat, toLng, durationMs) {
+  const from = marker.getLatLng();
+  if (Math.abs(from.lat - toLat) < 0.00002 && Math.abs(from.lng - toLng) < 0.00002) return;
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    marker.setLatLng([from.lat + (toLat - from.lat) * t, from.lng + (toLng - from.lng) * t]);
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function renderAreaWatchResults(vessels, centerLat, centerLng, label) {
+  const resultsEl = $('areaWatchResults');
+  if (!resultsEl) return;
+  const mapWrap = $('areaWatchMapArea');
+  const mapReady = !!mapWrap && typeof L !== 'undefined';
+
+  // Switching to a different area (not just refreshing the same one) starts
+  // clean — comparing "who's still here" only makes sense within one place.
+  if (label !== areaWatchCurrentLabel) {
+    areaWatchKnownVessels.forEach((known) => { if (known.cardEl) known.cardEl.remove(); });
+    if (areaWatchMapInstance?._markerLayer) areaWatchMapInstance._markerLayer.clearLayers();
+    if (areaWatchMapInstance) areaWatchMapInstance._centerMarker = null;
+    areaWatchKnownVessels = new Map();
+    areaWatchCurrentLabel = label;
+    resultsEl.innerHTML = '';
+  }
+
+  if (mapReady && !areaWatchMapInstance) {
+    areaWatchMapInstance = L.map(mapWrap);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles © Esri',
+    }).addTo(areaWatchMapInstance);
+    areaWatchMapInstance._markerLayer = L.layerGroup().addTo(areaWatchMapInstance);
+    areaWatchMapInstance._centerMarker = null;
+  }
+
+  const seenMmsi = new Set(vessels.map((v) => v.mmsi));
+
+  // Anyone we knew about last refresh who isn't in this one has left the
+  // area — turn the card/marker red, fade it out, then drop it. They may
+  // well be the same vessel that turns up if the team checks another port.
+  areaWatchKnownVessels.forEach((known, mmsi) => {
+    if (seenMmsi.has(mmsi) || known.departing) return;
+    known.departing = true;
+    if (known.cardEl) known.cardEl.className = 'area-watch-vessel-card status-departed';
+    if (known.marker) known.marker.setIcon(areaWatchShipIcon('departed', known.course));
+    setTimeout(() => {
+      const still = areaWatchKnownVessels.get(mmsi);
+      if (still && still.departing) {
+        if (still.marker && areaWatchMapInstance?._markerLayer) areaWatchMapInstance._markerLayer.removeLayer(still.marker);
+        if (still.cardEl) still.cardEl.remove();
+        areaWatchKnownVessels.delete(mmsi);
+      }
+    }, 1400);
+  });
+
+  if (!vessels.length && !areaWatchKnownVessels.size) {
+    resultsEl.innerHTML = '<div class="empty">No AIS positions heard here just now — busy yards report often, but a quiet moment (or a vessel just out of AIS range) is normal. Try again shortly, or turn on Live Watch.</div>';
+  } else if (resultsEl.querySelector('.empty')) {
+    resultsEl.innerHTML = '';
+  }
+
+  const points = mapReady ? [[centerLat, centerLng]] : [];
+
+  vessels.forEach((v) => {
+    const status = areaWatchStatus(v);
+    const wasKnownHere = areaWatchKnownVessels.has(v.mmsi);
+    const priorSighting = areaWatchGlobalHistory.get(v.mmsi);
+    const arrivedFromElsewhere = !wasKnownHere && priorSighting && priorSighting.area !== label;
+    areaWatchGlobalHistory.set(v.mmsi, { area: label, seenAt: Date.now() });
+
+    let known = areaWatchKnownVessels.get(v.mmsi);
+    if (!known) {
+      known = { cardEl: null, marker: null };
+      areaWatchKnownVessels.set(v.mmsi, known);
+    }
+    known.departing = false;
+    Object.assign(known, v, { status });
+
+    let card = known.cardEl;
+    if (!card || !card.isConnected) {
+      card = document.createElement('div');
+      resultsEl.appendChild(card);
+      known.cardEl = card;
+    }
+    card.className = `area-watch-vessel-card status-${status}${!wasKnownHere ? ' arriving' : ''}`;
+    const statusLabel = status === 'underway' ? 'Under way' : 'Docked / stationary';
+    card.innerHTML = `
+      <div class="fleet-vessel-name">🚢 Vessel: ${escapeHtml(v.name || 'Unnamed / not yet heard')}<span class="area-watch-status-chip ${status}">${statusLabel}</span></div>
+      <div class="fleet-vessel-meta">🏢 Owner: ${v.owner ? escapeHtml(v.owner) : 'not found in free databases'}</div>
+      <div class="fleet-vessel-meta fleet-vessel-pos">📍 Location: near ${escapeHtml(label)} (${Number(v.lat).toFixed(3)}, ${Number(v.lng).toFixed(3)})${v.speedKnots != null ? ` · ${Number(v.speedKnots).toFixed(1)} kn` : ''}</div>
+      <div class="fleet-vessel-meta">MMSI ${escapeHtml(v.mmsi)}${v.imo ? ` · IMO ${escapeHtml(v.imo)}` : ''}</div>
+      ${arrivedFromElsewhere ? `<div class="fleet-vessel-meta">↪ Just appeared here — last seen at ${escapeHtml(priorSighting.area)}</div>` : ''}
+    `;
+
+    if (mapReady) {
+      points.push([v.lat, v.lng]);
+      if (!known.marker) {
+        known.marker = L.marker([v.lat, v.lng], { icon: areaWatchShipIcon(status, v.course) }).addTo(areaWatchMapInstance._markerLayer);
+      } else {
+        known.marker.setIcon(areaWatchShipIcon(status, v.course));
+        animateAreaWatchMarker(known.marker, v.lat, v.lng, 1500);
+      }
+      known.marker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(v.name || 'Unnamed vessel')}</b><br>Owner: ${v.owner ? escapeHtml(v.owner) : 'unknown'}<br>Status: ${statusLabel}<br>MMSI ${escapeHtml(v.mmsi)}</div>`);
+    }
+  });
+
+  if (!mapReady) return;
+  if (!points.length) { mapWrap.style.display = 'none'; return; }
+  mapWrap.style.display = 'block';
+  if (!areaWatchMapInstance._centerMarker) {
+    areaWatchMapInstance._centerMarker = L.circleMarker([centerLat, centerLng], { radius: 6, color: '#ffb020' }).addTo(areaWatchMapInstance._markerLayer);
+  }
+  areaWatchMapInstance._centerMarker.setLatLng([centerLat, centerLng]);
+  areaWatchMapInstance._centerMarker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(label)}</b></div>`);
+  const bounds = L.latLngBounds(points);
+  setTimeout(() => {
+    areaWatchMapInstance.invalidateSize();
+    areaWatchMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
+  }, 50);
+}
+
+function toggleAreaWatchLive() {
+  const liveBtn = $('areaWatchLiveBtn');
+  if (areaWatchLiveActive) {
+    areaWatchLiveActive = false;
+    if (areaWatchLiveTimer) clearInterval(areaWatchLiveTimer);
+    areaWatchLiveTimer = null;
+    if (liveBtn) liveBtn.textContent = '▶ Start Live Watch';
+    return;
+  }
+  if (!areaWatchLastQuery) { showToast('Search an area first.'); return; }
+  areaWatchLiveActive = true;
+  if (liveBtn) liveBtn.textContent = '⏸ Stop Live Watch';
+  areaWatchLiveTimer = setInterval(() => {
+    if (areaWatchLastQuery) searchAreaWatch(areaWatchLastQuery.lat, areaWatchLastQuery.lng, areaWatchLastQuery.radiusKm, areaWatchLastQuery.label);
+  }, AREA_WATCH_POLL_MS);
+}
+
+function stopAreaWatchLive() {
+  if (!areaWatchLiveActive) return;
+  areaWatchLiveActive = false;
+  if (areaWatchLiveTimer) clearInterval(areaWatchLiveTimer);
+  areaWatchLiveTimer = null;
+  const liveBtn = $('areaWatchLiveBtn');
+  if (liveBtn) liveBtn.textContent = '▶ Start Live Watch';
+}
+
+if ($('areaWatchLiveBtn')) $('areaWatchLiveBtn').addEventListener('click', toggleAreaWatchLive);
+
+if ($('areaWatchSearchBtn')) {
+  $('areaWatchSearchBtn').addEventListener('click', () => {
+    const input = $('areaWatchLocation');
+    const lat = parseFloat(input?.dataset.lat || '');
+    const lon = parseFloat(input?.dataset.lon || '');
+    const radiusKm = parseFloat($('areaWatchRadius')?.value || '3');
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      showToast('Pick a shipyard/port above, or type a location and choose one of the suggestions.');
+      return;
+    }
+    document.querySelectorAll('#areaWatchPresetGrid [data-preset-idx]').forEach((c) => c.classList.remove('selected'));
+    searchAreaWatch(lat, lon, radiusKm, input.value.trim() || 'Searched location');
+  });
 }
 
 async function renderQueue() {

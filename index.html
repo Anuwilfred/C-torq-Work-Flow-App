@@ -242,6 +242,10 @@
           <span class="home-tile-icon home-tile-icon-field">🏢</span>
           <span class="home-tile-label">Company Finder</span>
         </button>
+        <button type="button" class="home-tile" data-open="areaWatch" data-feature="areaWatch">
+          <span class="home-tile-icon home-tile-icon-field">🛰️</span>
+          <span class="home-tile-label">Area Watch</span>
+        </button>
         <!-- RENEWAL MANAGER — visible to admins, and to anyone granted the
              'renewal' Map Access feature (full read/write on every
              employee's passport/visa/EID/work-permit data, same as an
@@ -1601,6 +1605,12 @@
           <div id="companyFinderLocationResults" class="job-search-results" style="display:none;"></div>
         </div>
 
+        <label for="companyFinderCountry">Or narrow to a whole country</label>
+        <select id="companyFinderCountry">
+          <option value="">Any country (use Location above)</option>
+        </select>
+        <p class="hint" style="margin-top:2px;">Picking a country here searches that entire country instead of the Location field above.</p>
+
         <button type="button" class="primary" id="companyFinderSearchBtn" style="width:100%; margin-top:12px;">🔍 Search</button>
       </div>
 
@@ -1608,6 +1618,96 @@
         <strong style="font-size:14px;">Results</strong>
         <div id="companyFinderMapArea" style="height:220px; border-radius: var(--r-md); overflow:hidden; margin-top:10px; display:none;"></div>
         <div id="companyFinderResults" style="margin-top:10px;"><div class="empty">Search above to see companies here.</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Company Fleet brain-map: opened from a Company Finder result — shows a
+     ship builder/owner's vessels radiating out from the company itself, with
+     contact/website details and live position per vessel where known. -->
+<div id="companyFleetOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="companyFleetOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🧠 Fleet</strong>
+      <button type="button" class="ghost" data-close="companyFleet">✕</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="card glass" id="fleetProfileCard">
+        <div id="fleetProfileBody">Loading…</div>
+      </div>
+
+      <div class="card glass" id="fleetBrainMapCard" style="margin-top:14px; min-height:280px;">
+        <strong style="font-size:14px;">Fleet map</strong>
+        <p class="hint" style="margin-top:2px;">Auto-found from Wikidata where possible — add or fix anything below; the team's own research always wins.</p>
+        <div id="fleetBrainMap" style="position:relative; margin-top:10px;"></div>
+      </div>
+
+      <div class="card glass" id="fleetAddVesselCard" style="margin-top:14px;">
+        <strong style="font-size:14px;">Add a vessel</strong>
+        <label for="fleetVesselName">Vessel name</label>
+        <input id="fleetVesselName" type="text" placeholder="e.g. MV Marwan Star" />
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label for="fleetVesselImo">IMO number (optional)</label>
+            <input id="fleetVesselImo" type="text" placeholder="e.g. 9456789" />
+          </div>
+          <div style="flex:1;">
+            <label for="fleetVesselMmsi">MMSI (optional, for live position)</label>
+            <input id="fleetVesselMmsi" type="text" placeholder="e.g. 470123456" />
+          </div>
+        </div>
+        <button type="button" class="primary" id="fleetAddVesselBtn" style="width:100%; margin-top:12px;">➕ Add vessel</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- AREA WATCH — live "who's currently sitting here" view over any point,
+     via AIS (aisstream.io). Presets cover the major UAE shipyards/ports;
+     "Search any location" covers everywhere else (uses the same free
+     address search as Company Finder/Clients). Not a repair/build status —
+     just live position, which is the closest free legal proxy we have. -->
+<div id="areaWatchOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="areaWatchOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>🛰️ Area Watch</strong>
+      <button type="button" class="ghost" data-close="areaWatch">✕</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="card glass" id="areaWatchSearchCard">
+        <strong style="font-size:14px;">UAE shipyards &amp; ports</strong>
+        <p class="hint" style="margin-top:2px;">Tap one to see every vessel AIS currently hears there — or search any location below.</p>
+        <div id="areaWatchPresetGrid" class="mode-grid" style="margin-top:8px;"></div>
+
+        <label for="areaWatchLocation" style="margin-top:14px;">Or search any location</label>
+        <div style="position:relative;">
+          <input id="areaWatchLocation" type="text" placeholder="e.g. Jebel Ali Port, Dubai" autocomplete="off" />
+          <div id="areaWatchLocationResults" class="job-search-results" style="display:none;"></div>
+        </div>
+        <label for="areaWatchRadius">Radius</label>
+        <select id="areaWatchRadius">
+          <option value="1.5">1.5 km (a single berth/yard)</option>
+          <option value="3" selected>3 km (a whole shipyard/terminal)</option>
+          <option value="8">8 km (a whole port area)</option>
+        </select>
+        <button type="button" class="primary" id="areaWatchSearchBtn" style="width:100%; margin-top:12px;">🔍 Search this area</button>
+      </div>
+
+      <div class="card glass" id="areaWatchResultsCard" style="margin-top:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <strong style="font-size:14px;" id="areaWatchResultsTitle">Results</strong>
+          <button type="button" class="ghost" id="areaWatchLiveBtn" style="display:none; white-space:nowrap;">▶ Start Live Watch</button>
+        </div>
+        <p class="hint" style="margin-top:2px;">Vessel name, owner (when found in free databases) and live location — not a confirmed repair/build status. Green = sitting still, amber = under way, red (fading) = just left this area.</p>
+        <div id="areaWatchMapArea" style="height:220px; border-radius: var(--r-md); overflow:hidden; margin-top:10px; display:none;"></div>
+        <div id="areaWatchResults" style="margin-top:10px;"><div class="empty">Pick a shipyard/port above, or search a location, to see what's there now.</div></div>
       </div>
 
     </div>

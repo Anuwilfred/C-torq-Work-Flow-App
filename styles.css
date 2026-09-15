@@ -3771,3 +3771,89 @@ img.chat-img { max-width: 100%; height: auto; border-radius: 10px; display: bloc
 @media (max-width: 640px) {
   .tutorial-card { padding: 16px 16px 12px; }
 }
+
+/* ---------- Company Fleet brain-map (Company Finder) ----------
+   All surfaces use the same adaptive var(--glass-2)/var(--text*) tokens as
+   the rest of the app so this stays legible in both Light and Dark scheme —
+   see the styles.css Light/Dark audit above for why that matters (a fixed
+   color here would repeat the exact bug that was fixed everywhere else). */
+.fleet-link-line { stroke: var(--glass-border-strong); stroke-width: 1.5; }
+.fleet-hub-node, .fleet-vessel-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.fleet-hub-node {
+  width: 140px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1.5px solid var(--glass-border-strong);
+  border-radius: 20px;
+  padding: 14px 10px;
+  z-index: 2;
+}
+.fleet-hub-icon { font-size: 26px; line-height: 1; }
+.fleet-hub-name { font-size: 12.5px; font-weight: 800; color: var(--text); margin-top: 6px; line-height: 1.3; }
+.fleet-hub-meta { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+.fleet-hub-contact { font-size: 10.5px; color: var(--text-dim); margin-top: 4px; overflow-wrap: anywhere; }
+.fleet-hub-contact-missing { font-style: italic; opacity: 0.75; }
+.fleet-vessel-node {
+  width: 128px;
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 10px 8px 8px;
+  z-index: 1;
+}
+.fleet-vessel-name { font-size: 11.5px; font-weight: 700; color: var(--text); line-height: 1.25; }
+.fleet-vessel-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.fleet-vessel-pos { color: var(--text-muted); font-weight: 600; }
+.fleet-vessel-badge {
+  position: absolute; top: -8px; right: 6px;
+  font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--glass-strong); border: 1px solid var(--glass-border-strong); color: var(--text-dim);
+}
+.fleet-vessel-badge.auto { color: var(--ok); }
+.fleet-vessel-badge.manual { color: var(--accent); }
+.fleet-locate-btn {
+  margin-top: 6px; font-size: 10.5px; padding: 4px 9px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--glass-border); color: var(--text-dim); cursor: pointer;
+}
+.fleet-locate-btn:hover { color: var(--text); border-color: var(--glass-border-strong); }
+.fleet-locate-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* Area Watch — same look as fleet-vessel-node but a plain stacked list
+   (not radial), so it needs its own block-layout card rather than the
+   absolute-positioned brain-map node. */
+.area-watch-vessel-card {
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  transition: opacity 1.1s ease, border-color 0.4s ease;
+}
+.area-watch-vessel-card:first-child { margin-top: 0; }
+/* Status colours: green = sitting still (likely docked/moored), amber =
+   under way (moving through/near the area), red+fading = was heard on the
+   previous refresh but not this one — it's left the area (possibly headed
+   to another port) and is about to be removed from the list. */
+.area-watch-vessel-card.status-docked { border-left-color: var(--ok); }
+.area-watch-vessel-card.status-underway { border-left-color: var(--warn); }
+.area-watch-vessel-card.status-departed { border-left-color: var(--err); opacity: 0.35; }
+.area-watch-vessel-card.arriving { animation: areaWatchArrive 1.4s ease; }
+@keyframes areaWatchArrive {
+  0% { box-shadow: 0 0 0 0 rgba(99, 209, 151, 0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(99, 209, 151, 0); }
+}
+.area-watch-status-chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 6px; }
+.area-watch-status-chip.docked { color: var(--ok); }
+.area-watch-status-chip.underway { color: var(--warn); }
+.area-watch-status-chip.departed { color: var(--err); }
