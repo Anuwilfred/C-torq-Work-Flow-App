@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.52.7';
+const APP_VERSION = 'v3.52.8';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'AEON Ai can now answer country-wide fleet questions (e.g. "what ships are docked in UAE, with owners") via a live web search — a paid, opt-in feature an admin turns on separately (roughly 20 cents per question). Its fleet answers also now offer a "Download PDF" button (vessel table + written profiles) instead of the old web-page mind map.';
+const APP_UPDATE_NOTES = 'Fixed AEON Ai wrongly saying "timed out" on longer answers (like a live country-wide fleet search), and fixed a raw crash if your sign-in briefly fails to load — it now says plainly to refresh and try again.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -14580,17 +14580,30 @@ async function sendAiMessage() {
 
   try {
     const { data: { session } } = await getSessionSafe();
+    if (!session) {
+      // getSessionSafe() falls back to null if reading the session itself
+      // timed out or the person's sign-in has actually lapsed — either way,
+      // `session.access_token` below would throw a raw, confusing error.
+      // Say plainly what's going on instead of crashing on a null field.
+      throw new Error('Your sign-in could not be confirmed right now — refresh the app and try again.');
+    }
     // Same reasoning as chat send/upload above: sb.functions.invoke() has no
     // built-in ceiling of its own, so if the edge function or the network
     // ever genuinely hangs instead of erroring, "Thinking…" would sit there
     // forever with the input still locked. This guarantees a real answer or
-    // a clear failure message within 30s, always — never an endless spinner.
+    // a clear failure message, always — never an endless spinner.
+    // 75s (not 30s): when the live country-wide fleet search is turned on
+    // (ENABLE_LIVE_COUNTRY_FLEET), the backend can spend up to ~45s doing the
+    // real web search plus another ~20s writing the final reply — a 30s cap
+    // here was cutting that off and showing "timed out" even though the
+    // backend was still genuinely working. Every other kind of question
+    // still answers in a couple of seconds either way.
     const { data, error } = await withTimeout(
       sb.functions.invoke('ai-chat', {
         body: { message: text, history: aiHistory },
         headers: { Authorization: `Bearer ${session.access_token}` }
       }),
-      30000,
+      75000,
       'AEON Ai'
     );
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
