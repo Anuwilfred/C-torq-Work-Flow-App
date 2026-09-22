@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.3';
+const APP_VERSION = 'v3.53.4';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a bug where Reports, Projects, Job ID search, and AEON Ai could all go blank/empty at once (while everything else kept working) if a sign-in check got stuck behind another open tab. That check now runs independently per tab and retries once automatically, so a stuck tab elsewhere can no longer freeze these for you.';
+const APP_UPDATE_NOTES = 'Fixed a deeper cause of the same bug as the last update: Reports, Projects, Live Drivers, Job ID search, and AEON Ai could still freeze on Loading because the previous per-tab sign-in fix could itself get stuck waiting on a check that was, in turn, waiting on it. That circular wait is now time-capped, so it can no longer freeze these panels.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -108,25 +108,49 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
 
 // ---------- Supabase client ----------
 // TAB-LOCAL AUTH LOCK — root-cause fix for the "Reports/Projects/Job
-// search/AEON Ai all break at once, everything else looks fine" bug.
-// By default supabase-js serializes every auth call (getSession, getUser,
-// token refresh — which every single authenticated request quietly goes
-// through first) behind the browser's shared navigator.locks API, and that
-// lock is shared across EVERY tab/window open on this site, not just this
-// one. If a tab gets closed (or a PWA instance backgrounded) mid-refresh
-// without cleanly releasing that lock, every other tab's very next auth
-// call — and therefore every panel that needs one — waits on it forever.
-// getSessionSafe()'s timeout below then gives up and treats a perfectly
-// valid, signed-in session as "no session" for that one call, which is
-// exactly what made Reports/Projects/Job search/AI all look broken/empty
-// at the same time while the rest of the UI (which doesn't need a fresh
-// session) kept working fine. This replaces that shared, cross-tab lock
-// with a plain in-memory queue scoped to THIS tab only, so one tab can
-// never be blocked by another tab's stuck lock again.
+// search/AEON Ai/Live Drivers all break at once, everything else looks
+// fine" bug. By default supabase-js serializes every auth call (getSession,
+// getUser, token refresh — which every single authenticated request
+// quietly goes through first) behind the browser's shared navigator.locks
+// API, and that lock is shared across EVERY tab/window open on this site,
+// not just this one. If a tab gets closed (or a PWA instance backgrounded)
+// mid-refresh without cleanly releasing that lock, every other tab's very
+// next auth call — and therefore every panel that needs one — waits on it
+// forever. This replaces that shared, cross-tab lock with a plain
+// in-memory queue scoped to THIS tab only.
+//
+// FOLLOW-UP FIX (this version): the first version of this tab-local queue
+// above chained every new call strictly behind whatever call was already
+// running for the same lock name, and waited for it with no time limit.
+// That reintroduced the exact same symptom one level down: supabase-js's
+// own internal session-recovery step (_initialize/_recoverAndRefresh) runs
+// INSIDE this lock, and as part of finishing it notifies this app's own
+// onAuthStateChange subscriber — which itself calls loadProfile(), which
+// calls sb.auth.getSession() again, requesting the very same lock name a
+// second time before the first call has returned. The old queue made that
+// second call wait for the first to finish — but the first call couldn't
+// finish until that second, nested call returned, so the two calls waited
+// on each other forever. This was confirmed live: the tab's lock queue
+// stayed stuck on a single entry indefinitely (20+ seconds, no progress)
+// even on a completely fresh page load with a perfectly valid, unexpired
+// session already in localStorage, while a raw authenticated fetch to
+// Supabase in the very same tab came back in well under a second — proving
+// it was a local deadlock, not a slow or throttled network/server.
+// Capping how long any call waits for the one ahead of it (instead of
+// waiting unconditionally) turns that permanent deadlock into, at worst, a
+// short bounded delay: if the call ahead hasn't finished in time, this call
+// just proceeds on its own rather than waiting on it forever.
 const _tabAuthLockQueue = new Map();
+const TAB_AUTH_LOCK_WAIT_CAP_MS = 4000;
 async function tabLocalAuthLock(name, _acquireTimeout, fn) {
-  const previous = _tabAuthLockQueue.get(name) || Promise.resolve();
-  const current = previous.catch(() => {}).then(fn);
+  const previous = _tabAuthLockQueue.get(name);
+  if (previous) {
+    await Promise.race([
+      previous.catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, TAB_AUTH_LOCK_WAIT_CAP_MS)),
+    ]);
+  }
+  const current = (async () => fn())();
   _tabAuthLockQueue.set(name, current);
   try {
     return await current;
