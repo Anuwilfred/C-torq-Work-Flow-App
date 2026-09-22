@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.2';
+const APP_VERSION = 'v3.53.3';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a bug where closing Team Chat left it quietly polling in the background for the rest of the day, plus chat images being re-downloaded on every refresh — together the biggest cause of exceeding the Supabase data-transfer quota. No visible changes; this just makes the app lighter on data.';
+const APP_UPDATE_NOTES = 'Fixed a bug where Reports, Projects, Job ID search, and AEON Ai could all go blank/empty at once (while everything else kept working) if a sign-in check got stuck behind another open tab. That check now runs independently per tab and retries once automatically, so a stuck tab elsewhere can no longer freeze these for you.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -107,9 +107,37 @@ if (document.getElementById('appVersionLabel')) document.getElementById('appVers
 })();
 
 // ---------- Supabase client ----------
+// TAB-LOCAL AUTH LOCK — root-cause fix for the "Reports/Projects/Job
+// search/AEON Ai all break at once, everything else looks fine" bug.
+// By default supabase-js serializes every auth call (getSession, getUser,
+// token refresh — which every single authenticated request quietly goes
+// through first) behind the browser's shared navigator.locks API, and that
+// lock is shared across EVERY tab/window open on this site, not just this
+// one. If a tab gets closed (or a PWA instance backgrounded) mid-refresh
+// without cleanly releasing that lock, every other tab's very next auth
+// call — and therefore every panel that needs one — waits on it forever.
+// getSessionSafe()'s timeout below then gives up and treats a perfectly
+// valid, signed-in session as "no session" for that one call, which is
+// exactly what made Reports/Projects/Job search/AI all look broken/empty
+// at the same time while the rest of the UI (which doesn't need a fresh
+// session) kept working fine. This replaces that shared, cross-tab lock
+// with a plain in-memory queue scoped to THIS tab only, so one tab can
+// never be blocked by another tab's stuck lock again.
+const _tabAuthLockQueue = new Map();
+async function tabLocalAuthLock(name, _acquireTimeout, fn) {
+  const previous = _tabAuthLockQueue.get(name) || Promise.resolve();
+  const current = previous.catch(() => {}).then(fn);
+  _tabAuthLockQueue.set(name, current);
+  try {
+    return await current;
+  } finally {
+    if (_tabAuthLockQueue.get(name) === current) _tabAuthLockQueue.delete(name);
+  }
+}
 const sb = window.supabase.createClient(
   window.CTORQ_CONFIG.SUPABASE_URL,
-  window.CTORQ_CONFIG.SUPABASE_ANON_KEY
+  window.CTORQ_CONFIG.SUPABASE_ANON_KEY,
+  { auth: { lock: tabLocalAuthLock } }
 );
 
 // ---------- Auth-check timeout guard ----------
@@ -173,9 +201,22 @@ async function readFunctionsError(error) {
 // (falling back to "no session" for that one attempt) instead of freezing
 // that panel indefinitely.
 async function getSessionSafe(ms = 6000) {
-  const result = await raceTimeout(sb.auth.getSession(), ms);
+  let result = await raceTimeout(sb.auth.getSession(), ms);
+  // Same "most hangs are transient" reasoning as enterApp's getUser() retry
+  // above — before this retry existed, a single slow/contended lock on ANY
+  // panel (Reports, Projects, Job ID search, AEON Ai...) meant that one call
+  // permanently gave up and treated a perfectly good, signed-in session as
+  // "no session" for the rest of that panel's load — which is what caused
+  // Reports/Projects/Job search/AI to all look broken/empty at once even
+  // though the person was genuinely still logged in. One short retry clears
+  // the large majority of these without the person needing to do anything.
   if (result.__timedOut) {
-    console.warn('[Auth] getSession() timed out — treating as no session for this one call.');
+    console.warn('[Auth] getSession() timed out once — retrying after a short pause before giving up.');
+    await new Promise((r) => setTimeout(r, 1200));
+    result = await raceTimeout(sb.auth.getSession(), ms);
+  }
+  if (result.__timedOut) {
+    console.warn('[Auth] getSession() timed out twice — treating as no session for this one call.');
     return { data: { session: null } };
   }
   return result;
@@ -1804,7 +1845,7 @@ async function recallEntry(en) {
         date: en.date || en.leaveStart,
         userLabel: en.userLabel,
       },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     });
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     en.status = 'recalled';
@@ -3379,7 +3420,7 @@ async function sendInviteRow(rowId) {
   if (row?.customized) body.allowedFeatures = row.allowedFeatures;
   const { data, error } = await sb.functions.invoke('invite-user', {
     body,
-    headers: { Authorization: `Bearer ${session.access_token}` }
+    headers: { Authorization: `Bearer ${session?.access_token}` }
   });
 
   if (error || data?.error) {
@@ -3580,7 +3621,7 @@ async function renderTeamList() {
       const { data: { session } } = await getSessionSafe();
       const { data: resData, error: fnErr } = await sb.functions.invoke('manage-team-member', {
         body: { userId: btn.dataset.deactivate, action: 'deactivate' },
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       if (fnErr || resData?.error) { showToast(`Couldn't deactivate: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
       showToast('Deactivated.');
@@ -3592,7 +3633,7 @@ async function renderTeamList() {
       const { data: { session } } = await getSessionSafe();
       const { data: resData, error: fnErr } = await sb.functions.invoke('manage-team-member', {
         body: { userId: btn.dataset.reactivate, action: 'reactivate' },
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       if (fnErr || resData?.error) { showToast(`Couldn't reactivate: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
       showToast('Reactivated — they can sign in again.');
@@ -3613,7 +3654,7 @@ async function renderTeamList() {
       const { data: { session } } = await getSessionSafe();
       const { data: resData, error: fnErr } = await sb.functions.invoke('manage-team-member', {
         body: { userId: btn.dataset.deleteMember, action: 'delete' },
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       if (fnErr || resData?.error) { showToast(`Couldn't delete: ${resData?.error || await readFunctionsError(fnErr)}`); return; }
       showToast('Deleted.');
@@ -3647,7 +3688,7 @@ async function renderRecalledEntriesList() {
   if (!session) { list.innerHTML = '<div class="empty">Please log in first.</div>'; return; }
   const { data, error } = await sb.functions.invoke('admin-recalled-entries', {
     body: { action: 'list' },
-    headers: { Authorization: `Bearer ${session.access_token}` },
+    headers: { Authorization: `Bearer ${session?.access_token}` },
   });
   if (error || data?.error) {
     list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
@@ -3699,7 +3740,7 @@ async function callAdminRecalled(action, extra) {
   if (!session) { showToast('Please log in first.'); return { ok: false }; }
   const { data, error } = await sb.functions.invoke('admin-recalled-entries', {
     body: { action, path: currentRecalledItem.path, ...extra },
-    headers: { Authorization: `Bearer ${session.access_token}` },
+    headers: { Authorization: `Bearer ${session?.access_token}` },
   });
   if (error || data?.error) {
     showToast(`Couldn't ${action}: ${data?.error || await readFunctionsError(error)}`);
@@ -3762,7 +3803,7 @@ $('backfillJobHoursBtn')?.addEventListener('click', async () => {
   try {
     const { data: { session } } = await getSessionSafe();
     const { data, error } = await withTimeout(
-      sb.functions.invoke('backfill-job-hours', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+      sb.functions.invoke('backfill-job-hours', { headers: { Authorization: `Bearer ${session?.access_token}` } }),
       120000,
       'Job hours backfill'
     );
@@ -5362,7 +5403,7 @@ $('addTripBtn')?.addEventListener('click', async () => {
     const { data: { session } } = await getSessionSafe();
     sb.functions.invoke('send-push', {
       body: { kind: 'trip', tripId: data.id },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     }).catch(() => {}); // best-effort — a missed push shouldn't block the trip already being saved
   }
 });
@@ -6428,7 +6469,7 @@ if ($('syncJobHoursBtn')) {
     try {
       const { data: { session } } = await getSessionSafe();
       const { data, error } = await withTimeout(
-        sb.functions.invoke('sync-job-hours', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        sb.functions.invoke('sync-job-hours', { headers: { Authorization: `Bearer ${session?.access_token}` } }),
         45000,
         'Sync'
       );
@@ -7476,7 +7517,7 @@ if ($('renewalRefreshBtn')) {
     try {
       const { data: { session } } = await getSessionSafe();
       const { data, error } = await withTimeout(
-        sb.functions.invoke('sync-renewals', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        sb.functions.invoke('sync-renewals', { headers: { Authorization: `Bearer ${session?.access_token}` } }),
         45000,
         'Sync'
       );
@@ -7549,7 +7590,7 @@ async function renderTank() {
   try {
     const { data: { session } } = await getSessionSafe();
     const { data, error } = await sb.functions.invoke('get-tank-level', {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     });
     if (error || data?.error) {
       $('tankSvgArea').innerHTML = `<div class="empty">Couldn't load the tank: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
@@ -8204,7 +8245,7 @@ async function callStageRequestAction(jobId, extra) {
   try {
     const { data, error } = await sb.functions.invoke('advance-project-stage', {
       body: { jobId, ...extra },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     });
     if (error || data?.ok === false) throw new Error(data?.error || await readFunctionsError(error));
     return data;
@@ -8224,7 +8265,7 @@ async function callAdvanceStage(jobId, action, stageKey) {
   try {
     const { data, error } = await sb.functions.invoke('advance-project-stage', {
       body: { jobId, action, stageKey },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     });
     if (error || data?.ok === false) throw new Error(data?.error || await readFunctionsError(error));
     return data;
@@ -8863,7 +8904,7 @@ async function openProjectDetail(jobId, name) {
   const { data: { session } } = await getSessionSafe();
   const { data, error } = await sb.functions.invoke('get-project-report', {
     body: { jobId },
-    headers: { Authorization: `Bearer ${session.access_token}` },
+    headers: { Authorization: `Bearer ${session?.access_token}` },
   });
   if (error || data?.error) {
     $('projectRingsArea').innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
@@ -9605,7 +9646,7 @@ async function callDesignEnquiryWorkflow(action, extra) {
   try {
     const { data, error } = await sb.functions.invoke('design-enquiry-workflow', {
       body: { action, ...extra },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     });
     if (error || data?.ok === false) throw new Error(data?.error || await readFunctionsError(error));
     return data;
@@ -11278,7 +11319,7 @@ async function fetchAndRenderReport() {
     const { data: { session } } = await getSessionSafe();
     const { data, error } = await sb.functions.invoke('get-report', {
       body: { targetEmail: reportTargetEmail, month: reportMonth },
-      headers: { Authorization: `Bearer ${session.access_token}` }
+      headers: { Authorization: `Bearer ${session?.access_token}` }
     });
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     renderReport(data);
@@ -11925,7 +11966,7 @@ async function sendChatMessage() {
         const { data: { session } } = await getSessionSafe();
         if (!session?.access_token) throw new Error('Not signed in — please sign out and back in.');
         sendBtn.textContent = 'Uploading… 0%';
-        await uploadFileResumable(file, 'chat-attachments', path, session.access_token, (fraction) => {
+        await uploadFileResumable(file, 'chat-attachments', path, session?.access_token, (fraction) => {
           sendBtn.textContent = `Uploading… ${Math.round(fraction * 100)}%`;
         });
       } else {
@@ -12379,7 +12420,7 @@ if ($('srSubmitBtn')) {
       const { data, error } = await withTimeout(
         sb.functions.invoke('submit-special-request', {
           body: { entryDate, startTime, endTime, location, jobId, mode: srMode, description, reason },
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          headers: { Authorization: `Bearer ${session?.access_token}` },
         }),
         20000,
         'Submit special request'
@@ -12479,7 +12520,7 @@ async function reviewSpecialRequest(requestId, action) {
     const { data, error } = await withTimeout(
       sb.functions.invoke('approve-special-request', {
         body: { requestId, action },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
       }),
       20000,
       'Review special request'
@@ -14629,7 +14670,7 @@ async function syncQueue() {
     const pending = entries.filter(e => e.status !== 'synced');
     for (const entry of pending) {
       try {
-        entry.attachments = await uploadEntryAttachmentsIfNeeded(entry, session.access_token);
+        entry.attachments = await uploadEntryAttachmentsIfNeeded(entry, session?.access_token);
         // Timeout guard: this runs automatically every few minutes with no
         // one watching. Without a limit, one hung request here would keep
         // "syncing" stuck true forever, silently disabling every future
@@ -14637,7 +14678,7 @@ async function syncQueue() {
         const { data, error } = await withTimeout(
           sb.functions.invoke('submit-entry', {
             body: entry,
-            headers: { Authorization: `Bearer ${session.access_token}` }
+            headers: { Authorization: `Bearer ${session?.access_token}` }
           }),
           20000,
           'Submit entry'
@@ -15283,7 +15324,7 @@ async function sendAiMessage() {
     if (!session) {
       // getSessionSafe() falls back to null if reading the session itself
       // timed out or the person's sign-in has actually lapsed — either way,
-      // `session.access_token` below would throw a raw, confusing error.
+      // `session?.access_token` below would throw a raw, confusing error.
       // Say plainly what's going on instead of crashing on a null field.
       throw new Error('Your sign-in could not be confirmed right now — refresh the app and try again.');
     }
@@ -15301,7 +15342,7 @@ async function sendAiMessage() {
     const { data, error } = await withTimeout(
       sb.functions.invoke('ai-chat', {
         body: { message: text, history: aiHistory },
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session?.access_token}` }
       }),
       75000,
       'AEON Ai'
