@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.0';
+const APP_VERSION = 'v3.53.2';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'AEON Ai can now find vessels currently in for repair or maintenance at named shipyards/drydocks (ADSB, Drydocks World, and more). Live fleet searches now also show a real address/location and the exact date and time the snapshot was taken, in the chat table, the PDF, and the Mind Map page.';
+const APP_UPDATE_NOTES = 'Fixed a bug where closing Team Chat left it quietly polling in the background for the rest of the day, plus chat images being re-downloaded on every refresh — together the biggest cause of exceeding the Supabase data-transfer quota. No visible changes; this just makes the app lighter on data.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -771,6 +771,41 @@ let qsrLoadedJobId = '';
 let qsrLoadedJobName = '';
 let qsrMode = 'site'; // mode-of-work chip for quick jobs — defaults to Site, kept independent of the main New Entry mode chips
 
+// ---- Design Studio addition ----
+// When qsrDesignMode is on, the SAME Start/Stop/Submit ring clocks a Design
+// Enquiry number instead of a Job ID — one shared timer, just loaded with a
+// different kind of thing. Time logged this way still deducts from today's
+// normal job hours the same way any other Quick Job Switch interruption
+// does (fresh.interruptionMinutes), but it's written to
+// design_enquiry_time_entries via the design-enquiry-workflow Edge Function
+// instead of the normal timesheet queue — so it never appears in
+// job_hours_ledger, Profit Analyzer, or any project's billed hours. Only
+// shown to people with Design Studio access (Design department, or granted
+// the 'designStudio' Map Access feature) — see canUseDesignStudio() below.
+let qsrDesignMode = false;
+let qsrLoadedEnquiryId = '';
+let qsrLoadedEnquiryNumber = '';
+let qsrLoadedEnquiryLabel = '';
+let qsrLoadedStageId = '';
+let qsrEnquiryOptions = []; // cached {id, number, label, activeStage} for the picker, refreshed each time it's opened
+
+let designDepartmentId = null; // cached at login — the Design department's own id
+let designDepartmentHeadId = null; // cached at login — who may start a brand new enquiry number
+
+// Design Studio is visible to anyone actually in the Design department, OR
+// anyone an admin has separately granted the 'designStudio' Map Access
+// feature to (e.g. a manager who wants to see the roadmap without being
+// moved into the department).
+function isInDesignDepartment() {
+  return !!(currentProfile?.department_id && designDepartmentId && currentProfile.department_id === designDepartmentId);
+}
+function canUseDesignStudio() {
+  return isInDesignDepartment() || hasFeature('designStudio');
+}
+function isDesignDepartmentHead() {
+  return currentProfile?.role === 'admin' || (designDepartmentHeadId && currentUser?.id === designDepartmentHeadId);
+}
+
 function renderQuickSwitchRing() {
   const handle = $('qsrHandle');
   if (!handle) return;
@@ -779,14 +814,38 @@ function renderQuickSwitchRing() {
   handle.style.display = clockedIn ? 'flex' : 'none';
   if (!clockedIn) { $('qsrDrawer')?.classList.remove('show'); $('qsrDrawerBackdrop')?.classList.remove('show'); return; }
 
-  if (!qsrLoadedJobId) qsrLoadedJobId = $('jobId').value.trim();
+  // A running/paused-but-not-yet-submitted segment locks which "kind" (Job
+  // vs Design Enquiry) is in play — state.qsrIsDesign (stamped at Start) is
+  // the source of truth then, not the toggle, so flipping the toggle
+  // mid-timer can never silently relabel an already-running segment.
+  const segmentLocked = !!state.qsrSegmentStart;
+  if (segmentLocked) qsrDesignMode = !!state.qsrIsDesign;
+
+  const kindToggle = $('qsrKindToggle');
+  if (kindToggle) {
+    kindToggle.style.display = canUseDesignStudio() ? 'flex' : 'none';
+    kindToggle.querySelectorAll('[data-qsr-kind]').forEach((b) => {
+      b.classList.toggle('selected', (b.dataset.qsrKind === 'design') === qsrDesignMode);
+      b.disabled = segmentLocked;
+    });
+  }
+
+  if (!qsrDesignMode && !qsrLoadedJobId) qsrLoadedJobId = $('jobId').value.trim();
   const paused = !!state.qsrSegmentPausedAt;
   const running = !!state.qsrSegmentStart && !paused;
 
-  const badge = $('qsrSelectedBadge');
-  if (badge) badge.textContent = qsrLoadedJobId ? `${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}` : 'No job selected yet';
+  if ($('qsrJobIdIcon')) $('qsrJobIdIcon').textContent = qsrDesignMode ? '📐' : '🆔';
+  if ($('qsrJobIdText')) $('qsrJobIdText').textContent = qsrDesignMode ? 'Enquiry' : 'Job ID';
 
-  $('qsrStartBtn').disabled = state.status === 'onbreak' || !qsrLoadedJobId;
+  const badge = $('qsrSelectedBadge');
+  if (badge) {
+    badge.textContent = qsrDesignMode
+      ? (qsrLoadedEnquiryId ? qsrLoadedEnquiryLabel : 'No enquiry selected yet')
+      : (qsrLoadedJobId ? `${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}` : 'No job selected yet');
+  }
+
+  const somethingLoaded = qsrDesignMode ? !!qsrLoadedEnquiryId : !!qsrLoadedJobId;
+  $('qsrStartBtn').disabled = state.status === 'onbreak' || !somethingLoaded;
   $('qsrStopBtn').disabled = state.status === 'onbreak' || !state.qsrSegmentStart || paused;
   $('qsrSubmitBtn').disabled = !state.qsrSegmentStart;
 
@@ -842,6 +901,69 @@ function showQsrJobMatches(q) {
   });
 }
 
+// Design Enquiry picker — same drawer, same search box/results list as the
+// Job ID picker above, just a different data source: active
+// design_enquiries this person can see (RLS already scopes visibility to
+// Design Studio access). Loaded into its own qsrLoadedEnquiry* variables so
+// picking an enquiry never touches the Job ID ones, or vice versa.
+async function loadQsrEnquiryOptions() {
+  const { data, error } = await sb
+    .from('design_enquiries')
+    .select('id, enquiry_number, customer_name, vessel_name, status, design_enquiry_stages(id, status, name)')
+    .eq('status', 'active')
+    .order('enquiry_number', { ascending: false });
+  if (error) { qsrEnquiryOptions = []; return qsrEnquiryOptions; }
+  qsrEnquiryOptions = (data || []).map((r) => {
+    const activeStage = (r.design_enquiry_stages || []).find((s) => s.status === 'active');
+    return {
+      id: r.id,
+      number: r.enquiry_number,
+      label: `#${r.enquiry_number}${r.customer_name ? ' — ' + r.customer_name : ''}`,
+      activeStageId: activeStage?.id || null,
+      activeStageName: activeStage?.name || null,
+    };
+  });
+  return qsrEnquiryOptions;
+}
+
+function openQsrEnquiryPicker() {
+  $('qsrJobSearch').value = '';
+  $('qsrJobResults').style.display = 'none';
+  $('qsrJobSearch').focus();
+  loadQsrEnquiryOptions().then(() => showQsrEnquiryMatches(''));
+}
+
+function showQsrEnquiryMatches(q) {
+  const box = $('qsrJobResults');
+  const query = (q || '').trim().toLowerCase();
+  const matches = (query
+    ? qsrEnquiryOptions.filter((r) => r.label.toLowerCase().includes(query))
+    : qsrEnquiryOptions
+  ).slice(0, 30);
+  box.innerHTML = matches.length
+    ? matches.map((r) => `
+        <div class="job-search-item" data-enquiry-id="${r.id}" data-enquiry-number="${r.number}" data-enquiry-label="${escapeHtml(r.label)}" data-stage-id="${r.activeStageId || ''}">
+          <div class="jid">${escapeHtml(r.label)}</div>
+          <div class="jdesc">${r.activeStageName ? 'Now at: ' + escapeHtml(r.activeStageName) : 'No active stage'}</div>
+        </div>
+      `).join('')
+    : '<div class="job-search-empty">No matching enquiry found.</div>';
+  box.style.display = 'block';
+  box.querySelectorAll('.job-search-item[data-enquiry-id]').forEach((item) => {
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      qsrLoadedEnquiryId = item.dataset.enquiryId;
+      qsrLoadedEnquiryNumber = item.dataset.enquiryNumber;
+      qsrLoadedEnquiryLabel = item.dataset.enquiryLabel;
+      qsrLoadedStageId = item.dataset.stageId || '';
+      box.style.display = 'none';
+      $('qsrJobSearch').value = '';
+      showToast(`Loaded: ${qsrLoadedEnquiryLabel}`);
+      renderQuickSwitchRing();
+    });
+  });
+}
+
 // Start (left): begins timing the loaded Job ID on QJS's own clock —
 // completely separate from whatever's running in the normal New Entry
 // form/segmentStart, which is left running untouched. Captures a fresh GPS
@@ -849,31 +971,47 @@ function showQsrJobMatches(q) {
 // quick job was already running or stopped-but-not-yet-submitted, it's
 // auto-submitted first so nothing is ever silently lost.
 async function qsrStart() {
-  if (!qsrLoadedJobId) { showToast('Pick a Job ID first.'); return; }
+  if (qsrDesignMode) {
+    if (!qsrLoadedEnquiryId) { showToast('Pick a Design Enquiry first.'); return; }
+  } else if (!qsrLoadedJobId) { showToast('Pick a Job ID first.'); return; }
   const now = new Date();
   let state = getClockState();
   if (state.qsrSegmentStart) {
-    // qsrSubmit() clears qsrLoadedJobId/Name once it's done (ready for a
-    // fresh pick) — but here that variable is actually the NEXT job we're
-    // about to start, so stash and restore it around the safety-net submit.
+    // qsrSubmit() clears the loaded-picker variables once it's done (ready
+    // for a fresh pick) — but here they're actually the NEXT thing we're
+    // about to start, so stash and restore them around the safety-net submit.
+    const nextIsDesign = qsrDesignMode;
     const nextJobId = qsrLoadedJobId, nextJobName = qsrLoadedJobName;
+    const nextEnquiryId = qsrLoadedEnquiryId, nextEnquiryNumber = qsrLoadedEnquiryNumber, nextEnquiryLabel = qsrLoadedEnquiryLabel, nextStageId = qsrLoadedStageId;
     await qsrSubmit();
+    qsrDesignMode = nextIsDesign;
     qsrLoadedJobId = nextJobId; qsrLoadedJobName = nextJobName;
+    qsrLoadedEnquiryId = nextEnquiryId; qsrLoadedEnquiryNumber = nextEnquiryNumber; qsrLoadedEnquiryLabel = nextEnquiryLabel; qsrLoadedStageId = nextStageId;
     state = getClockState();
   }
   state.qsrSegmentStart = now.toISOString();
   state.qsrSegmentPausedAt = null;
+  state.qsrIsDesign = qsrDesignMode;
   // Stamped into STATE (not just the module-level "currently loaded in the
-  // picker" variable) so that if someone picks a different job in the
-  // picker before Stop/Submit, the safety-net auto-submit above still
+  // picker" variables) so that if someone picks a different job/enquiry in
+  // the picker before Stop/Submit, the safety-net auto-submit above still
   // correctly labels the segment that was actually running, not whatever's
   // now loaded.
-  state.qsrJobId = qsrLoadedJobId;
-  state.qsrJobName = qsrLoadedJobName;
+  if (qsrDesignMode) {
+    state.qsrEnquiryId = qsrLoadedEnquiryId;
+    state.qsrEnquiryNumber = qsrLoadedEnquiryNumber;
+    state.qsrEnquiryLabel = qsrLoadedEnquiryLabel;
+    state.qsrStageId = qsrLoadedStageId || null;
+    state.qsrJobId = null; state.qsrJobName = null;
+  } else {
+    state.qsrJobId = qsrLoadedJobId;
+    state.qsrJobName = qsrLoadedJobName;
+    state.qsrEnquiryId = null; state.qsrEnquiryNumber = null; state.qsrEnquiryLabel = null; state.qsrStageId = null;
+  }
   state.qsrStartLocation = null; state.qsrStartLat = null; state.qsrStartLng = null;
   state.qsrStopLocation = null; state.qsrStopLat = null; state.qsrStopLng = null;
   saveClockState(state);
-  showToast(`Started: ${qsrLoadedJobId}${qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''}`);
+  showToast(`Started: ${qsrDesignMode ? qsrLoadedEnquiryLabel : (qsrLoadedJobId + (qsrLoadedJobName ? ' — ' + qsrLoadedJobName : ''))}`);
   renderQuickSwitchRing();
   fetchAndFillLocation({ silent: true, fillField: false }).then((r) => {
     if (!r.ok) return;
@@ -921,13 +1059,54 @@ async function qsrSubmit() {
     if (r.ok) { stopLocation = r.address; stopLat = r.lat; stopLng = r.lng; }
   }
 
-  // Use the job stamped into state at Start time — NOT the module-level
-  // "currently loaded in the picker" variable, which may have already
-  // changed if this is running as the safety net inside qsrStart() picking
-  // up a different job.
+  const minutes = Math.max(0, Math.round((endPoint - new Date(state.qsrSegmentStart)) / 60000));
+
+  // ---- Design Enquiry branch: logs against design_enquiry_time_entries via
+  // the design-enquiry-workflow Edge Function instead of the normal
+  // timesheet queue — never touches job_hours_ledger or Profit Analyzer.
+  // Still deducts from today's normal job hours via interruptionMinutes,
+  // exactly like any other Quick Job Switch interruption. ----
+  if (state.qsrIsDesign) {
+    const result = await callDesignEnquiryWorkflow('log_time', {
+      enquiryId: state.qsrEnquiryId,
+      stageId: state.qsrStageId || null,
+      minutes,
+      description: combineDescription(qsrNotesSelected, $('qsrNotes')?.value || ''),
+      mode: qsrMode,
+      startTime: state.qsrSegmentStart,
+      endTime: endPoint.toISOString(),
+      startLocation: state.qsrStartLocation || null,
+      startLat: state.qsrStartLat ?? null,
+      startLng: state.qsrStartLng ?? null,
+      endLocation: stopLocation || null,
+      endLat: stopLat ?? null,
+      endLng: stopLng ?? null,
+    });
+
+    const freshDesign = getClockState();
+    freshDesign.qsrSegmentStart = null;
+    freshDesign.qsrSegmentPausedAt = null;
+    freshDesign.qsrIsDesign = false;
+    freshDesign.qsrEnquiryId = null; freshDesign.qsrEnquiryNumber = null; freshDesign.qsrEnquiryLabel = null; freshDesign.qsrStageId = null;
+    freshDesign.qsrStartLocation = null; freshDesign.qsrStartLat = null; freshDesign.qsrStartLng = null;
+    freshDesign.qsrStopLocation = null; freshDesign.qsrStopLat = null; freshDesign.qsrStopLng = null;
+    if (result) freshDesign.interruptionMinutes = (freshDesign.interruptionMinutes || 0) + minutes;
+    saveClockState(freshDesign);
+
+    const loadedLabel = qsrLoadedEnquiryLabel;
+    qsrLoadedEnquiryId = ''; qsrLoadedEnquiryNumber = ''; qsrLoadedEnquiryLabel = ''; qsrLoadedStageId = '';
+    if ($('qsrNotes')) $('qsrNotes').value = '';
+    if (result) showToast(`${loadedLabel || 'That enquiry'} logged (${minutes}m) — deducted from today's normal job hours.`);
+    renderQuickSwitchRing();
+    return;
+  }
+
+  // ---- Normal Job ID branch (unchanged) — use the job stamped into state
+  // at Start time, NOT the module-level "currently loaded in the picker"
+  // variable, which may have already changed if this is running as the
+  // safety net inside qsrStart() picking up a different job. ----
   const jobId = state.qsrJobId || qsrLoadedJobId;
   const jobInfo = jobSearchOptions.find((r) => r.job_id === jobId);
-  const minutes = Math.max(0, Math.round((endPoint - new Date(state.qsrSegmentStart)) / 60000));
 
   const draft = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -989,9 +1168,20 @@ function closeQsrDrawer() {
 $('qsrDrawerCloseBtn')?.addEventListener('click', closeQsrDrawer);
 $('qsrDrawerBackdrop')?.addEventListener('click', closeQsrDrawer);
 
-$('qsrJobIdBtn')?.addEventListener('click', openQsrJobPicker);
-$('qsrJobSearch')?.addEventListener('focus', () => showQsrJobMatches($('qsrJobSearch').value));
-$('qsrJobSearch')?.addEventListener('input', () => showQsrJobMatches($('qsrJobSearch').value));
+$('qsrJobIdBtn')?.addEventListener('click', () => { if (qsrDesignMode) openQsrEnquiryPicker(); else openQsrJobPicker(); });
+$('qsrJobSearch')?.addEventListener('focus', () => { if (qsrDesignMode) showQsrEnquiryMatches($('qsrJobSearch').value); else showQsrJobMatches($('qsrJobSearch').value); });
+$('qsrJobSearch')?.addEventListener('input', () => { if (qsrDesignMode) showQsrEnquiryMatches($('qsrJobSearch').value); else showQsrJobMatches($('qsrJobSearch').value); });
+
+// Job vs Design Enquiry toggle — only shown to people with Design Studio
+// access (see renderQuickSwitchRing above); locked while a segment is
+// already running/paused so it can't relabel an in-flight quick job.
+document.querySelectorAll('#qsrKindToggle [data-qsr-kind]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    qsrDesignMode = btn.dataset.qsrKind === 'design';
+    renderQuickSwitchRing();
+  });
+});
 
 $('qsrStartBtn')?.addEventListener('click', () => { if (!$('qsrStartBtn').disabled) qsrStart(); });
 $('qsrStopBtn')?.addEventListener('click', () => { if (!$('qsrStopBtn').disabled) qsrPause(); });
@@ -1956,6 +2146,23 @@ async function enterApp(knownUser) {
   // delete they make is written to visa_renewals_audit_log so an admin can
   // see who changed what.
   if ($('renewalManagerHomeTile')) $('renewalManagerHomeTile').style.display = hasFeature('renewal') ? 'flex' : 'none';
+
+  // Design Studio: cache the Design department's id + current head so
+  // isInDesignDepartment()/isDesignDepartmentHead() (defined near the Quick
+  // Job Switch state block) can gate the home tile, the "New Enquiry"
+  // button, and the Quick Job Switch design-mode toggle without a fresh
+  // query every time. Only Design department members (or anyone an admin
+  // has delegated 'designStudio' Map Access to) see the tile.
+  try {
+    const { data: designDept } = await sb.from('departments').select('id, head_id').eq('name', 'Design').maybeSingle();
+    designDepartmentId = designDept?.id || null;
+    designDepartmentHeadId = designDept?.head_id || null;
+  } catch (_) {
+    designDepartmentId = null;
+    designDepartmentHeadId = null;
+  }
+  if ($('designStudioHomeTile')) $('designStudioHomeTile').style.display = canUseDesignStudio() ? 'flex' : 'none';
+
   $('newGroupBtn').style.display = 'inline-block';
   if ($('newsComposeCard')) $('newsComposeCard').style.display = 'block';
   checkForUnreadNews();
@@ -2952,6 +3159,8 @@ const FEATURE_LIST = [
   { key: 'fieldActivities', label: 'Field Activities (mission start/stop + client visit logging — for marketing/field people)' },
   { key: 'companyFinder', label: 'Company Finder (search real companies by industry/location, add as Client) — private, off by default' },
   { key: 'areaWatch', label: 'Area Watch (live AIS view of vessels currently at UAE shipyards/ports) — private, off by default' },
+  { key: 'designStudio', label: 'Design Studio (Enquiry-to-Offer process flow) — normally only the Design department, grant here to add someone else' },
+  { key: 'designFinalDocs', label: 'Design Studio — Final Technical Proposal & Offer documents (management-only stages)' },
 ];
 
 // Hides every dashboard element tagged data-feature="X" (nav tabs, home
@@ -5369,6 +5578,8 @@ const PANEL_IDS = {
   weather: ['weatherOverlay', 'weatherOverlayBackdrop'],
   about: ['aboutOverlay', 'aboutOverlayBackdrop'],
   appearance: ['appearanceOverlay', 'appearanceOverlayBackdrop'],
+  designStudio: ['designStudioOverlay', 'designStudioOverlayBackdrop'],
+  designEnquiryDetail: ['designEnquiryDetailOverlay', 'designEnquiryDetailOverlayBackdrop'],
 };
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
@@ -5472,6 +5683,20 @@ function openPanel(name, opts = {}) {
     renderHourlyRateList();
     renderDocumentTypeList();
   }
+  if (name === 'designStudio') {
+    // "New Enquiry" (which mints the next 5000-series number) is only for
+    // the Design department head or an admin — matches
+    // is_design_department_head()/is_admin() gating on create_enquiry in
+    // the design-enquiry-workflow Edge Function, so nobody sees a button
+    // that would just fail server-side.
+    if ($('newDesignEnquiryCard')) $('newDesignEnquiryCard').style.display = (currentProfile?.role === 'admin' || isDesignDepartmentHead()) ? 'block' : 'none';
+    if ($('manageDesignStageTemplatesCard')) $('manageDesignStageTemplatesCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
+    renderDesignStudioList();
+    if (currentProfile?.role === 'admin') renderManageDesignStageTemplates();
+  }
+  if (name === 'designEnquiryDetail') {
+    renderDesignEnquiryDetail();
+  }
 }
 function closePanel(name) {
   const ids = PANEL_IDS[name];
@@ -5501,6 +5726,9 @@ if ($('departmentDetailBackBtn')) {
 }
 if ($('quotationDetailBackBtn')) {
   $('quotationDetailBackBtn').addEventListener('click', () => { closePanel('quotationDetail'); openPanel('quotations'); });
+}
+if ($('designEnquiryDetailBackBtn')) {
+  $('designEnquiryDetailBackBtn').addEventListener('click', () => { closePanel('designEnquiryDetail'); openPanel('designStudio'); });
 }
 
 // =====================================================================
@@ -9349,6 +9577,399 @@ if ($('addBoqItemBtn')) {
 }
 
 // =====================================================================
+// DESIGN STUDIO — the Enquiry-to-Offer process flow / roadmap requested
+// from the "ENQUIRY TO OFFER SUBMISSION PROCESS FLOW AND STATUS" document.
+// One "enquiry" (numbered 5000, 5001, ... via design_enquiry_number_seq)
+// moves through a 9-stage roadmap (design_enquiry_stage_templates), one
+// stage active at a time, each with an assignee, allocated hours, %
+// complete, documents, and its own time log — entirely separate from real
+// project Job IDs / job_hours_ledger / Profit Analyzer (this is pre-sales
+// design work, never billed). Visible only to the Design department (or
+// anyone an admin has granted the 'designStudio' Map Access feature) —
+// see canUseDesignStudio() near the Quick Job Switch state block. The
+// last 5 stages (Technical Proposal + Offer) are further restricted:
+// only admins, designFinalDocs-granted people, or that stage's own
+// assignee can see them — see has_design_final_access() in the SQL.
+// All multi-row transitions (create enquiry, log time, complete a stage +
+// hand off to the next) go through the design-enquiry-workflow Edge
+// Function; plain single-row field edits (assignee, hours, % complete)
+// are direct client writes covered by design_enquiry_schema.sql's RLS.
+// =====================================================================
+
+let currentDesignEnquiryDetailId = null;
+let designStudioPeopleCache = null; // {id -> {full_name, email}}, refreshed each time the list/detail opens
+
+async function callDesignEnquiryWorkflow(action, extra) {
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { showToast('Please log in first.'); return null; }
+  try {
+    const { data, error } = await sb.functions.invoke('design-enquiry-workflow', {
+      body: { action, ...extra },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error || data?.ok === false) throw new Error(data?.error || await readFunctionsError(error));
+    return data;
+  } catch (err) {
+    showToast(err.message || String(err));
+    return null;
+  }
+}
+
+async function loadDesignStudioPeople() {
+  const { data } = await sb.from('profiles').select('id, full_name, email').eq('status', 'active').order('full_name', { ascending: true });
+  const byId = {};
+  (data || []).forEach((p) => { byId[p.id] = p; });
+  designStudioPeopleCache = byId;
+  return byId;
+}
+function designPersonName(id) {
+  if (!id) return '—';
+  const p = designStudioPeopleCache?.[id];
+  return p ? (p.full_name || p.email) : '—';
+}
+
+// ---- List: every enquiry this person can see (RLS already scopes it to
+// Design Studio access), most recent first ----
+async function renderDesignStudioList() {
+  const wrap = $('designStudioList');
+  if (!wrap || !currentUser) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  await loadDesignStudioPeople();
+  const { data: rows, error } = await sb
+    .from('design_enquiries')
+    .select('*, design_enquiry_stages(id, position, name, status, assignee_id)')
+    .order('enquiry_number', { ascending: false });
+  if (error) { wrap.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(error.message)}</div>`; return; }
+  if (!rows || !rows.length) { wrap.innerHTML = '<div class="empty">No design enquiries yet.</div>'; return; }
+
+  const STATUS_LABEL = { active: 'In progress', completed: 'Completed', on_hold: 'On hold', cancelled: 'Cancelled' };
+  const STATUS_CLASS = { active: '', completed: 'synced', on_hold: 'pending-chip', cancelled: 'rejected' };
+
+  wrap.innerHTML = rows.map((r) => {
+    const stages = (r.design_enquiry_stages || []).slice().sort((a, b) => a.position - b.position);
+    const activeStage = stages.find((s) => s.status === 'active');
+    const doneCount = stages.filter((s) => s.status === 'completed').length;
+    return `
+    <div class="entry" data-design-enquiry-open="${r.id}" style="cursor:pointer;">
+      <span class="type-icon">📐</span>
+      <div class="entry-body">
+        <div class="entry-meta">Enquiry #${r.enquiry_number}${r.customer_name ? ' — ' + escapeHtml(r.customer_name) : ''}</div>
+        <div class="entry-desc">${escapeHtml(r.vessel_name || 'No vessel name')}${activeStage ? ` · Now at: ${escapeHtml(activeStage.name)}` : ''}</div>
+        <div class="entry-desc" style="opacity:.75;">${doneCount}/${stages.length} stages complete${activeStage?.assignee_id ? ' · Assigned to ' + escapeHtml(designPersonName(activeStage.assignee_id)) : ''}</div>
+      </div>
+      <span class="chip ${STATUS_CLASS[r.status] || ''}">${STATUS_LABEL[r.status] || r.status}</span>
+    </div>
+  `;
+  }).join('');
+
+  wrap.querySelectorAll('[data-design-enquiry-open]').forEach((el) => {
+    el.addEventListener('click', () => openDesignEnquiryDetail(el.dataset.designEnquiryOpen));
+  });
+}
+
+if ($('newDesignEnquiryBtn')) {
+  $('newDesignEnquiryBtn').addEventListener('click', async () => {
+    const btn = $('newDesignEnquiryBtn');
+    btn.disabled = true;
+    try {
+      const result = await callDesignEnquiryWorkflow('create_enquiry', {
+        customerName: $('designEnquiryCustomerName')?.value.trim() || '',
+        vesselName: $('designEnquiryVesselName')?.value.trim() || '',
+        contactNumber: $('designEnquiryContactNumber')?.value.trim() || '',
+        contactEmail: $('designEnquiryContactEmail')?.value.trim() || '',
+        customerAddress: $('designEnquiryAddress')?.value.trim() || '',
+        trnNumber: $('designEnquiryTrn')?.value.trim() || '',
+      });
+      if (!result) return;
+      showToast(`Enquiry #${result.enquiry.enquiry_number} created.`);
+      ['designEnquiryCustomerName', 'designEnquiryVesselName', 'designEnquiryContactNumber', 'designEnquiryContactEmail', 'designEnquiryAddress', 'designEnquiryTrn']
+        .forEach((id) => { if ($(id)) $(id).value = ''; });
+      await renderDesignStudioList();
+      openDesignEnquiryDetail(result.enquiry.id);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+function openDesignEnquiryDetail(enquiryId) {
+  currentDesignEnquiryDetailId = enquiryId;
+  openPanel('designEnquiryDetail');
+}
+
+// ---- Detail: the roadmap itself — a simple vertical stage-by-stage
+// timeline (not the winding-road SVG used for real projects, kept deliberately
+// simpler since a Design enquiry's roadmap is fixed/linear) with a connecting
+// line whose color reflects progress, one card per stage carrying assignee,
+// hours, % complete, reason, documents, and — only for the currently active
+// stage, by its own assignee or an admin — a "Mark stage complete" button.
+// ============================================================
+async function renderDesignEnquiryDetail() {
+  const wrap = $('designEnquiryDetailBody');
+  if (!wrap || !currentDesignEnquiryDetailId) return;
+  wrap.innerHTML = '<div class="empty">Loading…</div>';
+  await loadDesignStudioPeople();
+
+  const [{ data: enquiry, error: enqErr }, { data: stages }, { data: docs }, { data: timeEntries }] = await Promise.all([
+    sb.from('design_enquiries').select('*').eq('id', currentDesignEnquiryDetailId).maybeSingle(),
+    sb.from('design_enquiry_stages').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('position', { ascending: true }),
+    sb.from('design_enquiry_documents').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('uploaded_at', { ascending: false }),
+    sb.from('design_enquiry_time_entries').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('entry_date', { ascending: false }),
+  ]);
+  if (enqErr || !enquiry) { wrap.innerHTML = `<div class="empty">Couldn't load this enquiry.</div>`; return; }
+
+  const isAdmin = currentProfile?.role === 'admin';
+  const visibleStages = (stages || []); // RLS already hides restricted rows this person can't see
+  const peopleOptions = Object.values(designStudioPeopleCache || {})
+    .map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
+
+  const totalMinutesByStage = {};
+  let totalMinutesAll = 0;
+  (timeEntries || []).forEach((t) => {
+    totalMinutesByStage[t.stage_id] = (totalMinutesByStage[t.stage_id] || 0) + (t.minutes || 0);
+    totalMinutesAll += t.minutes || 0;
+  });
+  const fmtHrs = (mins) => `${Math.round((mins / 60) * 10) / 10}h`;
+
+  const header = `
+    <div class="detail-header-card">
+      <div class="entry-meta" style="font-size:1.1em;">Enquiry #${enquiry.enquiry_number} — ${escapeHtml(enquiry.customer_name || 'No customer name')}</div>
+      <div class="entry-desc">${escapeHtml(enquiry.vessel_name || '')}</div>
+      <div class="entry-desc" style="opacity:.8;">${enquiry.contact_number ? '📞 ' + escapeHtml(enquiry.contact_number) + ' &nbsp; ' : ''}${enquiry.contact_email ? '✉ ' + escapeHtml(enquiry.contact_email) : ''}</div>
+      ${enquiry.customer_address ? `<div class="entry-desc" style="opacity:.8;">📍 ${escapeHtml(enquiry.customer_address)}</div>` : ''}
+      <div class="entry-desc" style="margin-top:6px; font-weight:600;">Total logged time on this enquiry: ${fmtHrs(totalMinutesAll)}</div>
+    </div>
+  `;
+
+  const stageCards = visibleStages.map((s) => {
+    const statusColor = s.status === 'completed' ? '#2ecc71' : s.status === 'active' ? '#3498db' : '#8a8f98';
+    const canEdit = isAdmin || s.assignee_id === currentUser.id;
+    const canComplete = s.status === 'active' && canEdit;
+    const stageDocs = (docs || []).filter((d) => d.stage_id === s.id);
+    const overBudget = Number(s.allocated_hours) > 0 && (totalMinutesByStage[s.id] || 0) / 60 > Number(s.allocated_hours);
+    return `
+      <div class="entry" style="flex-direction:column; align-items:stretch; border-left:4px solid ${statusColor};">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="entry-meta">${s.position}. ${escapeHtml(s.name)}${s.restricted_to_management ? ' 🔒' : ''}</div>
+          <span class="chip ${s.status === 'completed' ? 'synced' : s.status === 'active' ? '' : 'pending-chip'}">${s.status}</span>
+        </div>
+        <div class="location-row" style="margin-top:8px; flex-wrap:wrap;">
+          <select data-stage-assignee="${s.id}" ${isAdmin ? '' : 'disabled'} style="flex:1 1 160px;">
+            <option value="">— Unassigned —</option>
+            ${peopleOptions}
+          </select>
+          <input type="number" min="0" step="0.5" data-stage-hours="${s.id}" value="${s.allocated_hours || 0}" placeholder="Allocated hrs" ${canEdit ? '' : 'disabled'} style="flex:1 1 110px;" />
+          <input type="number" min="0" max="100" data-stage-percent="${s.id}" value="${s.percent_complete || 0}" placeholder="% complete" ${canEdit ? '' : 'disabled'} style="flex:1 1 100px;" />
+        </div>
+        <textarea data-stage-reason="${s.id}" placeholder="Reason for delay / notes (if not 100%)" ${canEdit ? '' : 'disabled'} style="margin-top:6px; min-height:36px;">${escapeHtml(s.reason || '')}</textarea>
+        <div class="entry-desc" style="margin-top:4px;">Logged: ${fmtHrs(totalMinutesByStage[s.id] || 0)}${s.allocated_hours > 0 ? ` of ${s.allocated_hours}h budget` : ''}${overBudget ? ' ⚠️ over budget' : ''}</div>
+        ${canEdit ? `<button type="button" class="secondary" data-stage-save="${s.id}" style="margin-top:6px;">💾 Save</button>` : ''}
+        <div style="margin-top:8px;">
+          <div class="entry-desc" style="font-weight:600;">Documents</div>
+          ${stageDocs.length ? stageDocs.map((d) => `
+            <div class="location-row" style="margin-top:4px;">
+              <span style="flex:1;">📄 ${escapeHtml(d.file_name || 'file')} <span class="chip">${d.label}</span></span>
+              <button type="button" class="secondary" data-doc-view="${d.id}">Open</button>
+            </div>
+          `).join('') : '<div class="entry-desc" style="opacity:.7;">No documents yet.</div>'}
+          ${canEdit ? `
+            <div class="location-row" style="margin-top:6px;">
+              <select data-doc-label="${s.id}" style="flex:0 0 110px;">
+                <option value="original">Original</option>
+                <option value="revised">Revised</option>
+              </select>
+              <input type="file" data-doc-file="${s.id}" style="flex:1;" />
+              <button type="button" class="secondary" data-doc-upload="${s.id}">⬆ Upload</button>
+            </div>
+          ` : ''}
+        </div>
+        ${canComplete ? `<button type="button" class="primary" data-stage-complete="${s.id}" style="margin-top:10px;">✓ Mark stage complete &amp; hand off</button>` : ''}
+      </div>
+    `;
+  }).join('<div style="height:8px;"></div>');
+
+  const timesheetRows = (timeEntries || []).slice(0, 50).map((t) => `
+    <div class="location-row" style="font-size:.9em;">
+      <span style="flex:1 1 90px;">${escapeHtml(t.entry_date)}</span>
+      <span style="flex:1 1 140px;">${escapeHtml(designPersonName(t.person_id))}</span>
+      <span style="flex:2 1 160px; opacity:.85;">${escapeHtml(t.description || '')}</span>
+      <span style="flex:0 0 70px; text-align:right;">${fmtHrs(t.minutes)}</span>
+    </div>
+  `).join('');
+
+  wrap.innerHTML = header
+    + '<div style="margin-top:14px;">' + stageCards + '</div>'
+    + `<div class="entry" style="flex-direction:column; align-items:stretch; margin-top:14px;">
+        <div class="entry-meta">Timesheet — complete details of time logged</div>
+        ${timesheetRows || '<div class="empty">No time logged yet.</div>'}
+      </div>`;
+
+  const pendingDesignDocUploads = new Map();
+  wrap.querySelectorAll('[data-stage-assignee]').forEach((sel) => {
+    const stage = visibleStages.find((s) => s.id === sel.dataset.stageAssignee);
+    if (stage?.assignee_id) sel.value = stage.assignee_id;
+    sel.addEventListener('change', () => assignDesignStage(sel.dataset.stageAssignee, sel.value || null));
+  });
+  wrap.querySelectorAll('[data-stage-save]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.stageSave;
+      const hours = parseFloat(wrap.querySelector(`[data-stage-hours="${id}"]`)?.value) || 0;
+      const percent = Math.max(0, Math.min(100, parseInt(wrap.querySelector(`[data-stage-percent="${id}"]`)?.value, 10) || 0));
+      const reason = wrap.querySelector(`[data-stage-reason="${id}"]`)?.value.trim() || null;
+      btn.disabled = true;
+      const { error } = await sb.from('design_enquiry_stages').update({ allocated_hours: hours, percent_complete: percent, reason }).eq('id', id);
+      btn.disabled = false;
+      if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+      showToast('Stage updated.');
+      renderDesignEnquiryDetail();
+    });
+  });
+  wrap.querySelectorAll('[data-doc-file]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.files && input.files[0]) pendingDesignDocUploads.set(input.dataset.docFile, input.files[0]);
+      else pendingDesignDocUploads.delete(input.dataset.docFile);
+    });
+  });
+  wrap.querySelectorAll('[data-doc-upload]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const stageId = btn.dataset.docUpload;
+      const file = pendingDesignDocUploads.get(stageId);
+      const label = wrap.querySelector(`[data-doc-label="${stageId}"]`)?.value || 'original';
+      uploadDesignStageDocument(stageId, currentDesignEnquiryDetailId, file, label);
+    });
+  });
+  wrap.querySelectorAll('[data-doc-view]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const doc = (docs || []).find((d) => d.id === btn.dataset.docView);
+      if (!doc) return;
+      const { data: signed, error } = await sb.storage.from('design-enquiry-attachments').createSignedUrl(doc.file_path, 600);
+      if (error || !signed?.signedUrl) { showToast(`Couldn't open: ${error?.message || 'no link'}`); return; }
+      window.open(signed.signedUrl, '_blank');
+    });
+  });
+  wrap.querySelectorAll('[data-stage-complete]').forEach((btn) => {
+    btn.addEventListener('click', () => completeDesignStage(btn.dataset.stageComplete));
+  });
+}
+
+async function assignDesignStage(stageId, personId) {
+  const { error } = await sb.from('design_enquiry_stages').update({ assignee_id: personId }).eq('id', stageId);
+  if (error) { showToast(`Couldn't assign: ${error.message}`); return; }
+  showToast('Assignee updated.');
+  renderDesignEnquiryDetail();
+}
+
+async function uploadDesignStageDocument(stageId, enquiryId, file, label) {
+  if (!file) { showToast('Choose a file first.'); return; }
+  try {
+    const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
+    const path = `${enquiryId}/${stageId}/${Date.now()}_${safeName}`;
+    const { error: upErr } = await sb.storage.from('design-enquiry-attachments').upload(path, file, { contentType: file.type || 'application/octet-stream' });
+    if (upErr) throw upErr;
+    const { error } = await sb.from('design_enquiry_documents').insert({
+      enquiry_id: enquiryId, stage_id: stageId, file_path: path, file_name: file.name, label, uploaded_by: currentUser.id,
+    });
+    if (error) throw error;
+    showToast('Document uploaded.');
+    renderDesignEnquiryDetail();
+  } catch (err) {
+    showToast(`Couldn't upload: ${err.message || err}`);
+  }
+}
+
+async function completeDesignStage(stageId) {
+  if (!confirm('Mark this stage complete and hand off to the next one?')) return;
+  const result = await callDesignEnquiryWorkflow('complete_stage', { stageId });
+  if (!result) return;
+  showToast('Stage completed — next assignee notified.');
+  renderDesignEnquiryDetail();
+  renderDesignStudioList();
+}
+
+// ---- Admin-only: Manage the shared 9-stage template (design_enquiry_stage_templates) ----
+// Same idea as Manage Project Stages — editing this only changes what a
+// BRAND NEW enquiry's stages look like going forward; an enquiry already
+// created keeps the snapshot rows it was given at creation time.
+async function renderManageDesignStageTemplates() {
+  const box = $('manageDesignStageTemplatesList');
+  if (!box) return;
+  const { data: templates, error } = await sb.from('design_enquiry_stage_templates').select('*').order('position', { ascending: true });
+  if (error || !templates || !templates.length) { box.innerHTML = '<div class="empty">No stages yet — add the first one below.</div>'; return; }
+
+  box.innerHTML = templates.map((t, i) => `
+    <div class="jobdesc-row" style="flex-wrap:wrap;">
+      <span class="jobdesc-label" style="flex:1 1 170px;">${escapeHtml(t.name)}</span>
+      <label style="display:flex; align-items:center; gap:4px; flex:0 0 auto; font-size:.85em;">
+        <input type="checkbox" data-stage-restricted="${t.id}" ${t.restricted_to_management ? 'checked' : ''} /> Management-only
+      </label>
+      <label style="display:flex; align-items:center; gap:4px; flex:0 0 auto; font-size:.85em;">
+        <input type="checkbox" data-stage-enabled="${t.id}" ${t.enabled ? 'checked' : ''} /> Enabled
+      </label>
+      <button type="button" class="secondary" data-design-stage-up="${t.id}" ${i === 0 ? 'disabled' : ''} title="Move earlier">↑</button>
+      <button type="button" class="secondary" data-design-stage-down="${t.id}" ${i === templates.length - 1 ? 'disabled' : ''} title="Move later">↓</button>
+      <button type="button" class="secondary" data-design-stage-delete="${t.id}" title="Remove stage">🗑️</button>
+    </div>
+  `).join('');
+
+  box.querySelectorAll('[data-stage-restricted]').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const { error: updErr } = await sb.from('design_enquiry_stage_templates').update({ restricted_to_management: cb.checked }).eq('id', cb.dataset.stageRestricted);
+      if (updErr) { showToast(`Couldn't save: ${updErr.message}`); return; }
+      showToast('Saved.');
+    });
+  });
+  box.querySelectorAll('[data-stage-enabled]').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const { error: updErr } = await sb.from('design_enquiry_stage_templates').update({ enabled: cb.checked }).eq('id', cb.dataset.stageEnabled);
+      if (updErr) { showToast(`Couldn't save: ${updErr.message}`); return; }
+      showToast('Saved — only affects enquiries created from now on.');
+    });
+  });
+  box.querySelectorAll('[data-design-stage-up]').forEach((btn) => {
+    btn.addEventListener('click', () => swapDesignTemplatePosition(templates, btn.dataset.designStageUp, -1));
+  });
+  box.querySelectorAll('[data-design-stage-down]').forEach((btn) => {
+    btn.addEventListener('click', () => swapDesignTemplatePosition(templates, btn.dataset.designStageDown, 1));
+  });
+  box.querySelectorAll('[data-design-stage-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Remove this stage from the template? Enquiries already created keep their own snapshot — this only affects new enquiries going forward.')) return;
+      const { error: delErr } = await sb.from('design_enquiry_stage_templates').delete().eq('id', btn.dataset.designStageDelete);
+      if (delErr) { showToast(`Couldn't remove: ${delErr.message}`); return; }
+      showToast('Stage removed.');
+      renderManageDesignStageTemplates();
+    });
+  });
+}
+
+async function swapDesignTemplatePosition(templates, id, dir) {
+  const idx = templates.findIndex((t) => t.id === id);
+  const otherIdx = idx + dir;
+  if (idx === -1 || otherIdx < 0 || otherIdx >= templates.length) return;
+  const a = templates[idx], b = templates[otherIdx];
+  await Promise.all([
+    sb.from('design_enquiry_stage_templates').update({ position: b.position }).eq('id', a.id),
+    sb.from('design_enquiry_stage_templates').update({ position: a.position }).eq('id', b.id),
+  ]);
+  renderManageDesignStageTemplates();
+}
+
+if ($('designAddStageTemplateBtn')) {
+  $('designAddStageTemplateBtn').addEventListener('click', async () => {
+    const nameInput = $('newDesignStageName');
+    const name = nameInput?.value.trim();
+    if (!name) { showToast('Enter a stage name.'); return; }
+    const { data: existing } = await sb.from('design_enquiry_stage_templates').select('position').order('position', { ascending: false }).limit(1);
+    const nextPos = (existing && existing[0]?.position ? existing[0].position : 0) + 1;
+    const { error } = await sb.from('design_enquiry_stage_templates').insert({ name, position: nextPos });
+    if (error) { showToast(`Couldn't add: ${error.message}`); return; }
+    nameInput.value = '';
+    showToast('Stage added.');
+    renderManageDesignStageTemplates();
+  });
+}
+
+// =====================================================================
 // PROFIT ANALYZER — quoted price vs. what's actually been spent/collected
 // on a project, broken down by department and person (hours × hourly_rate
 // from Data Feed), plus a company-wide profit trend over a chosen year
@@ -10700,6 +11321,18 @@ let chatListTimer = null;
 let openChatTimer = null;       // backup poll for the open thread, in case realtime drops (flaky mobile networks)
 let pendingChatAttachment = null; // { file } selected but not yet sent
 let chatMessagesCache = []; // last loaded rows for the open thread, kept so edit/cancel can re-render without a fresh fetch
+// Cache of already-issued signed URLs, keyed by storage path — WITHOUT this,
+// every re-render (every 5s poll + every realtime event) called
+// createSignedUrl() again for every attachment already on screen, handing
+// back a signed URL with a different token each time. Since the token
+// changes, the browser sees a "new" <img src> and re-downloads the full
+// image from Storage instead of using its cache — for a thread with a few
+// images left open for hours, that's the same images downloaded hundreds of
+// times over, and was the single biggest driver behind this project's
+// Supabase Egress quota being exceeded (see Sep 2026 usage investigation).
+// Signed URLs here are minted for 1 hour (3600s); cached for 50 minutes so a
+// stale-but-still-valid URL is never handed out.
+const chatAttachmentUrlCache = new Map(); // path -> { url, expiresAt }
 let editingMessageId = null; // message currently showing its inline edit box, if any
 let onlineUserIds = new Set();  // who's currently online, via Supabase Realtime Presence
 // presenceChannel itself is declared up near currentUser/currentProfile now — see the comment there.
@@ -10714,6 +11347,24 @@ function openChatOverlay() {
 function closeChatOverlay() {
   $('chatOverlayBackdrop').classList.remove('show');
   $('chatOverlay').classList.remove('show');
+  // These two intervals were only ever stopped on logout, never on simply
+  // closing the chat panel — so opening chat even once, then closing it and
+  // spending the rest of the day in Timesheet/Projects/etc., left the
+  // 20s chat-list poll (and, if a thread had been open, the message poll +
+  // its Realtime subscription) silently running in the background for the
+  // rest of the session. That was a much bigger contributor to the
+  // Supabase Egress overage than anything that only happens while chat is
+  // actually on screen — see the Sep 2026 usage investigation.
+  clearInterval(chatListTimer);
+  chatListTimer = null;
+  clearInterval(openChatTimer);
+  openChatTimer = null;
+  if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null; }
+  activeChatId = null;
+  activeChatMeta = null;
+  $('chatShell').classList.remove('show-thread');
+  $('chatThreadWrap').style.display = 'none';
+  $('chatEmpty').style.display = 'flex';
 }
 $('chatOrb').addEventListener('click', openChatOverlay);
 $('chatOverlayBackdrop').addEventListener('click', closeChatOverlay);
@@ -10969,8 +11620,12 @@ async function initChatTab() {
 function attachmentMimeIsImage(mime) { return (mime || '').startsWith('image/'); }
 
 async function attachmentUrl(path) {
+  const cached = chatAttachmentUrlCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
   const { data } = await sb.storage.from('chat-attachments').createSignedUrl(path, 3600);
-  return data?.signedUrl || null;
+  const url = data?.signedUrl || null;
+  if (url) chatAttachmentUrlCache.set(path, { url, expiresAt: Date.now() + 50 * 60 * 1000 });
+  return url;
 }
 
 async function renderMessages(rows) {
@@ -11108,9 +11763,14 @@ async function openChat(chatId) {
     .subscribe();
 
   // Realtime can silently drop on flaky mobile connections — this backup
-  // poll guarantees messages still show up within a few seconds either way.
+  // poll guarantees messages still show up within a reasonable time either
+  // way. Was every 5s, which (combined with re-issuing a fresh signed URL
+  // for every image on every poll — see attachmentUrl()'s cache above) was
+  // a major contributor to exceeding the Supabase Egress quota. 20s is
+  // still a fast enough fallback for a dropped Realtime connection, at a
+  // quarter of the polling traffic.
   clearInterval(openChatTimer);
-  openChatTimer = setInterval(() => { if (activeChatId === chatId) loadMessages(chatId); }, 5000);
+  openChatTimer = setInterval(() => { if (activeChatId === chatId) loadMessages(chatId); }, 20000);
 }
 
 $('chatBackBtn').addEventListener('click', () => {

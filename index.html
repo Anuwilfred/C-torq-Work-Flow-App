@@ -258,6 +258,15 @@
           <span class="home-tile-icon home-tile-icon-renewals">🛂</span>
           <span class="home-tile-label">Renewal Manager</span>
         </button>
+        <!-- DESIGN STUDIO — visible to anyone in the Design department, or
+             anyone granted the 'designStudio' Map Access feature (see
+             canUseDesignStudio() in app.js). Same no-data-feature pattern as
+             Renewal Manager above, since the department check needs to run
+             through JS, not the plain [data-feature] tile-hider. -->
+        <button type="button" class="home-tile" data-open="designStudio" id="designStudioHomeTile" style="display:none;">
+          <span class="home-tile-icon home-tile-icon-field">📐</span>
+          <span class="home-tile-label">Design Studio</span>
+        </button>
         <button type="button" class="home-tile" data-tab="settings" data-feature="settings">
           <span class="home-tile-icon">⚙️</span>
           <span class="home-tile-label">Settings</span>
@@ -717,7 +726,17 @@
     <button type="button" class="ghost" id="qsrDrawerCloseBtn">✕</button>
   </div>
   <div class="qsr-drawer-body">
-    <label for="qsrJobSearch">Job ID</label>
+    <!-- Job vs Design Enquiry toggle — only shown to people with Design
+         Studio access (Design department, or granted the 'designStudio' Map
+         Access feature); hidden + JS-driven, see renderQuickSwitchRing() in
+         app.js. Locked (buttons disabled) while a segment is already
+         running/paused so switching can't relabel an in-flight quick job. -->
+    <div id="qsrKindToggle" class="qsr-kind-toggle" style="display:none;">
+      <button type="button" class="qsr-kind-btn selected" data-qsr-kind="job">🧾 Job</button>
+      <button type="button" class="qsr-kind-btn" data-qsr-kind="design">📐 Design Enquiry</button>
+    </div>
+
+    <label for="qsrJobSearch">Job ID / Design Enquiry</label>
     <div class="job-search-wrap" style="position:relative;">
       <input id="qsrJobSearch" type="text" placeholder="Tap to see all jobs, or type to filter..." autocomplete="off" />
       <div id="qsrJobResults" class="job-search-results" style="display:none;"></div>
@@ -738,8 +757,8 @@
       <div class="qsr-dpad">
         <div class="qsr-dpad-plate"></div>
         <button type="button" class="qsr-slot qsr-top" id="qsrJobIdBtn" title="Tap to pick or change the job">
-          <span class="qsr-dpad-icon">🆔</span>
-          <span class="qsr-dpad-text">Job ID</span>
+          <span class="qsr-dpad-icon" id="qsrJobIdIcon">🆔</span>
+          <span class="qsr-dpad-text" id="qsrJobIdText">Job ID</span>
         </button>
         <button type="button" class="qsr-slot qsr-side qsr-left" id="qsrStartBtn" disabled>
           <span class="qsr-dpad-icon">▶</span>
@@ -1171,6 +1190,74 @@
     </div>
     <div class="panel-body">
       <div id="profitDetailBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DESIGN STUDIO OVERLAY — the Enquiry-to-Offer roadmap requested from the
+     "ENQUIRY TO OFFER SUBMISSION PROCESS FLOW AND STATUS" document. Visible
+     only to the Design department (or anyone granted the 'designStudio' Map
+     Access feature) — see canUseDesignStudio()/openPanel('designStudio') in
+     app.js. "New Enquiry" only shows for the Design department head or an
+     admin (create_enquiry is gated the same way server-side). -->
+<div id="designStudioOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="designStudioOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>📐 Design Studio</strong>
+      <button type="button" class="ghost" data-close="designStudio">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass" id="newDesignEnquiryCard" style="display:none;">
+        <strong style="font-size:14px;">➕ New Design Enquiry</strong>
+        <p class="hint" style="margin-top:2px;">Gets the next enquiry number automatically (starting at 5000) and starts its 9-stage roadmap at "Enquiry Input".</p>
+        <div class="location-row" style="margin-top:8px; flex-wrap:wrap;">
+          <input id="designEnquiryCustomerName" type="text" placeholder="Customer name" style="flex:1 1 160px;" />
+          <input id="designEnquiryVesselName" type="text" placeholder="Vessel name" style="flex:1 1 160px;" />
+        </div>
+        <div class="location-row" style="margin-top:8px; flex-wrap:wrap;">
+          <input id="designEnquiryContactNumber" type="text" placeholder="Contact number" style="flex:1 1 140px;" />
+          <input id="designEnquiryContactEmail" type="email" placeholder="Contact email" style="flex:1 1 160px;" />
+        </div>
+        <div class="location-row" style="margin-top:8px; flex-wrap:wrap;">
+          <input id="designEnquiryAddress" type="text" placeholder="Customer address" style="flex:2 1 200px;" />
+          <input id="designEnquiryTrn" type="text" placeholder="TRN number" style="flex:1 1 140px;" />
+        </div>
+        <button type="button" class="primary" id="newDesignEnquiryBtn" style="margin-top:10px;">➕ Create Enquiry</button>
+      </div>
+
+      <div class="card glass" id="manageDesignStageTemplatesCard" style="display:none; margin-top:16px;">
+        <strong style="font-size:14px;">🛠️ Manage Roadmap Stages (admin)</strong>
+        <p class="hint" style="margin-top:2px;">Changing this only affects enquiries created from now on — enquiries already started keep their own snapshot.</p>
+        <div id="manageDesignStageTemplatesList" style="margin-top:8px;"></div>
+        <div class="location-row" style="margin-top:10px;">
+          <input id="newDesignStageName" type="text" placeholder="New stage name" style="flex:1;" />
+          <button type="button" class="secondary" id="designAddStageTemplateBtn">➕ Add stage</button>
+        </div>
+      </div>
+
+      <div class="card glass" style="margin-top:16px;">
+        <strong style="font-size:14px;">📋 Enquiries</strong>
+        <div id="designStudioList" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DESIGN ENQUIRY DETAIL OVERLAY — the roadmap itself: one card per stage
+     with assignee, allocated hours, % complete, reason, documents, and
+     (only the active stage's assignee/admin) a "Mark complete & hand off"
+     button, plus the full timesheet of everyone's logged time. -->
+<div id="designEnquiryDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="designEnquiryDetailOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <button type="button" class="ghost" id="designEnquiryDetailBackBtn">‹ Back</button>
+      <strong>Enquiry Detail</strong>
+      <button type="button" class="ghost" data-close="designEnquiryDetail">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="designEnquiryDetailBody"></div>
     </div>
   </div>
 </div>
