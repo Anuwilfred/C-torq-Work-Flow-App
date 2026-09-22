@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.4';
+const APP_VERSION = 'v3.53.5';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed a deeper cause of the same bug as the last update: Reports, Projects, Live Drivers, Job ID search, and AEON Ai could still freeze on Loading because the previous per-tab sign-in fix could itself get stuck waiting on a check that was, in turn, waiting on it. That circular wait is now time-capped, so it can no longer freeze these panels.';
+const APP_UPDATE_NOTES = 'Found and fixed the actual source of Reports/Projects/Live Drivers/Job search/AEON Ai freezing on Loading: the app was fully re-checking your sign-in every time it was silently re-announced in the background (which happens often, sometimes several times a second), and those overlapping re-checks were piling up. Repeats of a sign-in already handled are now skipped.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2737,6 +2737,23 @@ if ($('jobIdSimple')) {
   });
 }
 
+// THE REAL ROOT CAUSE of Reports/Projects/Live Drivers/Job search/AEON Ai
+// getting stuck on Loading, found by watching it happen live: this handler
+// fires 'SIGNED_IN' every time supabase-js re-announces the session over
+// its cross-tab BroadcastChannel — which it does repeatedly, sometimes
+// several times within the same second, without the session having
+// actually changed at all. Every one of those was being fully reprocessed
+// (loadProfile(), then enterApp() — which itself calls loadProfile() a
+// second time), and each of those calls needs the very same auth lock that
+// supabase-js is, at that exact moment, still holding open while it
+// delivers this very notification. One stray rebroadcast is a brief wait;
+// a burst of several in one second is several of those overlapping waits
+// stacking up back to back — which is exactly what turned a several-second
+// delay into Loading spinners that never finished. Re-announcements of a
+// session we've already fully processed carry the same access_token as the
+// one we handled last time, so skipping those (and only those) stops the
+// pile-up at its source without skipping any real, new sign-in.
+let _lastHandledSignedInToken = null;
 sb.auth.onAuthStateChange(async (event, session) => {
   if (event === 'PASSWORD_RECOVERY') {
     currentUser = session.user;
@@ -2747,6 +2764,8 @@ sb.auth.onAuthStateChange(async (event, session) => {
     return;
   }
   if (event === 'SIGNED_IN' && session) {
+    if (session.access_token === _lastHandledSignedInToken) return;
+    _lastHandledSignedInToken = session.access_token;
     const profile = await loadProfile(session.user);
     currentUser = session.user;
     currentProfile = profile;
