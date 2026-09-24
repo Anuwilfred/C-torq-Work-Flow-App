@@ -587,6 +587,40 @@ section.panel.active { display: block; animation: fadeIn 0.22s ease; }
   50% { opacity: 0.32; }
 }
 
+/* Design Studio's own simple brain-map: a straight connecting line down the
+   left with a round node per stage (deliberately not the winding-road SVG
+   used for real projects — a design enquiry's roadmap is fixed/linear, so a
+   plain vertical chain is clearer). Node color = status; clicking a node
+   expands/collapses its detail card below it. A "sent back" node gets an
+   amber ring + a small badge showing who sent it back and why, standing in
+   for the curved arrow the real project map draws — simpler to keep
+   readable at this scale, same idea. */
+.design-roadmap { position: relative; padding-left: 34px; }
+.design-roadmap::before {
+  content: ''; position: absolute; left: 13px; top: 14px; bottom: 14px; width: 2px;
+  background: var(--border, rgba(150,150,150,0.35));
+}
+.design-node-row { position: relative; margin-bottom: 4px; }
+.design-node-dot {
+  position: absolute; left: -34px; top: 2px; width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700;
+  border: 2px solid var(--border, rgba(150,150,150,0.35)); background: var(--card-bg, #2a2a2a); z-index: 1;
+}
+.design-node-dot.pending { opacity: 0.55; }
+.design-node-dot.active { border-color: #3498db; color: #3498db; animation: stageHandoffPulse 1.6s ease-in-out infinite; }
+.design-node-dot.completed { border-color: #2ecc71; background: #2ecc71; color: #0d2a17; }
+.design-node-dot.sentback { border-color: #e0a020; box-shadow: 0 0 0 3px rgba(224,160,32,0.3); }
+.design-sentback-badge {
+  margin: 4px 0 8px 0; padding: 6px 10px; border-radius: 8px; font-size: 0.85em;
+  background: rgba(224,160,32,0.15); border: 1px solid rgba(224,160,32,0.4);
+}
+.design-followup-node {
+  border-left: 4px solid #8a4fd6; padding: 10px 12px; border-radius: 8px;
+  background: rgba(138,79,214,0.08); margin-top: 10px;
+}
+.design-outcome-won { border-left: 4px solid #2ecc71; background: rgba(46,204,113,0.1); }
+.design-outcome-rejected { border-left: 4px solid #e0565a; background: rgba(224,86,90,0.1); }
+
 /* Active-stage summary card + hand-off action, rendered below the road.
    Was a fixed rgba(10,10,10,0.55) tint — the .stage-active-label child uses
    var(--text) (dark in Light mode), so this card was never meant to be a

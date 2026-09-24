@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.7';
+const APP_VERSION = 'v3.53.8';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Fixed the Team list, Projects list, and Reports panel getting stuck on Loading or showing empty when the connection is slow: those screens now give up waiting after a few seconds instead of hanging forever, show a clear message, and give you a Retry button. Also fixed a bug where the "Viewing report for" list could go permanently blank for the rest of your session after a single slow load.';
+const APP_UPDATE_NOTES = 'Design Studio now shows the enquiry roadmap as a connected map: click any stage to expand it, and the Design department head can send a completed stage back for rework with a comment (the assignee is notified). Once every stage is done, a new follow-up section tracks the days waiting on the client decision and lets the head record Won or Rejected. Also fixed the Team list, Projects list, and Reports panel getting stuck on Loading — they now give up after a few seconds with a clear message and a Retry button, and the "Viewing report for" list can no longer go permanently blank after one slow load.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -9772,15 +9772,31 @@ async function renderDesignStudioList() {
     const stages = (r.design_enquiry_stages || []).slice().sort((a, b) => a.position - b.position);
     const activeStage = stages.find((s) => s.status === 'active');
     const doneCount = stages.filter((s) => s.status === 'completed').length;
+    // Once every stage is done, the chip stops saying flat "Completed" and
+    // instead reflects the follow-up phase — Day N waiting, or the final
+    // Won/Rejected split — since that's the state that actually matters
+    // once the offer's out the door.
+    let chipClass = STATUS_CLASS[r.status] || '';
+    let chipLabel = STATUS_LABEL[r.status] || r.status;
+    let statusLine = activeStage ? ` · Now at: ${escapeHtml(activeStage.name)}` : '';
+    if (r.status === 'completed' && r.follow_up_started_at) {
+      if (r.outcome === 'won') { chipClass = 'synced'; chipLabel = '🏆 Won'; }
+      else if (r.outcome === 'rejected') { chipClass = 'rejected'; chipLabel = '✕ Rejected'; }
+      else {
+        const daysSince = Math.floor((Date.now() - new Date(r.follow_up_started_at).getTime()) / 86400000);
+        chipClass = 'pending-chip'; chipLabel = `Follow-up: Day ${daysSince}`;
+        statusLine = ' · Waiting on client decision';
+      }
+    }
     return `
     <div class="entry" data-design-enquiry-open="${r.id}" style="cursor:pointer;">
       <span class="type-icon">📐</span>
       <div class="entry-body">
         <div class="entry-meta">Enquiry #${r.enquiry_number}${r.customer_name ? ' — ' + escapeHtml(r.customer_name) : ''}</div>
-        <div class="entry-desc">${escapeHtml(r.vessel_name || 'No vessel name')}${activeStage ? ` · Now at: ${escapeHtml(activeStage.name)}` : ''}</div>
+        <div class="entry-desc">${escapeHtml(r.vessel_name || 'No vessel name')}${statusLine}</div>
         <div class="entry-desc" style="opacity:.75;">${doneCount}/${stages.length} stages complete${activeStage?.assignee_id ? ' · Assigned to ' + escapeHtml(designPersonName(activeStage.assignee_id)) : ''}</div>
       </div>
-      <span class="chip ${STATUS_CLASS[r.status] || ''}">${STATUS_LABEL[r.status] || r.status}</span>
+      <span class="chip ${chipClass}">${chipLabel}</span>
     </div>
   `;
   }).join('');
@@ -9833,16 +9849,25 @@ async function renderDesignEnquiryDetail() {
   wrap.innerHTML = '<div class="empty">Loading…</div>';
   await loadDesignStudioPeople();
 
-  const [{ data: enquiry, error: enqErr }, { data: stages }, { data: docs }, { data: timeEntries }] = await Promise.all([
+  const [{ data: enquiry, error: enqErr }, { data: stages }, { data: docs }, { data: timeEntries }, { data: stageRequests }] = await Promise.all([
     sb.from('design_enquiries').select('*').eq('id', currentDesignEnquiryDetailId).maybeSingle(),
     sb.from('design_enquiry_stages').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('position', { ascending: true }),
     sb.from('design_enquiry_documents').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('uploaded_at', { ascending: false }),
     sb.from('design_enquiry_time_entries').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('entry_date', { ascending: false }),
+    sb.from('design_enquiry_stage_requests').select('*').eq('enquiry_id', currentDesignEnquiryDetailId).order('created_at', { ascending: false }),
   ]);
   if (enqErr || !enquiry) { wrap.innerHTML = `<div class="empty">Couldn't load this enquiry.</div>`; return; }
 
   const isAdmin = currentProfile?.role === 'admin';
+  const isHead = isDesignDepartmentHead();
   const visibleStages = (stages || []); // RLS already hides restricted rows this person can't see
+  // Only the most recent unresolved send-back per target stage matters for
+  // the badge/ring — a stage can only be actively "sent back" once at a time
+  // since raising a new one requires it to be completed again first.
+  const openRequestByStage = {};
+  (stageRequests || []).forEach((r) => {
+    if (!r.resolved && !openRequestByStage[r.to_stage_id]) openRequestByStage[r.to_stage_id] = r;
+  });
   const peopleOptions = Object.values(designStudioPeopleCache || {})
     .map((p) => `<option value="${p.id}">${escapeHtml(p.full_name || p.email)}</option>`).join('');
 
@@ -9864,52 +9889,124 @@ async function renderDesignEnquiryDetail() {
     </div>
   `;
 
+  // Brain-map node chain: each stage is a dot + one-line header on the
+  // connecting line (design-roadmap CSS), expandable to the full card of
+  // assignee/hours/notes/documents/complete — same fields as before, just
+  // collapsed by default so the whole 9-step flow reads as a map rather
+  // than a long scroll. The currently active stage, and any stage with an
+  // unresolved send-back, start expanded since those are what need action.
   const stageCards = visibleStages.map((s) => {
-    const statusColor = s.status === 'completed' ? '#2ecc71' : s.status === 'active' ? '#3498db' : '#8a8f98';
     const canEdit = isAdmin || s.assignee_id === currentUser.id;
     const canComplete = s.status === 'active' && canEdit;
     const stageDocs = (docs || []).filter((d) => d.stage_id === s.id);
     const overBudget = Number(s.allocated_hours) > 0 && (totalMinutesByStage[s.id] || 0) / 60 > Number(s.allocated_hours);
+    const openReq = openRequestByStage[s.id];
+    const dotClass = openReq ? 'sentback' : s.status;
+    const expanded = s.status === 'active' || !!openReq;
+    const canSendBack = (isAdmin || isHead) && s.status === 'completed' && !openReq;
+    // Only earlier/this-stage assignees + anyone else in the picker make
+    // sense as a reassignment target — reuse the same people list already
+    // built for the assignee dropdown.
     return `
-      <div class="entry" style="flex-direction:column; align-items:stretch; border-left:4px solid ${statusColor};">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="entry-meta">${s.position}. ${escapeHtml(s.name)}${s.restricted_to_management ? ' 🔒' : ''}</div>
-          <span class="chip ${s.status === 'completed' ? 'synced' : s.status === 'active' ? '' : 'pending-chip'}">${s.status}</span>
+      <div class="design-node-row">
+        <div class="design-node-dot ${dotClass}">${s.status === 'completed' && !openReq ? '✓' : s.position}</div>
+        <div class="entry" data-design-node-header="${s.id}" style="flex-direction:column; align-items:stretch; cursor:pointer; margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="entry-meta">${escapeHtml(s.name)}${s.restricted_to_management ? ' 🔒' : ''}</div>
+            <span class="chip ${s.status === 'completed' ? 'synced' : s.status === 'active' ? '' : 'pending-chip'}">${s.status}</span>
+          </div>
+          <div class="entry-desc" style="opacity:.8;">${s.assignee_id ? escapeHtml(designPersonName(s.assignee_id)) : 'Unassigned'}${s.allocated_hours > 0 ? ` · ${fmtHrs(totalMinutesByStage[s.id] || 0)} of ${s.allocated_hours}h` : ''}</div>
         </div>
-        <div class="location-row" style="margin-top:8px; flex-wrap:wrap;">
-          <select data-stage-assignee="${s.id}" ${isAdmin ? '' : 'disabled'} style="flex:1 1 160px;">
-            <option value="">— Unassigned —</option>
-            ${peopleOptions}
-          </select>
-          <input type="number" min="0" step="0.5" data-stage-hours="${s.id}" value="${s.allocated_hours || 0}" placeholder="Allocated hrs" ${canEdit ? '' : 'disabled'} style="flex:1 1 110px;" />
-          <input type="number" min="0" max="100" data-stage-percent="${s.id}" value="${s.percent_complete || 0}" placeholder="% complete" ${canEdit ? '' : 'disabled'} style="flex:1 1 100px;" />
-        </div>
-        <textarea data-stage-reason="${s.id}" placeholder="Reason for delay / notes (if not 100%)" ${canEdit ? '' : 'disabled'} style="margin-top:6px; min-height:36px;">${escapeHtml(s.reason || '')}</textarea>
-        <div class="entry-desc" style="margin-top:4px;">Logged: ${fmtHrs(totalMinutesByStage[s.id] || 0)}${s.allocated_hours > 0 ? ` of ${s.allocated_hours}h budget` : ''}${overBudget ? ' ⚠️ over budget' : ''}</div>
-        ${canEdit ? `<button type="button" class="secondary" data-stage-save="${s.id}" style="margin-top:6px;">💾 Save</button>` : ''}
-        <div style="margin-top:8px;">
-          <div class="entry-desc" style="font-weight:600;">Documents</div>
-          ${stageDocs.length ? stageDocs.map((d) => `
-            <div class="location-row" style="margin-top:4px;">
-              <span style="flex:1;">📄 ${escapeHtml(d.file_name || 'file')} <span class="chip">${d.label}</span></span>
-              <button type="button" class="secondary" data-doc-view="${d.id}">Open</button>
-            </div>
-          `).join('') : '<div class="entry-desc" style="opacity:.7;">No documents yet.</div>'}
-          ${canEdit ? `
-            <div class="location-row" style="margin-top:6px;">
-              <select data-doc-label="${s.id}" style="flex:0 0 110px;">
-                <option value="original">Original</option>
-                <option value="revised">Revised</option>
+        ${openReq ? `
+          <div class="design-sentback-badge">
+            ↩ Sent back by ${escapeHtml(designPersonName(openReq.raised_by))}${openReq.reassigned_to ? ` — reassigned to ${escapeHtml(designPersonName(openReq.reassigned_to))}` : ''}${openReq.comment ? `: "${escapeHtml(openReq.comment)}"` : ' (no comment given)'}
+          </div>
+        ` : ''}
+        <div data-design-node-body="${s.id}" style="display:${expanded ? 'block' : 'none'};">
+          <div class="entry" style="flex-direction:column; align-items:stretch; margin-top:4px;">
+            <div class="location-row" style="flex-wrap:wrap;">
+              <select data-stage-assignee="${s.id}" ${isAdmin ? '' : 'disabled'} style="flex:1 1 160px;">
+                <option value="">— Unassigned —</option>
+                ${peopleOptions}
               </select>
-              <input type="file" data-doc-file="${s.id}" style="flex:1;" />
-              <button type="button" class="secondary" data-doc-upload="${s.id}">⬆ Upload</button>
+              <input type="number" min="0" step="0.5" data-stage-hours="${s.id}" value="${s.allocated_hours || 0}" placeholder="Allocated hrs" ${canEdit ? '' : 'disabled'} style="flex:1 1 110px;" />
+              <input type="number" min="0" max="100" data-stage-percent="${s.id}" value="${s.percent_complete || 0}" placeholder="% complete" ${canEdit ? '' : 'disabled'} style="flex:1 1 100px;" />
             </div>
-          ` : ''}
+            <textarea data-stage-reason="${s.id}" placeholder="Reason for delay / notes (if not 100%)" ${canEdit ? '' : 'disabled'} style="margin-top:6px; min-height:36px;">${escapeHtml(s.reason || '')}</textarea>
+            <div class="entry-desc" style="margin-top:4px;">Logged: ${fmtHrs(totalMinutesByStage[s.id] || 0)}${s.allocated_hours > 0 ? ` of ${s.allocated_hours}h budget` : ''}${overBudget ? ' ⚠️ over budget' : ''}</div>
+            ${canEdit ? `<button type="button" class="secondary" data-stage-save="${s.id}" style="margin-top:6px;">💾 Save</button>` : ''}
+            <div style="margin-top:8px;">
+              <div class="entry-desc" style="font-weight:600;">Documents</div>
+              ${stageDocs.length ? stageDocs.map((d) => `
+                <div class="location-row" style="margin-top:4px;">
+                  <span style="flex:1;">📄 ${escapeHtml(d.file_name || 'file')} <span class="chip">${d.label}</span></span>
+                  <button type="button" class="secondary" data-doc-view="${d.id}">Open</button>
+                </div>
+              `).join('') : '<div class="entry-desc" style="opacity:.7;">No documents yet.</div>'}
+              ${canEdit ? `
+                <div class="location-row" style="margin-top:6px;">
+                  <select data-doc-label="${s.id}" style="flex:0 0 110px;">
+                    <option value="original">Original</option>
+                    <option value="revised">Revised</option>
+                  </select>
+                  <input type="file" data-doc-file="${s.id}" style="flex:1;" />
+                  <button type="button" class="secondary" data-doc-upload="${s.id}">⬆ Upload</button>
+                </div>
+              ` : ''}
+            </div>
+            ${canComplete ? `<button type="button" class="primary" data-stage-complete="${s.id}" style="margin-top:10px;">✓ Mark stage complete &amp; hand off</button>` : ''}
+            ${canSendBack ? `
+              <div style="margin-top:10px; border-top:1px solid var(--border, rgba(150,150,150,0.25)); padding-top:8px;">
+                <div class="entry-desc" style="font-weight:600;">Not good enough? Send it back</div>
+                <div class="location-row" style="margin-top:6px; flex-wrap:wrap;">
+                  <select data-sendback-reassign="${s.id}" style="flex:1 1 160px;">
+                    <option value="">Keep same person (${escapeHtml(s.assignee_id ? designPersonName(s.assignee_id) : 'unassigned')})</option>
+                    ${peopleOptions}
+                  </select>
+                </div>
+                <textarea data-sendback-comment="${s.id}" placeholder="Why is this being sent back?" style="margin-top:6px; min-height:32px;"></textarea>
+                <button type="button" class="secondary" data-sendback-submit="${s.id}" style="margin-top:6px;">↩ Send back for rework</button>
+              </div>
+            ` : ''}
+          </div>
         </div>
-        ${canComplete ? `<button type="button" class="primary" data-stage-complete="${s.id}" style="margin-top:10px;">✓ Mark stage complete &amp; hand off</button>` : ''}
       </div>
     `;
-  }).join('<div style="height:8px;"></div>');
+  }).join('');
+
+  // Post-Offer-Submission follow-up: once every stage is done, the enquiry
+  // isn't just "finished" — the client still needs chasing for a decision.
+  // Day count is computed live from follow_up_started_at (stamped by the
+  // Edge Function the moment stage 9 completes), so no scheduled job is
+  // needed to keep it current. Ends in a two-way split — Won / Rejected —
+  // same ideology as the real project map's outcome, just simpler.
+  let followUpSection = '';
+  if (enquiry.status === 'completed' && enquiry.follow_up_started_at) {
+    const daysSince = Math.floor((Date.now() - new Date(enquiry.follow_up_started_at).getTime()) / 86400000);
+    if (enquiry.outcome) {
+      const outcomeClass = enquiry.outcome === 'won' ? 'design-outcome-won' : 'design-outcome-rejected';
+      followUpSection = `
+        <div class="design-followup-node ${outcomeClass}">
+          <div class="entry-meta">${enquiry.outcome === 'won' ? '🏆 Won the job' : '✕ Rejected'}</div>
+          <div class="entry-desc">Recorded ${new Date(enquiry.outcome_at).toLocaleDateString()}${enquiry.outcome_notes ? ` — ${escapeHtml(enquiry.outcome_notes)}` : ''}</div>
+        </div>
+      `;
+    } else {
+      followUpSection = `
+        <div class="design-followup-node">
+          <div class="entry-meta">📨 Follow-up with client</div>
+          <div class="entry-desc">Offer submitted — Day ${daysSince} waiting on a decision, no answer yet.</div>
+          ${(isAdmin || isHead) ? `
+            <textarea id="designOutcomeNotes" placeholder="Notes (optional)" style="margin-top:8px; min-height:32px; width:100%;"></textarea>
+            <div class="location-row" style="margin-top:8px;">
+              <button type="button" class="primary" id="designOutcomeWonBtn" style="flex:1;">🏆 Won the job</button>
+              <button type="button" class="secondary" id="designOutcomeRejectedBtn" style="flex:1;">✕ Rejected</button>
+            </div>
+          ` : `<div class="entry-desc" style="opacity:.7; margin-top:6px;">Waiting on the Design department head to record the client's decision.</div>`}
+        </div>
+      `;
+    }
+  }
 
   const timesheetRows = (timeEntries || []).slice(0, 50).map((t) => `
     <div class="location-row" style="font-size:.9em;">
@@ -9921,11 +10018,19 @@ async function renderDesignEnquiryDetail() {
   `).join('');
 
   wrap.innerHTML = header
-    + '<div style="margin-top:14px;">' + stageCards + '</div>'
+    + `<div class="design-roadmap" style="margin-top:14px;">${stageCards}</div>`
+    + followUpSection
     + `<div class="entry" style="flex-direction:column; align-items:stretch; margin-top:14px;">
         <div class="entry-meta">Timesheet — complete details of time logged</div>
         ${timesheetRows || '<div class="empty">No time logged yet.</div>'}
       </div>`;
+
+  wrap.querySelectorAll('[data-design-node-header]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const body = wrap.querySelector(`[data-design-node-body="${el.dataset.designNodeHeader}"]`);
+      if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none';
+    });
+  });
 
   const pendingDesignDocUploads = new Map();
   wrap.querySelectorAll('[data-stage-assignee]').forEach((sel) => {
@@ -9973,6 +10078,37 @@ async function renderDesignEnquiryDetail() {
   wrap.querySelectorAll('[data-stage-complete]').forEach((btn) => {
     btn.addEventListener('click', () => completeDesignStage(btn.dataset.stageComplete));
   });
+  wrap.querySelectorAll('[data-sendback-submit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const stageId = btn.dataset.sendbackSubmit;
+      const reassignToUserId = wrap.querySelector(`[data-sendback-reassign="${stageId}"]`)?.value || null;
+      const comment = wrap.querySelector(`[data-sendback-comment="${stageId}"]`)?.value.trim() || null;
+      raiseDesignStageRequest(stageId, reassignToUserId, comment);
+    });
+  });
+  const wonBtn = $('designOutcomeWonBtn');
+  const rejectedBtn = $('designOutcomeRejectedBtn');
+  if (wonBtn) wonBtn.addEventListener('click', () => setDesignEnquiryOutcome('won'));
+  if (rejectedBtn) rejectedBtn.addEventListener('click', () => setDesignEnquiryOutcome('rejected'));
+}
+
+async function raiseDesignStageRequest(toStageId, reassignToUserId, comment) {
+  if (!confirm('Send this stage back for rework?')) return;
+  const result = await callDesignEnquiryWorkflow('raise_stage_request', { toStageId, reassignToUserId, comment });
+  if (!result) return;
+  showToast('Sent back — the assignee has been notified.');
+  renderDesignEnquiryDetail();
+  renderDesignStudioList();
+}
+
+async function setDesignEnquiryOutcome(outcome) {
+  const notes = $('designOutcomeNotes')?.value.trim() || null;
+  if (!confirm(outcome === 'won' ? 'Record this enquiry as Won?' : 'Record this enquiry as Rejected?')) return;
+  const result = await callDesignEnquiryWorkflow('set_outcome', { enquiryId: currentDesignEnquiryDetailId, outcome, notes });
+  if (!result) return;
+  showToast(outcome === 'won' ? 'Recorded as won 🏆' : 'Recorded as rejected.');
+  renderDesignEnquiryDetail();
+  renderDesignStudioList();
 }
 
 async function assignDesignStage(stageId, personId) {
