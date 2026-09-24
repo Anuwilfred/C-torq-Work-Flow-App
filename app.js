@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.5';
+const APP_VERSION = 'v3.53.7';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Found and fixed the actual source of Reports/Projects/Live Drivers/Job search/AEON Ai freezing on Loading: the app was fully re-checking your sign-in every time it was silently re-announced in the background (which happens often, sometimes several times a second), and those overlapping re-checks were piling up. Repeats of a sign-in already handled are now skipped.';
+const APP_UPDATE_NOTES = 'Fixed the Team list, Projects list, and Reports panel getting stuck on Loading or showing empty when the connection is slow: those screens now give up waiting after a few seconds instead of hanging forever, show a clear message, and give you a Retry button. Also fixed a bug where the "Viewing report for" list could go permanently blank for the rest of your session after a single slow load.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -2219,7 +2219,20 @@ async function enterApp(knownUser) {
   // query every time. Only Design department members (or anyone an admin
   // has delegated 'designStudio' Map Access to) see the tile.
   try {
-    const { data: designDept } = await sb.from('departments').select('id, head_id').eq('name', 'Design').maybeSingle();
+    // FOUND LIVE, WATCHING IT HAPPEN: this call had no timeout guard, unlike
+    // almost every other Supabase call in this function. A slow/stuck
+    // response here didn't throw — it just never resolved — so execution
+    // never reached anything below it: applyFeatureAccess() (which turns on
+    // the AI orb and chat bubble) and initGlobalAppearance() (background/
+    // wallpaper) simply never ran. That's the actual reason those looked
+    // "removed" — nothing was deleted, this one unguarded lookup was quietly
+    // blocking all of it. raceTimeout() plus the existing catch below now
+    // guarantee this can never hold up the rest of sign-in again.
+    const deptResult = await raceTimeout(
+      sb.from('departments').select('id, head_id').eq('name', 'Design').maybeSingle(),
+      5000
+    );
+    const designDept = deptResult.__timedOut ? null : deptResult.data;
     designDepartmentId = designDept?.id || null;
     designDepartmentHeadId = designDept?.head_id || null;
   } catch (_) {
@@ -3544,12 +3557,28 @@ $('inviteAccessSaveBtn')?.addEventListener('click', () => {
 
 async function renderTeamList() {
   const list = $('teamList');
-  const [{ data, error }, { rows: depts }, roles] = await Promise.all([
-    sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at, last_seen').order('created_at', { ascending: false }),
-    fetchDepartments(),
-    fetchRoles(),
-  ]);
-  if (error) { list.innerHTML = `<div class="empty">Couldn't load team list.</div>`; return; }
+  // This call previously had no timeout guard at all — if the underlying
+  // request was slow (confirmed elsewhere today: the same query can take
+  // 8+ seconds through this library even when a raw request for identical
+  // data comes back in under a second), the whole list just sat there
+  // silently forever with no "Loading" text and no error, which read as
+  // "the people are gone" even though nothing was actually missing.
+  // Capping it and giving a clear retry option means a slow response now
+  // shows something actionable instead of nothing at all.
+  const result = await raceTimeout(
+    Promise.all([
+      sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at, last_seen').order('created_at', { ascending: false }),
+      fetchDepartments(),
+      fetchRoles(),
+    ]),
+    8000
+  );
+  if (result.__timedOut) {
+    list.innerHTML = `<div class="empty">Couldn't load the team list — the connection is slow right now. <button type="button" class="secondary" onclick="renderTeamList()">Retry</button></div>`;
+    return;
+  }
+  const [{ data, error }, { rows: depts }, roles] = result;
+  if (error) { list.innerHTML = `<div class="empty">Couldn't load team list. <button type="button" class="secondary" onclick="renderTeamList()">Retry</button></div>`; return; }
   if (!data.length) { list.innerHTML = '<div class="empty">No one invited yet.</div>'; return; }
   const deptOptions = '<option value="">No department</option>' + (depts || []).map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
   const roleOptions = '<option value="">No role</option>' + roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
@@ -7664,10 +7693,20 @@ async function renderTank() {
 
 async function fetchProjects() {
   try {
-    const { data, error } = await sb
-      .from('projects')
-      .select('job_id, name, status, received_date, client')
-      .order('created_at', { ascending: false });
+    // No timeout guard here previously — if this call was slow (confirmed
+    // elsewhere: the same query can take 8+ seconds through this library
+    // even when an identical raw request comes back in under a second),
+    // this just awaited forever with nothing ever resolving, which is
+    // exactly what "Projects stuck on Loading…" turned out to be. A timeout
+    // here at least turns an infinite hang into a clear, retryable error.
+    const result = await raceTimeout(
+      sb.from('projects').select('job_id, name, status, received_date, client').order('created_at', { ascending: false }),
+      8000
+    );
+    if (result.__timedOut) {
+      return { rows: [], error: new Error("Couldn't reach the server in time — the connection is slow right now.") };
+    }
+    const { data, error } = result;
     if (error) { console.error('fetchProjects failed:', error); return { rows: [], error }; }
     return { rows: data || [], error: null };
   } catch (err) {
@@ -11258,10 +11297,25 @@ async function populateReportPersonPicker() {
   if (currentProfile?.role !== 'admin') { card.style.display = 'none'; return; }
   card.style.display = 'block';
   if (reportPersonPopulated) return;
-  reportPersonPopulated = true;
 
-  const { data } = await sb.from('profiles').select('email, full_name').order('full_name', { ascending: true });
+  // No timeout guard here previously, AND reportPersonPopulated was set to
+  // true before this fetch even started — so a single slow/failed attempt
+  // (confirmed elsewhere today: these calls can hang for 8+ seconds) left
+  // the "Viewing report for" dropdown permanently empty for the rest of the
+  // session, since the very next call would just see the flag already set
+  // and skip trying again entirely. Only marking it populated on an actual
+  // successful load means a bad attempt can always be retried later.
+  const result = await raceTimeout(
+    sb.from('profiles').select('email, full_name').order('full_name', { ascending: true }),
+    8000
+  );
   const select = $('reportPerson');
+  if (result.__timedOut) {
+    select.innerHTML = `<option value="">Couldn't load — try reopening Reports</option>`;
+    return;
+  }
+  reportPersonPopulated = true;
+  const { data } = result;
   const people = data || [];
   select.innerHTML = people.map(p =>
     `<option value="${escapeHtml(p.email)}">${escapeHtml(p.full_name || p.email)}${p.email === currentUser.email ? ' (you)' : ''}</option>`
@@ -11360,14 +11414,22 @@ async function fetchAndRenderReport() {
   $('reportTableWrap').innerHTML = '';
   try {
     const { data: { session } } = await getSessionSafe();
-    const { data, error } = await sb.functions.invoke('get-report', {
-      body: { targetEmail: reportTargetEmail, month: reportMonth },
-      headers: { Authorization: `Bearer ${session?.access_token}` }
-    });
+    const result = await raceTimeout(
+      sb.functions.invoke('get-report', {
+        body: { targetEmail: reportTargetEmail, month: reportMonth },
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      }),
+      10000
+    );
+    if (result.__timedOut) {
+      $('gaugeGrid').innerHTML = `<div class="empty">Couldn't load report — the connection is slow right now. <button type="button" class="secondary" onclick="fetchAndRenderReport()">Retry</button></div>`;
+      return;
+    }
+    const { data, error } = result;
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     renderReport(data);
   } catch (err) {
-    $('gaugeGrid').innerHTML = `<div class="empty">Couldn't load report: ${escapeHtml(String(err.message || err))}</div>`;
+    $('gaugeGrid').innerHTML = `<div class="empty">Couldn't load report: ${escapeHtml(String(err.message || err))} <button type="button" class="secondary" onclick="fetchAndRenderReport()">Retry</button></div>`;
   }
 }
 
