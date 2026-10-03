@@ -214,10 +214,6 @@
           <span class="home-tile-icon home-tile-icon-clients">🤝</span>
           <span class="home-tile-label">Clients</span>
         </button>
-        <button type="button" class="home-tile" data-open="quotations" data-feature="quotations">
-          <span class="home-tile-icon home-tile-icon-quotations">🧾</span>
-          <span class="home-tile-label">Quotations</span>
-        </button>
         <button type="button" class="home-tile" data-open="profitAnalyzer" data-feature="profit">
           <span class="home-tile-icon home-tile-icon-profit">💰</span>
           <span class="home-tile-label">Profit Analyzer</span>
@@ -237,14 +233,6 @@
         <button type="button" class="home-tile" data-open="fieldActivities" data-feature="fieldActivities">
           <span class="home-tile-icon home-tile-icon-field">🧭</span>
           <span class="home-tile-label">Field Activities</span>
-        </button>
-        <button type="button" class="home-tile" data-open="companyFinder" data-feature="companyFinder">
-          <span class="home-tile-icon home-tile-icon-field">🏢</span>
-          <span class="home-tile-label">Company Finder</span>
-        </button>
-        <button type="button" class="home-tile" data-open="areaWatch" data-feature="areaWatch">
-          <span class="home-tile-icon home-tile-icon-field">🛰️</span>
-          <span class="home-tile-label">Area Watch</span>
         </button>
         <!-- RENEWAL MANAGER — visible to admins, and to anyone granted the
              'renewal' Map Access feature (full read/write on every
@@ -617,6 +605,12 @@
         <p class="hint" style="margin-top:4px;">Project Detail, the Project Tank gauge, and AEON Ai now read project hours from a running total that updates automatically as new entries come in — instead of rescanning every timesheet in GitHub every time (that's what was making those screens slow to open). Run this once to fill it in for every entry already submitted before today. Safe to run again any time if numbers ever look off.</p>
         <button type="button" id="backfillJobHoursBtn" class="secondary" style="margin-top:8px;">Run one-time backfill</button>
         <div id="backfillJobHoursStatus" class="hint" style="margin-top:8px;"></div>
+      </div>
+      <div class="card glass">
+        <strong style="font-size:14px;">📝 Timesheet Descriptions (Sheet backfill)</strong>
+        <p class="hint" style="margin-top:4px;">The Google Sheet's Description column only started filling in automatically on new timesheet entries from today onward — older rows were submitted before that fix and are still blank. Tap this to scan every past timesheet entry and fill in any matching row's Description cell that's still empty. Safe to run more than once — it only ever touches a cell that's currently blank, never overwrites anything already there.</p>
+        <button type="button" id="backfillDescriptionsBtn" class="secondary" style="margin-top:8px;">Run one-time backfill</button>
+        <div id="backfillDescriptionsStatus" class="hint" style="margin-top:8px;"></div>
       </div>
       <div class="card glass">
         <strong style="font-size:14px;">🔁 Recalled Entries</strong>
@@ -1065,81 +1059,6 @@
         <button id="createClientBtn" class="primary" style="margin-top:12px;">Add client</button>
       </div>
       <div id="clientsListArea" style="margin-top:16px;"></div>
-    </div>
-  </div>
-</div>
-
-<!-- QUOTATIONS OVERLAY -->
-<div id="quotationsOverlayBackdrop" class="panel-overlay-backdrop"></div>
-<div id="quotationsOverlay" class="panel-overlay">
-  <div class="panel-shell">
-    <div class="panel-header">
-      <strong>Quotations</strong>
-      <button type="button" class="ghost" data-close="quotations">✕</button>
-    </div>
-    <div class="panel-body">
-      <div class="card glass" id="newQuotationCard" style="display:none;">
-        <strong style="font-size:14px;">New quotation</strong>
-        <label for="newQuoteNumber">Quote number</label>
-        <input id="newQuoteNumber" type="text" placeholder="e.g. Q-1042" />
-        <label for="newQuoteClient">Client</label>
-        <select id="newQuoteClient"><option value="">Select a client</option></select>
-        <label for="newQuoteJobId">Project / Job ID (optional)</label>
-        <select id="newQuoteJobId"><option value="">No project linked</option></select>
-        <label for="newQuoteTitle">Title</label>
-        <input id="newQuoteTitle" type="text" placeholder="e.g. Fire alarm system upgrade" />
-        <button id="createQuotationBtn" class="primary" style="margin-top:12px;">Create quotation</button>
-      </div>
-      <div id="quotationsListArea" style="margin-top:16px;"></div>
-    </div>
-  </div>
-</div>
-
-<!-- QUOTATION DETAIL OVERLAY -->
-<div id="quotationDetailOverlayBackdrop" class="panel-overlay-backdrop"></div>
-<div id="quotationDetailOverlay" class="panel-overlay">
-  <div class="panel-shell">
-    <div class="panel-header">
-      <button type="button" class="ghost" id="quotationDetailBackBtn">‹ Back</button>
-      <strong id="quotationDetailTitle">Quotation</strong>
-      <button type="button" class="ghost" data-close="quotationDetail">✕</button>
-    </div>
-    <div class="panel-body">
-      <div class="card glass">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-          <div>
-            <div id="quotationDetailClient" style="font-size:14px; font-weight:600;">—</div>
-            <div id="quotationDetailMeta" class="hint" style="margin-top:2px;">—</div>
-          </div>
-          <div id="quotationStatusBadge"></div>
-        </div>
-        <div class="row-2" id="quotationStatusButtons" style="margin-top:14px; display:none;">
-          <button type="button" class="secondary" data-quote-status="sent">Mark sent</button>
-          <button type="button" class="secondary" data-quote-status="accepted">Mark accepted</button>
-        </div>
-        <button type="button" class="secondary" id="quotationRejectBtn" style="width:100%; margin-top:8px; display:none;">Mark rejected</button>
-      </div>
-      <div class="card glass" style="margin-top:16px;">
-        <strong style="font-size:14px;">Line items</strong>
-        <div id="quotationItemsArea" style="margin-top:12px;"></div>
-        <div id="quotationTotalRow" style="margin-top:8px;"></div>
-        <div id="newQuoteItemCard" style="display:none; margin-top:14px;">
-          <div class="section-divider"></div>
-          <label for="quoteItemDescription">Description</label>
-          <input id="quoteItemDescription" type="text" placeholder="e.g. Supply and install smoke detectors" />
-          <div class="row-2" style="margin-top:6px;">
-            <div>
-              <label for="quoteItemQuantity">Quantity</label>
-              <input id="quoteItemQuantity" type="number" min="0" step="0.01" placeholder="1" />
-            </div>
-            <div>
-              <label for="quoteItemUnitPrice">Unit price</label>
-              <input id="quoteItemUnitPrice" type="number" min="0" step="0.01" placeholder="0" />
-            </div>
-          </div>
-          <button type="button" id="addQuoteItemBtn" class="primary" style="margin-top:12px;">Add item</button>
-        </div>
-      </div>
     </div>
   </div>
 </div>
@@ -1663,57 +1582,9 @@
   </div>
 </div>
 
-<!-- COMPANY FINDER OVERLAY — search real companies worldwide by industry +
-     location (free OpenStreetMap search, called directly from here — no redirect out
-     to Chrome/Google Maps), then save any of them as a Client with one tap
-     so a Field Activities visit can be logged against it. -->
-<div id="companyFinderOverlayBackdrop" class="panel-overlay-backdrop"></div>
-<div id="companyFinderOverlay" class="panel-overlay">
-  <div class="panel-shell">
-    <div class="panel-header">
-      <strong>🏢 Company Finder</strong>
-      <button type="button" class="ghost" data-close="companyFinder">✕</button>
-    </div>
-    <div class="panel-body">
-
-      <div class="card glass" id="companyFinderSearchCard">
-        <strong style="font-size:14px;">Search companies</strong>
-        <p class="hint" style="margin-top:2px;">Pick an industry (or type your own) and a location — anywhere in the world, Dubai/UAE by default.</p>
-
-        <label style="margin-top:8px;">Industry</label>
-        <div id="companyFinderIndustryGrid" class="mode-grid"></div>
-
-        <label for="companyFinderKeyword">Or type your own industry/keyword</label>
-        <input id="companyFinderKeyword" type="text" placeholder="e.g. Cloud computing providers" />
-
-        <label for="companyFinderLocation">Location</label>
-        <div class="job-search-wrap" style="position:relative;">
-          <input id="companyFinderLocation" type="text" value="Dubai, UAE" placeholder="City, country — or leave as Dubai, UAE" autocomplete="off" />
-          <div id="companyFinderLocationResults" class="job-search-results" style="display:none;"></div>
-        </div>
-
-        <label for="companyFinderCountry">Or narrow to a whole country</label>
-        <select id="companyFinderCountry">
-          <option value="">Any country (use Location above)</option>
-        </select>
-        <p class="hint" style="margin-top:2px;">Picking a country here searches that entire country instead of the Location field above.</p>
-
-        <button type="button" class="primary" id="companyFinderSearchBtn" style="width:100%; margin-top:12px;">🔍 Search</button>
-      </div>
-
-      <div class="card glass" id="companyFinderResultsCard" style="margin-top:14px;">
-        <strong style="font-size:14px;">Results</strong>
-        <div id="companyFinderMapArea" style="height:220px; border-radius: var(--r-md); overflow:hidden; margin-top:10px; display:none;"></div>
-        <div id="companyFinderResults" style="margin-top:10px;"><div class="empty">Search above to see companies here.</div></div>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-<!-- Company Fleet brain-map: opened from a Company Finder result — shows a
-     ship builder/owner's vessels radiating out from the company itself, with
-     contact/website details and live position per vessel where known. -->
+<!-- Company Fleet brain-map: shows a ship builder/owner's vessels radiating
+     out from the company itself, with contact/website details and live
+     position per vessel where known. Used by AEON Ai's fleet lookup. -->
 <div id="companyFleetOverlayBackdrop" class="panel-overlay-backdrop"></div>
 <div id="companyFleetOverlay" class="panel-overlay">
   <div class="panel-shell">
@@ -1755,54 +1626,6 @@
           </div>
         </div>
         <button type="button" class="primary" id="fleetAddVesselBtn" style="width:100%; margin-top:12px;">➕ Add vessel</button>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-<!-- AREA WATCH — live "who's currently sitting here" view over any point,
-     via AIS (aisstream.io). Presets cover the major UAE shipyards/ports;
-     "Search any location" covers everywhere else (uses the same free
-     address search as Company Finder/Clients). Not a repair/build status —
-     just live position, which is the closest free legal proxy we have. -->
-<div id="areaWatchOverlayBackdrop" class="panel-overlay-backdrop"></div>
-<div id="areaWatchOverlay" class="panel-overlay">
-  <div class="panel-shell">
-    <div class="panel-header">
-      <strong>🛰️ Area Watch</strong>
-      <button type="button" class="ghost" data-close="areaWatch">✕</button>
-    </div>
-    <div class="panel-body">
-
-      <div class="card glass" id="areaWatchSearchCard">
-        <strong style="font-size:14px;">UAE shipyards &amp; ports</strong>
-        <p class="hint" style="margin-top:2px;">Tap one to see every vessel AIS currently hears there — or search any location below.</p>
-        <div id="areaWatchPresetGrid" class="mode-grid" style="margin-top:8px;"></div>
-
-        <label for="areaWatchLocation" style="margin-top:14px;">Or search any location</label>
-        <div style="position:relative;">
-          <input id="areaWatchLocation" type="text" placeholder="e.g. Jebel Ali Port, Dubai" autocomplete="off" />
-          <div id="areaWatchLocationResults" class="job-search-results" style="display:none;"></div>
-        </div>
-        <label for="areaWatchRadius">Radius</label>
-        <select id="areaWatchRadius">
-          <option value="1.5">1.5 km (a single berth/yard)</option>
-          <option value="3" selected>3 km (a whole shipyard/terminal)</option>
-          <option value="8">8 km (a whole port area)</option>
-        </select>
-        <button type="button" class="primary" id="areaWatchSearchBtn" style="width:100%; margin-top:12px;">🔍 Search this area</button>
-      </div>
-
-      <div class="card glass" id="areaWatchResultsCard" style="margin-top:14px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-          <strong style="font-size:14px;" id="areaWatchResultsTitle">Results</strong>
-          <button type="button" class="ghost" id="areaWatchLiveBtn" style="display:none; white-space:nowrap;">▶ Start Live Watch</button>
-        </div>
-        <p class="hint" style="margin-top:2px;">Vessel name, owner (when found in free databases) and live location — not a confirmed repair/build status. Green = sitting still, amber = under way, red (fading) = just left this area.</p>
-        <div id="areaWatchMapArea" style="height:220px; border-radius: var(--r-md); overflow:hidden; margin-top:10px; display:none;"></div>
-        <div id="areaWatchResults" style="margin-top:10px;"><div class="empty">Pick a shipyard/port above, or search a location, to see what's there now.</div></div>
-        <div id="areaWatchBrainMap" style="position:relative; margin-top:10px; display:none;"></div>
       </div>
 
     </div>

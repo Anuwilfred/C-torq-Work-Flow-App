@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.8';
+const APP_VERSION = 'v3.53.10';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Design Studio now shows the enquiry roadmap as a connected map: click any stage to expand it, and the Design department head can send a completed stage back for rework with a comment (the assignee is notified). Once every stage is done, a new follow-up section tracks the days waiting on the client decision and lets the head record Won or Rejected. Also fixed the Team list, Projects list, and Reports panel getting stuck on Loading — they now give up after a few seconds with a clear message and a Retry button, and the "Viewing report for" list can no longer go permanently blank after one slow load.';
+const APP_UPDATE_NOTES = 'Removed the Company Finder, Area Watch, and Quotations tiles/features. AEON Ai\'s fleet lookup (Company Fleet) and BOQ features are unaffected.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -3242,20 +3242,17 @@ const FEATURE_LIST = [
   { key: 'learning', label: 'Learning' },
   { key: 'health', label: 'Health Challenges' },
   { key: 'clients', label: 'Clients' },
-  { key: 'quotations', label: 'Quotations' },
   { key: 'tank', label: 'Project Tank' },
   { key: 'allocation', label: 'Job Allocation (allocate people & drivers to jobs)' },
   { key: 'datafeed', label: 'Data Feed (add/remove people & jobs, manage job types)' },
   { key: 'liveDrivers', label: 'Live Drivers (see driver locations)' },
   { key: 'appearance', label: 'Appearance (theme, background, daily quote)' },
   { key: 'renewal', label: 'My Document Renewal Status (AEON Ai can tell them their own passport, visa, work permit and other document expiry — never anyone else\'s)' },
-  { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money/quotations for this person)' },
+  { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money for this person)' },
   { key: 'profit', label: 'Profit Analyzer (project cost/profit breakdown, hourly rates, payments)' },
   { key: 'leaveRequest', label: 'Leave / Vacation requests (inside Special Request)' },
   { key: 'documentRequest', label: 'Request Document (inside Special Request)' },
   { key: 'fieldActivities', label: 'Field Activities (mission start/stop + client visit logging — for marketing/field people)' },
-  { key: 'companyFinder', label: 'Company Finder (search real companies by industry/location, add as Client) — private, off by default' },
-  { key: 'areaWatch', label: 'Area Watch (live AIS view of vessels currently at UAE shipyards/ports) — private, off by default' },
   { key: 'designStudio', label: 'Design Studio (Enquiry-to-Offer process flow) — normally only the Design department, grant here to add someone else' },
   { key: 'designFinalDocs', label: 'Design Studio — Final Technical Proposal & Offer documents (management-only stages)' },
 ];
@@ -3882,6 +3879,39 @@ $('backfillJobHoursBtn')?.addEventListener('click', async () => {
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     status.textContent = `Done — scanned ${data.entriesScanned} timesheet entries, updated ${data.rowsWritten} project-hour records.`;
     showToast('Job hours backfill complete.');
+  } catch (err) {
+    status.textContent = `Backfill failed: ${err.message || err}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// One-time (but safe-to-repeat) backfill for the Google Sheet's Description
+// column on the Timesheet tabs — sync-to-drive only started writing that
+// column going forward from the day the bug was fixed; every entry
+// submitted before that is still a blank cell in the Sheet even though the
+// text was there in GitHub the whole time. This calls a dedicated Edge
+// Function that matches each GitHub entry back to its already-synced Sheet
+// row (by Job ID + Date + Clock In Time) and fills in Description only
+// where that cell is still empty — never touches a cell that already has
+// something in it, so it's harmless to tap again (e.g. if a big backlog
+// needs more than one pass to finish within one run's time budget).
+$('backfillDescriptionsBtn')?.addEventListener('click', async () => {
+  const btn = $('backfillDescriptionsBtn');
+  const status = $('backfillDescriptionsStatus');
+  btn.disabled = true;
+  status.textContent = 'Scanning every past timesheet entry and matching it to its Sheet row — this can take a little while, and may need more than one tap on a team with a lot of history…';
+  try {
+    const { data: { session } } = await getSessionSafe();
+    const { data, error } = await withTimeout(
+      sb.functions.invoke('backfill-timesheet-descriptions', { headers: { Authorization: `Bearer ${session?.access_token}` } }),
+      120000,
+      'Description backfill'
+    );
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+    const more = data.ranOutOfTime ? ' Time budget reached before finishing everyone — tap again to continue where it left off.' : ' All caught up.';
+    status.textContent = `Done — checked ${data.entriesScanned} entries, filled in ${data.cellsFilled} blank Description cells, ${data.alreadyFilled} already had one, ${data.noMatch} had no matching Sheet row.${more}`;
+    showToast('Description backfill run complete.');
   } catch (err) {
     status.textContent = `Backfill failed: ${err.message || err}`;
   } finally {
@@ -5666,17 +5696,13 @@ const PANEL_IDS = {
   learning: ['learningOverlay', 'learningOverlayBackdrop'],
   health: ['healthOverlay', 'healthOverlayBackdrop'],
   clients: ['clientsOverlay', 'clientsOverlayBackdrop'],
-  quotations: ['quotationsOverlay', 'quotationsOverlayBackdrop'],
-  quotationDetail: ['quotationDetailOverlay', 'quotationDetailOverlayBackdrop'],
   profitAnalyzer: ['profitAnalyzerOverlay', 'profitAnalyzerOverlayBackdrop'],
   profitDetail: ['profitDetailOverlay', 'profitDetailOverlayBackdrop'],
   renewalManager: ['renewalManagerOverlay', 'renewalManagerOverlayBackdrop'],
   renewalEdit: ['renewalEditOverlay', 'renewalEditOverlayBackdrop'],
   renewalHistory: ['renewalHistoryOverlay', 'renewalHistoryOverlayBackdrop'],
   fieldActivities: ['fieldActivitiesOverlay', 'fieldActivitiesOverlayBackdrop'],
-  companyFinder: ['companyFinderOverlay', 'companyFinderOverlayBackdrop'],
   companyFleet: ['companyFleetOverlay', 'companyFleetOverlayBackdrop'],
-  areaWatch: ['areaWatchOverlay', 'areaWatchOverlayBackdrop'],
   tank: ['tankOverlay', 'tankOverlayBackdrop'],
   mapAccess: ['mapAccessOverlay', 'mapAccessOverlayBackdrop'],
   people: ['peopleOverlay', 'peopleOverlayBackdrop'],
@@ -5718,12 +5744,6 @@ function openPanel(name, opts = {}) {
     renderClientsList();
     wireNewClientAddressSearch();
   }
-  if (name === 'quotations') {
-    $('newQuotationCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
-    populateQuoteClientDropdown();
-    populateQuoteJobDropdown();
-    renderQuotationsList();
-  }
   if (name === 'tank') {
     renderTank();
   }
@@ -5753,26 +5773,6 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'fieldActivities') {
     renderFieldActivitiesPanel();
-  }
-  if (name === 'companyFinder') {
-    renderCompanyFinderIndustryChips();
-    populateCompanyFinderCountries();
-    wireAddressSearch('companyFinderLocation', 'companyFinderLocationResults');
-  }
-  if (name === 'areaWatch') {
-    renderAreaWatchPresets();
-    wireAddressSearch('areaWatchLocation', 'areaWatchLocationResults');
-    // Zero-click default: show real live data the instant the panel opens,
-    // no typing or extra tap needed — the very first thing the team asked
-    // for was "just show me the data, one click". Only auto-runs the first
-    // time; once something has been searched, reopening the panel keeps
-    // showing that instead of resetting back to the default port.
-    if (!areaWatchLastQuery && AREA_WATCH_PRESETS.length) {
-      const first = AREA_WATCH_PRESETS[0];
-      const firstChip = document.querySelector('#areaWatchPresetGrid [data-preset-idx="0"]');
-      if (firstChip) firstChip.classList.add('selected');
-      searchAreaWatch(first.lat, first.lng, first.radiusKm, first.label);
-    }
   }
   if (name === 'people') {
     renderTeamList();
@@ -5816,10 +5816,6 @@ function closePanel(name) {
   if (!ids) return;
   $(ids[0]).classList.remove('show');
   $(ids[1]).classList.remove('show');
-  // Live Watch polls AIS every 20s in the background — stop it the moment
-  // the panel closes so it doesn't keep running (and burning AIS lookups)
-  // once nobody's looking at it.
-  if (name === 'areaWatch' && typeof stopAreaWatchLive === 'function') stopAreaWatchLive();
 }
 document.querySelectorAll('[data-open]').forEach((btn) => {
   btn.addEventListener('click', () => openPanel(btn.dataset.open, { hideCreate: btn.dataset.hideCreate === 'true' }));
@@ -5836,9 +5832,6 @@ if ($('projectDetailBackBtn')) {
 }
 if ($('departmentDetailBackBtn')) {
   $('departmentDetailBackBtn').addEventListener('click', () => { closePanel('departmentDetail'); openPanel('departments'); });
-}
-if ($('quotationDetailBackBtn')) {
-  $('quotationDetailBackBtn').addEventListener('click', () => { closePanel('quotationDetail'); openPanel('quotations'); });
 }
 if ($('designEnquiryDetailBackBtn')) {
   $('designEnquiryDetailBackBtn').addEventListener('click', () => { closePanel('designEnquiryDetail'); openPanel('designStudio'); });
@@ -6383,7 +6376,6 @@ const TUTORIAL_STEPS = [
   { selector: '.home-tile[data-open="learning"]', icon: '🎓', title: 'Learning', text: 'Free courses and certifications — AI, coding, safety, PLC, HMI, and more.' },
   { selector: '.home-tile[data-open="health"]', icon: '💪', title: 'Health', text: 'Simple wellbeing tips and trusted health resources.' },
   { selector: '.home-tile[data-open="clients"]', icon: '🤝', title: 'Clients', text: 'Manage client records.' },
-  { selector: '.home-tile[data-open="quotations"]', icon: '🧾', title: 'Quotations', text: 'Create and track quotations and BOQs.' },
   { selector: '.home-tile[data-open="tank"]', icon: '🛢️', title: 'Project Tank', text: 'A quick visual read on your overall project pipeline.' },
   { selector: '.home-tile[data-open="allocation"]', icon: '🚚', title: 'Job Allocation', text: "See — or if you're an admin, publish — who's assigned to which job today." },
   { selector: '.home-tile[data-open="datafeed"]', icon: '📥', title: 'Data Feed', text: 'Add or remove people and jobs, and manage the job types/categories used everywhere else.' },
@@ -6672,7 +6664,7 @@ if ($('saveDepartmentHeadBtn')) {
 // admins can add/remove entries. Same pattern as Departments above.
 // =====================================================================
 
-let clientsCache = []; // [{id, name}] — reused by the quotation client picker
+let clientsCache = []; // [{id, name}]
 
 async function fetchClients() {
   try {
@@ -6727,7 +6719,7 @@ async function renderClientsList(isRetry = false) {
 
 // Lets an admin search a real address for an EXISTING client (new clients
 // get this at creation time via the Address field below) — reuses the
-// same Google Places text search that powers Company Finder.
+// same free address text search used elsewhere in the app.
 async function setClientLocation(clientId) {
   const q = prompt("Search an address for this client (e.g. 'Jebel Ali Free Zone, Dubai'):");
   if (!q || !q.trim()) return;
@@ -6775,204 +6767,6 @@ if ($('createClientBtn')) {
     addressInput.dataset.lon = '';
     renderClientsList();
     showToast('Client added.');
-  });
-}
-
-// =====================================================================
-// QUOTATIONS — draft/sent/accepted/rejected, each with its own line items.
-// Anyone signed in can browse; only admins can create, add items, or move
-// the status forward.
-// =====================================================================
-
-async function populateQuoteClientDropdown() {
-  const select = $('newQuoteClient');
-  if (!select) return;
-  const { rows } = await fetchClients();
-  clientsCache = rows;
-  select.innerHTML = '<option value="">Select a client</option>' +
-    rows.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
-}
-
-async function populateQuoteJobDropdown() {
-  const select = $('newQuoteJobId');
-  if (!select) return;
-  const { data, error } = await sb.from('projects').select('job_id, name').eq('status', 'active').order('job_id');
-  const rows = error ? [] : (data || []);
-  select.innerHTML = '<option value="">No project linked</option>' +
-    rows.map((r) => `<option value="${escapeHtml(r.job_id)}">${escapeHtml(r.job_id)}${r.name ? ' — ' + escapeHtml(r.name) : ''}</option>`).join('');
-}
-
-const QUOTE_STATUS_LABEL = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', rejected: 'Rejected' };
-const QUOTE_STATUS_CLASS = { draft: 'pending', sent: 'pending', accepted: 'synced', rejected: 'error' };
-
-async function fetchQuotations() {
-  try {
-    const { data, error } = await sb
-      .from('quotations')
-      .select('id, quote_number, title, status, job_id, issue_date, client_id, clients(name)')
-      .order('created_at', { ascending: false });
-    if (error) { console.error('fetchQuotations failed:', error); return { rows: [], error }; }
-    return { rows: data || [], error: null };
-  } catch (err) {
-    console.error('fetchQuotations threw:', err);
-    return { rows: [], error: err };
-  }
-}
-
-async function renderQuotationsList(isRetry = false) {
-  const wrap = $('quotationsListArea');
-  if (!wrap) return;
-  if (!isRetry) wrap.innerHTML = '<div class="empty">Loading…</div>';
-  const { rows, error } = await fetchQuotations();
-  if (error) {
-    if (!isRetry) { await new Promise((r) => setTimeout(r, 400)); return renderQuotationsList(true); }
-    wrap.innerHTML = `<div class="empty">Couldn't load quotations: ${escapeHtml(error.message || String(error))}</div>`;
-    return;
-  }
-  if (!rows.length) { wrap.innerHTML = '<div class="empty">No quotations yet.</div>'; return; }
-  wrap.innerHTML = rows.map((q) => `
-    <div class="entry" data-quote-row="${escapeHtml(q.id)}" data-quote-title="${escapeHtml(q.title || q.quote_number)}" style="cursor:pointer;">
-      <span class="type-icon">🧾</span>
-      <div class="entry-body">
-        <div class="entry-desc">${escapeHtml(q.quote_number)}${q.title ? ' — ' + escapeHtml(q.title) : ''}</div>
-        <div class="entry-meta">${escapeHtml(q.clients?.name || 'No client set')}${q.job_id ? ' · ' + escapeHtml(q.job_id) : ''}</div>
-      </div>
-      <span class="chip ${QUOTE_STATUS_CLASS[q.status] || ''}">${QUOTE_STATUS_LABEL[q.status] || q.status}</span>
-    </div>
-  `).join('');
-  wrap.querySelectorAll('[data-quote-row]').forEach((row) => {
-    row.addEventListener('click', () => openQuotationDetail(row.dataset.quoteRow));
-  });
-}
-
-if ($('createQuotationBtn')) {
-  $('createQuotationBtn').addEventListener('click', async () => {
-    const quoteNumber = $('newQuoteNumber').value.trim();
-    const clientId = $('newQuoteClient').value;
-    if (!quoteNumber) { showToast('Enter a quote number.'); return; }
-    if (!clientId) { showToast('Select a client.'); return; }
-    const { error } = await sb.from('quotations').insert({
-      quote_number: quoteNumber,
-      client_id: clientId,
-      job_id: $('newQuoteJobId').value || null,
-      title: $('newQuoteTitle').value.trim() || null,
-      created_by: currentUser.id,
-    });
-    if (error) { showToast(`Couldn't create quotation: ${error.message}`); return; }
-    ['newQuoteNumber', 'newQuoteTitle'].forEach((id) => { $(id).value = ''; });
-    renderQuotationsList();
-    showToast('Quotation created.');
-  });
-}
-
-let currentQuotationId = null;
-
-async function openQuotationDetail(quotationId) {
-  currentQuotationId = quotationId;
-  $('quotationDetailTitle').textContent = 'Quotation';
-  $('quotationDetailClient').textContent = '—';
-  $('quotationDetailMeta').textContent = '—';
-  $('quotationStatusBadge').innerHTML = '';
-  $('quotationItemsArea').innerHTML = '<div class="empty">Loading…</div>';
-  $('quotationTotalRow').innerHTML = '';
-  openPanel('quotationDetail');
-
-  const { data: q, error } = await sb
-    .from('quotations')
-    .select('id, quote_number, title, status, job_id, issue_date, clients(name)')
-    .eq('id', quotationId)
-    .single();
-  if (error || !q) {
-    $('quotationItemsArea').innerHTML = `<div class="empty">Couldn't load this quotation: ${escapeHtml(error?.message || 'not found')}</div>`;
-    return;
-  }
-  $('quotationDetailTitle').textContent = q.quote_number;
-  $('quotationDetailClient').textContent = q.title ? `${q.title}` : q.quote_number;
-  $('quotationDetailMeta').textContent = `${q.clients?.name || 'No client set'}${q.job_id ? ' · ' + q.job_id : ''} · ${q.issue_date || ''}`;
-  $('quotationStatusBadge').innerHTML = `<span class="chip ${QUOTE_STATUS_CLASS[q.status] || ''}">${QUOTE_STATUS_LABEL[q.status] || q.status}</span>`;
-
-  const isAdmin = currentProfile?.role === 'admin';
-  $('newQuoteItemCard').style.display = isAdmin ? 'block' : 'none';
-  $('quotationStatusButtons').style.display = (isAdmin && q.status !== 'accepted' && q.status !== 'rejected') ? 'grid' : 'none';
-  $('quotationRejectBtn').style.display = (isAdmin && q.status !== 'accepted' && q.status !== 'rejected') ? 'block' : 'none';
-
-  renderQuotationItems(quotationId);
-}
-
-async function renderQuotationItems(quotationId) {
-  const wrap = $('quotationItemsArea');
-  const { data: items, error } = await sb
-    .from('quotation_items')
-    .select('*')
-    .eq('quotation_id', quotationId)
-    .order('sort_order', { ascending: true });
-  if (error) {
-    wrap.innerHTML = `<div class="empty">Couldn't load line items: ${escapeHtml(error.message)}</div>`;
-    return;
-  }
-  const rows = items || [];
-  const isAdmin = currentProfile?.role === 'admin';
-  if (!rows.length) {
-    wrap.innerHTML = '<div class="empty">No line items yet.</div>';
-  } else {
-    let total = 0;
-    wrap.innerHTML = rows.map((it) => {
-      const amount = Number(it.quantity) * Number(it.unit_price);
-      total += amount;
-      return `
-        <div class="entry" data-quote-item="${escapeHtml(it.id)}">
-          <div class="entry-body">
-            <div class="entry-desc">${escapeHtml(it.description)}</div>
-            <div class="entry-meta">${it.quantity} × ${it.unit_price} = ${amount.toFixed(2)}</div>
-          </div>
-          ${isAdmin ? `<button type="button" class="ghost" data-delete-quote-item="${escapeHtml(it.id)}">✕</button>` : ''}
-        </div>
-      `;
-    }).join('');
-    $('quotationTotalRow').innerHTML = `<strong style="font-size:14px;">Total: ${total.toFixed(2)}</strong>`;
-    wrap.querySelectorAll('[data-delete-quote-item]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        await sb.from('quotation_items').delete().eq('id', btn.dataset.deleteQuoteItem);
-        renderQuotationItems(quotationId);
-      });
-    });
-  }
-  if (!rows.length) $('quotationTotalRow').innerHTML = '';
-}
-
-if ($('addQuoteItemBtn')) {
-  $('addQuoteItemBtn').addEventListener('click', async () => {
-    if (!currentQuotationId) return;
-    const description = $('quoteItemDescription').value.trim();
-    if (!description) { showToast('Enter a description.'); return; }
-    const quantity = parseFloat($('quoteItemQuantity').value) || 1;
-    const unitPrice = parseFloat($('quoteItemUnitPrice').value) || 0;
-    const { error } = await sb.from('quotation_items').insert({
-      quotation_id: currentQuotationId,
-      description,
-      quantity,
-      unit_price: unitPrice,
-    });
-    if (error) { showToast(`Couldn't add item: ${error.message}`); return; }
-    ['quoteItemDescription', 'quoteItemQuantity', 'quoteItemUnitPrice'].forEach((id) => { $(id).value = ''; });
-    renderQuotationItems(currentQuotationId);
-  });
-}
-
-document.querySelectorAll('[data-quote-status]').forEach((btn) => {
-  btn.addEventListener('click', async () => {
-    if (!currentQuotationId) return;
-    await sb.from('quotations').update({ status: btn.dataset.quoteStatus }).eq('id', currentQuotationId);
-    openQuotationDetail(currentQuotationId);
-    renderQuotationsList();
-  });
-});
-if ($('quotationRejectBtn')) {
-  $('quotationRejectBtn').addEventListener('click', async () => {
-    if (!currentQuotationId) return;
-    await sb.from('quotations').update({ status: 'rejected' }).eq('id', currentQuotationId);
-    openQuotationDetail(currentQuotationId);
-    renderQuotationsList();
   });
 }
 
@@ -10262,28 +10056,16 @@ async function fetchAllPaginated(table, selectStr, applyFilters) {
   return all;
 }
 
-// Quoted price: prefers the accepted Quotation for this job (falling back
-// to the most recent Quotation of any status), and falls back to the BOQ
-// total if this job has no Quotation at all — some projects are quoted one
-// way, some the other.
+// Quoted price: prefers the JOB DATA sheet's quoted price for this job, and
+// falls back to the BOQ total if the sheet hasn't quoted it yet.
 async function fetchQuotedPrice(jobId) {
   // Sheet-sourced quote (JOB DATA "Quoted price" column, synced straight into
-  // projects.quoted_price by sync-job-hours) is now the primary source — no
-  // manual entry needed. Only fall back to the old manual Quotation/BOQ
-  // derivation for jobs the sheet hasn't quoted yet.
+  // projects.quoted_price by sync-job-hours) is the primary source — no
+  // manual entry needed. Only fall back to the BOQ derivation for jobs the
+  // sheet hasn't quoted yet.
   const { data: proj } = await sb.from('projects').select('quoted_price').eq('job_id', jobId).maybeSingle();
   if (proj && proj.quoted_price !== null && proj.quoted_price !== undefined && Number(proj.quoted_price) > 0) {
     return { source: 'sheet', amount: Number(proj.quoted_price) || 0 };
-  }
-  const { data: quotes } = await sb.from('quotations')
-    .select('id, status, issue_date')
-    .eq('job_id', jobId)
-    .order('issue_date', { ascending: false });
-  if (quotes && quotes.length) {
-    const chosen = quotes.find((q) => q.status === 'accepted') || quotes[0];
-    const { data: items } = await sb.from('quotation_items').select('quantity, unit_price').eq('quotation_id', chosen.id);
-    const amount = (items || []).reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
-    return { source: 'quotation', amount };
   }
   const { data: boq } = await sb.from('boq_items').select('quantity, unit_rate').eq('job_id', jobId);
   if (boq && boq.length) {
@@ -10732,7 +10514,7 @@ async function renderProfitDetail(jobId, jobName) {
   body.innerHTML = `
     <div class="profit-stat-grid">
       <div class="profit-stat-card">
-        <div class="hint">💵 Quoted price${data.quoted.source ? ` (${data.quoted.source === 'sheet' ? 'JOB DATA sheet' : data.quoted.source === 'quotation' ? 'Quotation' : 'BOQ'})` : ''}</div>
+        <div class="hint">💵 Quoted price${data.quoted.source ? ` (${data.quoted.source === 'sheet' ? 'JOB DATA sheet' : 'BOQ'})` : ''}</div>
         <div class="profit-stat-value">${formatUSD(data.expected)}</div>
       </div>
       <div class="profit-stat-card">
@@ -13852,12 +13634,12 @@ async function renderFieldActivitiesPanel() {
 }
 
 // =====================================================================
-// COMPANY SEARCH — powers Company Finder (search real companies worldwide
-// by industry + location) and address search for Clients. Uses OpenStreet-
-// Map's free Nominatim search (the same free, no-key service already used
-// elsewhere in this app for reverse-geocoding clock-in/out locations) —
-// no API key, no billing account, $0, and searches run entirely inside
-// this app rather than opening Chrome/Google Maps.
+// COMPANY SEARCH — free address/company text search used by the Clients
+// address picker (setClientLocation) and Field Activities location search.
+// Uses OpenStreetMap's free Nominatim search (the same free, no-key service
+// already used elsewhere in this app for reverse-geocoding clock-in/out
+// locations) — no API key, no billing account, $0, and searches run
+// entirely inside this app rather than opening Chrome/Google Maps.
 // TRADE-OFF: OSM's listings are community-submitted, not a paid business
 // directory — well-known/larger companies and named landmarks usually
 // show up, but a specific small or specialized business may not be listed
@@ -13866,7 +13648,7 @@ async function renderFieldActivitiesPanel() {
 // If richer, more complete coverage is ever needed, this is the one place
 // that would need to change — swap the fetch below for a paid provider
 // (e.g. Google Places) and keep returning the same { ok, places, error }
-// shape so nothing else in Company Finder or Clients has to change.
+// shape so nothing else that calls it has to change.
 // =====================================================================
 
 async function companyTextSearch(query, { maxResults = 12 } = {}) {
@@ -13892,196 +13674,9 @@ async function companyTextSearch(query, { maxResults = 12 } = {}) {
 }
 
 // =====================================================================
-// COMPANY FINDER — search real companies worldwide by industry + location
-// (marine, oil & gas, manufacturers, shipping, ship builders, integration,
-// cloud, or a custom keyword), see them on a map, and save any of them
-// straight into Clients with one tap — ready for a Field Activities visit.
-// =====================================================================
-
-const COMPANY_FINDER_INDUSTRIES = [
-  { label: 'Marine Industries', emoji: '🚢' },
-  { label: 'Oil & Gas', emoji: '🛢️' },
-  { label: 'Manufacturers', emoji: '🏭' },
-  { label: 'Shipping Companies', emoji: '📦' },
-  { label: 'Ship Builders', emoji: '⚓' },
-  { label: 'Integration Companies', emoji: '🔧' },
-  { label: 'Cloud Companies', emoji: '☁️' },
-];
-
-let companyFinderSelectedIndustry = '';
-let companyFinderResults = [];
-let companyFinderMapInstance = null;
-
-// Full country list for the "narrow to a whole country" dropdown — plain
-// English names, since that's what gets appended straight into the OSM
-// Nominatim text search query (e.g. "Ship Builders companies in Norway").
-const COMPANY_FINDER_COUNTRIES = [
-  'United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Bahrain', 'Kuwait', 'Oman',
-  'India', 'Pakistan', 'Bangladesh', 'Sri Lanka', 'Singapore', 'Malaysia',
-  'Indonesia', 'Philippines', 'Vietnam', 'Thailand', 'China', 'Hong Kong',
-  'Taiwan', 'South Korea', 'Japan',
-  'United Kingdom', 'Ireland', 'Norway', 'Sweden', 'Denmark', 'Finland',
-  'Netherlands', 'Belgium', 'Germany', 'France', 'Spain', 'Portugal', 'Italy',
-  'Greece', 'Cyprus', 'Malta', 'Turkey', 'Poland', 'Croatia', 'Switzerland',
-  'United States', 'Canada', 'Mexico', 'Brazil', 'Argentina', 'Chile',
-  'Panama', 'Bahamas', 'Liberia', 'Marshall Islands',
-  'Egypt', 'Nigeria', 'South Africa', 'Kenya', 'Morocco', 'Algeria',
-  'Australia', 'New Zealand',
-  'Russia', 'Ukraine', 'Iran', 'Iraq', 'Israel', 'Jordan', 'Lebanon',
-].sort();
-
-function populateCompanyFinderCountries() {
-  const sel = $('companyFinderCountry');
-  if (!sel || sel.dataset.built) return;
-  sel.dataset.built = '1';
-  sel.insertAdjacentHTML('beforeend', COMPANY_FINDER_COUNTRIES.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join(''));
-}
-
-function renderCompanyFinderIndustryChips() {
-  const wrap = $('companyFinderIndustryGrid');
-  if (!wrap || wrap.dataset.built) return; // build once — the grid itself never changes
-  wrap.dataset.built = '1';
-  wrap.innerHTML = COMPANY_FINDER_INDUSTRIES.map((i) => `
-    <div class="doc-type-chip" data-industry-label="${escapeHtml(i.label)}"><span class="emoji">${i.emoji}</span>${escapeHtml(i.label)}</div>
-  `).join('');
-  wrap.querySelectorAll('[data-industry-label]').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      wrap.querySelectorAll('[data-industry-label]').forEach((c) => c.classList.toggle('selected', c === chip));
-      companyFinderSelectedIndustry = chip.dataset.industryLabel;
-      if ($('companyFinderKeyword')) $('companyFinderKeyword').value = '';
-    });
-  });
-}
-
-if ($('companyFinderSearchBtn')) {
-  $('companyFinderSearchBtn').addEventListener('click', async () => {
-    const country = $('companyFinderCountry')?.value || '';
-    const location = country || $('companyFinderLocation').value.trim() || 'Dubai, UAE';
-    const keyword = $('companyFinderKeyword').value.trim();
-    const industry = keyword || companyFinderSelectedIndustry;
-    if (!industry) { showToast('Pick an industry, or type your own keyword.'); return; }
-    const btn = $('companyFinderSearchBtn');
-    const resultsEl = $('companyFinderResults');
-    btn.disabled = true;
-    btn.textContent = '🔍 Searching…';
-    resultsEl.innerHTML = '<div class="empty">Searching…</div>';
-    // A typed keyword is very often a specific real name (e.g. "Drydocks
-    // World"), not a category — wrapping it as "X companies in Y" turns a
-    // real, findable place into a nonsense phrase nothing matches ("Drydocks
-    // World companies in Dubai, UAE"). Only apply that category-style
-    // wrapping when searching by a picked industry tile; a typed name is
-    // searched as itself, just with the location appended for context.
-    const query = keyword ? `${keyword}, ${location}` : `${industry} companies in ${location}`;
-    const { ok, places, error } = await companyTextSearch(query);
-    btn.disabled = false;
-    btn.textContent = '🔍 Search';
-    if (!ok) { resultsEl.innerHTML = `<div class="empty">${escapeHtml(error)}</div>`; return; }
-    companyFinderResults = places;
-    renderCompanyFinderResults();
-  });
-}
-
-async function renderCompanyFinderResults() {
-  const resultsEl = $('companyFinderResults');
-  const mapWrap = $('companyFinderMapArea');
-  if (!resultsEl) return;
-  if (!companyFinderResults.length) {
-    resultsEl.innerHTML = '<div class="empty">No companies found — try a different industry or location.</div>';
-    if (mapWrap) mapWrap.style.display = 'none';
-    return;
-  }
-
-  const placeIds = companyFinderResults.map((p) => p.id).filter(Boolean);
-  const { data: existing } = await sb.from('clients').select('place_id').in('place_id', placeIds);
-  const existingSet = new Set((existing || []).map((r) => r.place_id));
-
-  resultsEl.innerHTML = companyFinderResults.map((p, idx) => {
-    const already = existingSet.has(p.id);
-    return `
-      <div class="entry" style="align-items:flex-start;">
-        <span class="type-icon">🏢</span>
-        <div class="entry-body">
-          <div class="entry-desc">${escapeHtml(p.displayName?.text || 'Unnamed company')}</div>
-          <div class="entry-meta">${escapeHtml(p.formattedAddress || '')}</div>
-          ${p.internationalPhoneNumber ? `<div class="entry-meta">📞 ${escapeHtml(p.internationalPhoneNumber)}</div>` : ''}
-          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            ${p.websiteUri ? `<a class="secondary" style="text-decoration:none; text-align:center; padding:8px 12px; border-radius:10px;" href="${escapeHtml(p.websiteUri)}" target="_blank" rel="noopener">🌐 Website</a>` : ''}
-            <button type="button" class="primary" style="margin-top:0;" data-add-company="${idx}" ${already ? 'disabled' : ''}>${already ? '✅ Already a client' : '➕ Add as Client'}</button>
-            <button type="button" class="secondary" style="margin-top:0;" data-view-fleet="${idx}">🧠 View Fleet</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  resultsEl.querySelectorAll('[data-add-company]').forEach((btn) => {
-    btn.addEventListener('click', () => addCompanyAsClient(Number(btn.dataset.addCompany), btn));
-  });
-  resultsEl.querySelectorAll('[data-view-fleet]').forEach((btn) => {
-    btn.addEventListener('click', () => openCompanyFleet(companyFinderResults[Number(btn.dataset.viewFleet)]));
-  });
-
-  renderCompanyFinderMap();
-}
-
-async function addCompanyAsClient(idx, btn) {
-  const p = companyFinderResults[idx];
-  if (!p) return;
-  btn.disabled = true;
-  btn.textContent = 'Adding…';
-  try {
-    const { error } = await sb.from('clients').insert({
-      name: p.displayName?.text || 'Unnamed company',
-      address: p.formattedAddress || null,
-      lat: p.location?.latitude ?? null,
-      lng: p.location?.longitude ?? null,
-      phone: p.internationalPhoneNumber || null,
-      website: p.websiteUri || null,
-      industry: companyFinderSelectedIndustry || null,
-      source: 'openstreetmap',
-      place_id: p.id,
-      created_by: currentUser.id,
-    });
-    if (error) throw error;
-    btn.textContent = '✅ Added';
-    showToast(`${p.displayName?.text || 'Company'} added to Clients.`);
-    clientsCache = []; // stale — force a refresh next time it's needed
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = '➕ Add as Client';
-    showToast(`Couldn't add: ${err.message || err}`);
-  }
-}
-
-async function renderCompanyFinderMap() {
-  const mapWrap = $('companyFinderMapArea');
-  if (!mapWrap) return;
-  const points = companyFinderResults.filter((p) => p.location?.latitude && p.location?.longitude);
-  if (!points.length || typeof L === 'undefined') { mapWrap.style.display = 'none'; return; }
-  mapWrap.style.display = 'block';
-  if (!companyFinderMapInstance) {
-    companyFinderMapInstance = L.map(mapWrap);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-      attribution: 'Tiles © Esri',
-    }).addTo(companyFinderMapInstance);
-    companyFinderMapInstance._markerLayer = L.layerGroup().addTo(companyFinderMapInstance);
-  }
-  companyFinderMapInstance._markerLayer.clearLayers();
-  points.forEach((p) => {
-    const marker = L.marker([p.location.latitude, p.location.longitude]).addTo(companyFinderMapInstance._markerLayer);
-    marker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(p.displayName?.text || '')}</b><br>${escapeHtml(p.formattedAddress || '')}</div>`);
-  });
-  const bounds = L.latLngBounds(points.map((p) => [p.location.latitude, p.location.longitude]));
-  setTimeout(() => {
-    companyFinderMapInstance.invalidateSize();
-    companyFinderMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
-  }, 50);
-}
-
-// =====================================================================
-// COMPANY FLEET BRAIN-MAP — opened from a Company Finder result (ship
-// builder / vessel owner / shipping company). Shows the company as a hub
+// COMPANY FLEET BRAIN-MAP — opened from AEON Ai's fleet lookup chat
+// feature (ship builder / vessel owner / shipping company). Shows the
+// company as a hub
 // with its vessels radiating out, each with IMO/MMSI and, where a live
 // lookup succeeds, its most recent AIS position. Data comes from two
 // places, both shown with a small badge so the sales team knows which is
@@ -14433,355 +14028,6 @@ async function fetchWikidataFleet(companyName) {
   }
 }
 
-// =====================================================================
-// AREA WATCH — live "who's currently sitting here" over any point, via the
-// same aisstream.io feed as the fleet brain-map's Locate button, but as an
-// area search instead of a single-vessel lookup. Presets cover the major
-// UAE shipyards/ports (from the "we need all the Dubai service centres
-// like DMC, Drydocks, etc." request); "search any location" (reusing the
-// same free Nominatim address search as Company Finder/Clients) covers
-// everywhere else. This is the closest free/legal proxy to "who's in for
-// repair or build" — AIS only reports position, not why a vessel is
-// somewhere, so results are a lead to follow up on, not a confirmed status.
-// =====================================================================
-
-const AREA_WATCH_PRESETS = [
-  { label: 'Drydocks World, Dubai', lat: 25.2686, lng: 55.2708, radiusKm: 3 },
-  { label: 'Dubai Maritime City (DMC)', lat: 25.2441, lng: 55.2820, radiusKm: 3 },
-  { label: 'Jebel Ali Port', lat: 25.0134, lng: 55.0617, radiusKm: 8 },
-  { label: 'Khalifa Port, Abu Dhabi', lat: 24.8073, lng: 54.6339, radiusKm: 8 },
-  { label: 'Port Khalid, Sharjah', lat: 25.3600, lng: 55.3550, radiusKm: 3 },
-  { label: 'Saqr Port, Ras Al Khaimah', lat: 25.7300, lng: 55.9400, radiusKm: 3 },
-];
-
-let areaWatchMapInstance = null;
-// Per-area vessel tracking, keyed by MMSI, so a repeated search of the SAME
-// area (manual re-search, or Live Watch polling) can tell "still here" from
-// "just arrived" from "just left" — reset whenever the searched area itself
-// changes, since comparing vessels across two different ports isn't
-// meaningful. { marker, ...latest vessel fields, departing, status, isNew }
-let areaWatchKnownVessels = new Map();
-// Separate from the above and NEVER reset — a light cross-port memory so
-// that if a vessel that left one port later turns up in a different one the
-// team happens to search, we can say so ("last seen at X"). Session-only
-// (in-memory), not saved anywhere.
-let areaWatchGlobalHistory = new Map(); // mmsi -> { area, seenAt }
-let areaWatchCurrentLabel = null;
-let areaWatchLastQuery = null; // { lat, lng, radiusKm, label } — lets Live Watch repeat the last search
-let areaWatchLiveTimer = null;
-let areaWatchLiveActive = false;
-const AREA_WATCH_POLL_MS = 20000; // each refresh already spends ~12s listening to AIS + a Wikidata lookup, so polling faster than this would just overlap requests
-const AREA_WATCH_STATIONARY_KNOTS = 0.4; // AIS speed noise for a moored vessel rarely drifts above this
-
-function renderAreaWatchPresets() {
-  const wrap = $('areaWatchPresetGrid');
-  if (!wrap || wrap.dataset.built) return;
-  wrap.dataset.built = '1';
-  wrap.innerHTML = AREA_WATCH_PRESETS.map((p, i) => `
-    <div class="doc-type-chip" data-preset-idx="${i}"><span class="emoji">⚓</span>${escapeHtml(p.label)}</div>
-  `).join('');
-  wrap.querySelectorAll('[data-preset-idx]').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      wrap.querySelectorAll('[data-preset-idx]').forEach((c) => c.classList.toggle('selected', c === chip));
-      const preset = AREA_WATCH_PRESETS[Number(chip.dataset.presetIdx)];
-      if ($('areaWatchLocation')) { $('areaWatchLocation').value = ''; $('areaWatchLocation').dataset.lat = ''; $('areaWatchLocation').dataset.lon = ''; }
-      if ($('areaWatchRadius')) $('areaWatchRadius').value = String(preset.radiusKm);
-      searchAreaWatch(preset.lat, preset.lng, preset.radiusKm, preset.label);
-    });
-  });
-}
-
-async function searchAreaWatch(lat, lng, radiusKm, label) {
-  areaWatchLastQuery = { lat, lng, radiusKm, label };
-  const resultsEl = $('areaWatchResults');
-  const titleEl = $('areaWatchResultsTitle');
-  const liveBtn = $('areaWatchLiveBtn');
-  if (titleEl) titleEl.textContent = `Results — ${label}`;
-  if (liveBtn) liveBtn.style.display = 'inline-block';
-  // A Live Watch poll re-fetches quietly in the background — no "Listening…"
-  // wipe of the list and no disabling the search button, since the whole
-  // point is that the existing cards/map keep showing while it refreshes.
-  const isBackgroundPoll = areaWatchLiveActive;
-  if (!isBackgroundPoll && resultsEl) resultsEl.innerHTML = '<div class="empty">Listening for AIS positions in this area (a few seconds)…</div>';
-  const btn = $('areaWatchSearchBtn');
-  if (btn && !isBackgroundPoll) { btn.disabled = true; btn.textContent = '…'; }
-  try {
-    const { data, error } = await sb.functions.invoke('get-area-vessels', { body: { lat, lng, radiusKm } });
-    if (error) throw error;
-    if (data?.ok === false && data?.error) {
-      if (!isBackgroundPoll && resultsEl) resultsEl.innerHTML = `<div class="empty">${escapeHtml(data.error)}</div>`;
-      return;
-    }
-    renderAreaWatchResults(data?.vessels || [], lat, lng, label);
-  } catch (err) {
-    if (!isBackgroundPoll && resultsEl) resultsEl.innerHTML = `<div class="empty">Couldn't reach live AIS right now — ${escapeHtml(err.message || String(err))}</div>`;
-  } finally {
-    if (btn && !isBackgroundPoll) { btn.disabled = false; btn.textContent = '🔍 Search this area'; }
-  }
-}
-
-function areaWatchStatus(v) {
-  return (v.speedKnots != null && v.speedKnots > AREA_WATCH_STATIONARY_KNOTS) ? 'underway' : 'docked';
-}
-
-function areaWatchStatusColor(status) {
-  return status === 'underway' ? '#f2b755' : (status === 'departed' ? '#f27d70' : '#63d197');
-}
-
-// Same curved-branch hub diagram as the Company Fleet brain-map (see
-// renderFleetBrainMap / FLEET_BRANCH_COLORS above), reused here so "what's
-// live in this area" reads as one connected picture instead of a flat list —
-// the branch/border color is each vessel's live STATUS, not a fixed palette,
-// since status is the thing worth seeing at a glance here.
-function renderAreaWatchBrainMap(vesselList, label) {
-  const wrap = $('areaWatchBrainMap');
-  if (!wrap) return;
-  const n = vesselList.length;
-  if (!n) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
-  wrap.style.display = 'block';
-  const W = wrap.clientWidth || 320;
-  const H = Math.max(260, Math.min(560, 100 + n * 40));
-  wrap.style.height = `${H}px`;
-  const cx = W / 2, cy = H / 2;
-  const radius = Math.max(90, Math.min(W, H) / 2 - 78);
-
-  let linesSvg = '';
-  let nodesHtml = '';
-  vesselList.forEach((v, i) => {
-    const color = areaWatchStatusColor(v.status);
-    const angle = (2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2;
-    const x = Math.round(cx + radius * Math.cos(angle));
-    const y = Math.round(cy + radius * Math.sin(angle));
-    const dx = x - cx, dy = y - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    const bow = len * 0.18;
-    const ctrlX = Math.round((cx + x) / 2 - (dy / len) * bow);
-    const ctrlY = Math.round((cy + y) / 2 + (dx / len) * bow);
-    linesSvg += `<path d="M ${cx} ${cy} Q ${ctrlX} ${ctrlY} ${x} ${y}" fill="none" stroke="${color}" stroke-width="2" opacity="${v.status === 'departed' ? '0.35' : '0.75'}" />`;
-
-    const statusLabel = v.status === 'underway' ? 'Under way' : (v.status === 'departed' ? 'Just left' : 'Docked');
-    nodesHtml += `
-      <div class="fleet-vessel-node${v.status === 'departed' ? ' area-watch-node-departing' : ''}${v.isNew ? ' arriving' : ''}" style="left:${x}px; top:${y}px; border-left: 3px solid ${color};">
-        <span class="area-watch-status-chip ${v.status}">${statusLabel}</span>
-        <div class="fleet-vessel-name">🚢 ${escapeHtml(v.name || 'Unnamed vessel')}</div>
-        <div class="fleet-vessel-meta">🏢 ${v.owner ? escapeHtml(v.owner) : 'Owner not found'}</div>
-        <div class="fleet-vessel-meta">MMSI ${escapeHtml(v.mmsi)}${v.imo ? ` · IMO ${escapeHtml(v.imo)}` : ''}</div>
-        <div class="fleet-vessel-meta fleet-vessel-pos">${v.speedKnots != null ? `${Number(v.speedKnots).toFixed(1)} kn` : ''}</div>
-        ${v.arrivedFromElsewhere ? `<div class="fleet-vessel-meta">↪ last seen at ${escapeHtml(v.arrivedFromElsewhere)}</div>` : ''}
-      </div>`;
-  });
-
-  const docked = vesselList.filter((v) => v.status === 'docked').length;
-  const underway = vesselList.filter((v) => v.status === 'underway').length;
-
-  wrap.innerHTML = `
-    <svg width="${W}" height="${H}" style="position:absolute; left:0; top:0; pointer-events:none;">${linesSvg}</svg>
-    <div class="fleet-hub-node" style="left:${cx}px; top:${cy}px;">
-      <div class="fleet-hub-icon">⚓</div>
-      <div class="fleet-hub-name">${escapeHtml(label)}</div>
-      <div class="fleet-hub-meta">${n} vessel${n === 1 ? '' : 's'} · ${docked} docked, ${underway} under way</div>
-    </div>
-    ${nodesHtml}
-  `;
-}
-
-// A small ship-arrow marker, coloured by status and rotated to point the way
-// the vessel is actually heading (when AIS gave us one) instead of every
-// marker facing the same fixed direction — the "realistic" part of the ask.
-function areaWatchShipIcon(status, course) {
-  const color = status === 'underway' ? '#f2b755' : (status === 'departed' ? '#f27d70' : '#63d197');
-  const rotation = typeof course === 'number' ? course : 0;
-  return L.divIcon({
-    className: 'area-watch-ship-icon',
-    html: `<div style="width:22px; height:22px; transform: rotate(${rotation}deg); transition: transform 1s linear;">
-      <svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 1 L20 21 L12 16.5 L4 21 Z" fill="${color}" stroke="rgba(0,0,0,0.35)" stroke-width="1"/></svg>
-    </div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
-// Slides a marker to its new position over time instead of snapping there —
-// between two Live Watch refreshes this reads as the vessel actually moving,
-// not teleporting.
-function animateAreaWatchMarker(marker, toLat, toLng, durationMs) {
-  const from = marker.getLatLng();
-  if (Math.abs(from.lat - toLat) < 0.00002 && Math.abs(from.lng - toLng) < 0.00002) return;
-  const start = performance.now();
-  function step(now) {
-    const t = Math.min(1, (now - start) / durationMs);
-    marker.setLatLng([from.lat + (toLat - from.lat) * t, from.lng + (toLng - from.lng) * t]);
-    if (t < 1) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
-
-function renderAreaWatchResults(vessels, centerLat, centerLng, label) {
-  const resultsEl = $('areaWatchResults');
-  if (!resultsEl) return;
-  const mapWrap = $('areaWatchMapArea');
-  const mapReady = !!mapWrap && typeof L !== 'undefined';
-
-  // Switching to a different area (not just refreshing the same one) starts
-  // clean — comparing "who's still here" only makes sense within one place.
-  if (label !== areaWatchCurrentLabel) {
-    if (areaWatchMapInstance?._markerLayer) areaWatchMapInstance._markerLayer.clearLayers();
-    if (areaWatchMapInstance) areaWatchMapInstance._centerMarker = null;
-    areaWatchKnownVessels = new Map();
-    areaWatchCurrentLabel = label;
-  }
-
-  if (mapReady && !areaWatchMapInstance) {
-    areaWatchMapInstance = L.map(mapWrap);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-      attribution: 'Tiles © Esri',
-    }).addTo(areaWatchMapInstance);
-    areaWatchMapInstance._markerLayer = L.layerGroup().addTo(areaWatchMapInstance);
-    areaWatchMapInstance._centerMarker = null;
-  }
-
-  const seenMmsi = new Set(vessels.map((v) => v.mmsi));
-
-  // Anyone we knew about last refresh who isn't in this one has left the
-  // area — turn the marker/branch red, fade it out on the brain-map, then
-  // drop it. They may well be the same vessel that turns up if the team
-  // checks another port.
-  areaWatchKnownVessels.forEach((known, mmsi) => {
-    if (seenMmsi.has(mmsi) || known.departing) return;
-    known.departing = true;
-    known.status = 'departed';
-    known.isNew = false;
-    if (known.marker) known.marker.setIcon(areaWatchShipIcon('departed', known.course));
-    setTimeout(() => {
-      const still = areaWatchKnownVessels.get(mmsi);
-      if (still && still.departing) {
-        if (still.marker && areaWatchMapInstance?._markerLayer) areaWatchMapInstance._markerLayer.removeLayer(still.marker);
-        areaWatchKnownVessels.delete(mmsi);
-      }
-      renderAreaWatchBrainMap([...areaWatchKnownVessels.values()], areaWatchCurrentLabel || label);
-    }, 1400);
-  });
-
-  const points = mapReady ? [[centerLat, centerLng]] : [];
-
-  vessels.forEach((v) => {
-    const status = areaWatchStatus(v);
-    const wasKnownHere = areaWatchKnownVessels.has(v.mmsi);
-    const priorSighting = areaWatchGlobalHistory.get(v.mmsi);
-    const arrivedFromElsewhere = !wasKnownHere && priorSighting && priorSighting.area !== label ? priorSighting.area : null;
-    areaWatchGlobalHistory.set(v.mmsi, { area: label, seenAt: Date.now() });
-
-    let known = areaWatchKnownVessels.get(v.mmsi);
-    if (!known) {
-      known = { marker: null };
-      areaWatchKnownVessels.set(v.mmsi, known);
-    }
-    known.departing = false;
-    Object.assign(known, v, { status, isNew: !wasKnownHere, arrivedFromElsewhere });
-
-    if (mapReady) {
-      points.push([v.lat, v.lng]);
-      const statusLabel = status === 'underway' ? 'Under way' : 'Docked / stationary';
-      if (!known.marker) {
-        known.marker = L.marker([v.lat, v.lng], { icon: areaWatchShipIcon(status, v.course) }).addTo(areaWatchMapInstance._markerLayer);
-      } else {
-        known.marker.setIcon(areaWatchShipIcon(status, v.course));
-        animateAreaWatchMarker(known.marker, v.lat, v.lng, 1500);
-      }
-      known.marker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(v.name || 'Unnamed vessel')}</b><br>Owner: ${v.owner ? escapeHtml(v.owner) : 'unknown'}<br>Status: ${statusLabel}<br>MMSI ${escapeHtml(v.mmsi)}</div>`);
-    }
-  });
-
-  // One connected diagram (hub = the area, branches = vessels) instead of a
-  // flat list — reads the results the same "brain map" way the team already
-  // liked for a company's fleet.
-  const known = [...areaWatchKnownVessels.values()];
-  if (!known.length) {
-    resultsEl.style.display = 'block';
-    resultsEl.innerHTML = '<div class="empty">No AIS positions heard here just now — busy yards report often, but a quiet moment (or a vessel just out of AIS range) is normal. Try again shortly, or turn on Live Watch.</div>';
-    renderAreaWatchBrainMap([], label);
-  } else {
-    resultsEl.style.display = 'none';
-    resultsEl.innerHTML = '';
-    renderAreaWatchBrainMap(known, label);
-  }
-
-  if (!mapReady) return;
-  if (!points.length) { mapWrap.style.display = 'none'; return; }
-  mapWrap.style.display = 'block';
-  if (!areaWatchMapInstance._centerMarker) {
-    areaWatchMapInstance._centerMarker = L.circleMarker([centerLat, centerLng], { radius: 6, color: '#ffb020' }).addTo(areaWatchMapInstance._markerLayer);
-  }
-  areaWatchMapInstance._centerMarker.setLatLng([centerLat, centerLng]);
-  areaWatchMapInstance._centerMarker.bindPopup(`<div class="live-driver-tag"><b>${escapeHtml(label)}</b></div>`);
-  const bounds = L.latLngBounds(points);
-  setTimeout(() => {
-    areaWatchMapInstance.invalidateSize();
-    areaWatchMapInstance.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
-  }, 50);
-}
-
-function toggleAreaWatchLive() {
-  const liveBtn = $('areaWatchLiveBtn');
-  if (areaWatchLiveActive) {
-    areaWatchLiveActive = false;
-    if (areaWatchLiveTimer) clearInterval(areaWatchLiveTimer);
-    areaWatchLiveTimer = null;
-    if (liveBtn) liveBtn.textContent = '▶ Start Live Watch';
-    return;
-  }
-  if (!areaWatchLastQuery) { showToast('Search an area first.'); return; }
-  areaWatchLiveActive = true;
-  if (liveBtn) liveBtn.textContent = '⏸ Stop Live Watch';
-  areaWatchLiveTimer = setInterval(() => {
-    if (areaWatchLastQuery) searchAreaWatch(areaWatchLastQuery.lat, areaWatchLastQuery.lng, areaWatchLastQuery.radiusKm, areaWatchLastQuery.label);
-  }, AREA_WATCH_POLL_MS);
-}
-
-function stopAreaWatchLive() {
-  if (!areaWatchLiveActive) return;
-  areaWatchLiveActive = false;
-  if (areaWatchLiveTimer) clearInterval(areaWatchLiveTimer);
-  areaWatchLiveTimer = null;
-  const liveBtn = $('areaWatchLiveBtn');
-  if (liveBtn) liveBtn.textContent = '▶ Start Live Watch';
-}
-
-if ($('areaWatchLiveBtn')) $('areaWatchLiveBtn').addEventListener('click', toggleAreaWatchLive);
-
-if ($('areaWatchSearchBtn')) {
-  $('areaWatchSearchBtn').addEventListener('click', async () => {
-    const input = $('areaWatchLocation');
-    let lat = parseFloat(input?.dataset.lat || '');
-    let lon = parseFloat(input?.dataset.lon || '');
-    const radiusKm = parseFloat($('areaWatchRadius')?.value || '3');
-    const typed = input?.value.trim() || '';
-    const btn = $('areaWatchSearchBtn');
-    // Typed something but didn't tap one of the autocomplete suggestions —
-    // instead of bouncing them back with "pick a suggestion", just look the
-    // typed text up ourselves and use the best match. Note: a broad name
-    // like "Dubai" resolves to that city's general centroid, which can land
-    // well inland/away from any actual port — a specific place name (or one
-    // of the presets above, which carry exact port coordinates) works much
-    // better than a bare city name.
-    if ((!Number.isFinite(lat) || !Number.isFinite(lon)) && typed) {
-      btn.disabled = true; btn.textContent = 'Finding…';
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typed)}&limit=1`, { headers: { Accept: 'application/json' } });
-        const results = await res.json();
-        if (results?.[0]) { lat = parseFloat(results[0].lat); lon = parseFloat(results[0].lon); }
-      } catch { /* stays not-a-number — handled below */ }
-      btn.disabled = false; btn.textContent = '🔍 Search this area';
-    }
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      showToast(typed ? "Couldn't find that location — try a more specific name (e.g. a port or yard, not just a city)." : 'Type a location, or tap a shipyard/port above.');
-      return;
-    }
-    document.querySelectorAll('#areaWatchPresetGrid [data-preset-idx]').forEach((c) => c.classList.remove('selected'));
-    searchAreaWatch(lat, lon, radiusKm, typed || 'Searched location');
-  });
-}
 
 async function renderQueue() {
   const list = $('entryList');
@@ -15302,7 +14548,7 @@ function downloadFleetPdf(fleetTable) {
   const searchedAtText = fleetTable.isLive && fleetTable.searchedAt ? ` Snapshot taken ${new Date(fleetTable.searchedAt).toLocaleString()}.` : '';
   const summary = fleetTable.isLive
     ? `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} found via a live web search just now.${searchedAtText} This is a snapshot, not a complete or guaranteed-current list — verify before acting on it.`
-    : `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} on file. This reflects fleet ownership on record, not live vessel positions — use Area Watch for that.`;
+    : `${vessels.length} vessel${vessels.length === 1 ? '' : 's'} on file. This reflects fleet ownership on record, not a live vessel position.`;
   const summaryLines = doc.splitTextToSize(summary, pageW - marginX * 2);
   doc.text(summaryLines, marginX, y);
   y += summaryLines.length * 12 + 6;
@@ -15418,8 +14664,7 @@ function downloadFleetPdf(fleetTable) {
 // opened in a new browser tab from a Blob URL, so it can be viewed full
 // screen, printed, or the tab's own "Save Page As" used to keep a copy.
 // Deliberately honest about what "availability" means here: this is
-// ownership/fleet data (who owns what), not a live position feed — that's
-// a different feature (Area Watch) with its own, separate coverage limits.
+// ownership/fleet data (who owns what), not a live position feed.
 function buildFleetMindMapHtml(fleetTable) {
   const vessels = fleetTable.vessels || [];
   const n = vessels.length;
@@ -15465,7 +14710,7 @@ function buildFleetMindMapHtml(fleetTable) {
         ${v.status ? `Current status: ${escapeHtml(v.status)}. ` : ''}
         ${addressLabel ? `Address / location: ${escapeHtml(addressLabel)}. ` : hasPos ? `Last recorded position was ${posLabel}. ` : 'No location has been recorded for this vessel yet. '}
         This entry was ${v.source === 'wikidata' ? 'found automatically from Wikidata' : v.source === 'live' ? `found via a live web search${fleetTable.searchedAt ? ` on ${new Date(fleetTable.searchedAt).toLocaleString()}` : ' just now'}` : "added manually by your team's own research"} —
-        ${v.source === 'live' ? 'treat it as a snapshot, not a guaranteed-current or complete record; verify before acting on it.' : 'it reflects the ownership record on file, not a live, real-time location; for that, use Area Watch instead.'}</p>
+        ${v.source === 'live' ? 'treat it as a snapshot, not a guaranteed-current or complete record; verify before acting on it.' : 'it reflects the ownership record on file, not a live, real-time location.'}</p>
       </div>`;
   });
 
