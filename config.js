@@ -7,8 +7,9 @@ window.CTORQ_CONFIG = {
   APP_URL: 'https://anuwilfred.github.io/C-torq-Work-Flow-App', // update to your real published Pages URL
   // Public VAPID key for Web Push notifications — safe to expose client-side,
   // it only lets the browser verify pushes came from our matching private key.
-  VAPID_PUBLIC_KEY: 'BC_TISxEoDsVTpvh4F0JcTQD-oF8L6XvMvRMi5CfrmpsRtiqKUytW-WsqlhCxi7EMZlqNF3NN6ySdJ2twrPKtz4'
+  VAPID_PUBLIC_KEY: 'BNuyrgdgYKxufZdXa9mP__A1FSDY4K0A_im6RyG0uuy0SLX9wOD5Z9_r_I3EtnbCd85G4QBWdkyM80UOnNuMKcA'
   // Company Finder and Client address search run on OpenStreetMap's free
   // Nominatim search (see companyTextSearch() in app.js) — no API key or
   // billing account needed, so there's nothing to configure here for them.
 };
+
