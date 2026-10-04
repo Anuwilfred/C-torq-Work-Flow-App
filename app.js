@@ -5,7 +5,7 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.54.2';
+const APP_VERSION = 'v3.55.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -276,6 +276,15 @@ function getStoredSessionUser() {
 }
 
 let currentUser = null;
+let pendingNotificationNav = (() => {
+  try {
+    const p = new URLSearchParams(location.search);
+    const nav = p.get('nav');
+    if (!nav) return null;
+    history.replaceState(null, '', location.pathname + location.hash);
+    return { nav, id: p.get('id') };
+  } catch (_) { return null; }
+})();
 let currentProfile = null;
 // Declared up here (not down near the rest of the presence/chat code where
 // it's used) because startPresence() is called from enterApp() during
@@ -2260,6 +2269,7 @@ async function enterApp(knownUser) {
   startLastSeenHeartbeat();
   startGlobalMessageWatch();
   initPushOnboarding();
+  consumePendingNotificationNav();
   loadWeather();
   populateAllowanceDropdown();
   // Rehydrate BEFORE checking today's allocation, so an already-in-progress
@@ -15205,7 +15215,56 @@ const PUSH_SNOOZE_KEY = 'ctorq_push_banner_snoozed_until';
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.type === 'push-subscription-changed') syncPushSubscriptionSilently();
+    if (e.data?.type === 'notification-nav') {
+      if (currentUser) goToNotificationTarget(e.data.nav, e.data.id);
+      else pendingNotificationNav = { nav: e.data.nav, id: e.data.id };
+    }
   });
+}
+
+// ---------- Tap a notification → land on the right screen ----------
+// The push payload's url is e.g. ./?nav=chat&id=<chatId>. Cold start: read it
+// from the URL once, then run it after sign-in. App already open: the service
+// worker posts it (see notificationclick in service-worker.js).
+// (pendingNotificationNav is declared near the top of this file, next to
+// currentUser, so sign-in code that runs early can never hit a TDZ error.)
+
+function closeAllPanelsForNav() {
+  try { Object.values(PANEL_IDS).forEach(([a, b]) => { $(a)?.classList.remove('show'); $(b)?.classList.remove('show'); }); } catch (_) {}
+  try { closeNewsDrawer(); } catch (_) {}
+}
+
+function goToNotificationTarget(nav, id) {
+  if (!nav) return;
+  closeAllPanelsForNav();
+  switch (nav) {
+    case 'chat':
+      openChatOverlay();
+      if (id) setTimeout(() => openChat(id), (typeof chatListCache !== 'undefined' && chatListCache.length) ? 0 : 800);
+      break;
+    case 'news':
+      openNewsDrawer();
+      break;
+    case 'jobs':
+      setActiveTab('home');
+      openPanel('myjobs');
+      break;
+    case 'document':
+      setActiveTab('home');
+      openPanel('specialRequest');
+      break;
+    case 'clock':
+      setActiveTab('entry');
+      break;
+  }
+}
+
+function consumePendingNotificationNav() {
+  if (!pendingNotificationNav || !currentUser) return;
+  const { nav, id } = pendingNotificationNav;
+  pendingNotificationNav = null;
+  // Let the home screen finish rendering first.
+  setTimeout(() => goToNotificationTarget(nav, id), 600);
 }
 
 function isIOSDevice() {
