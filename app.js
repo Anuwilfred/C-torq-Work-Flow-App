@@ -5,7 +5,7 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.54.0';
+const APP_VERSION = 'v3.54.1';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -15142,6 +15142,27 @@ async function refreshPushStatus() {
   el.textContent = await getPushStatusLabel();
 }
 
+// A subscription is only valid for the VAPID public key it was created with.
+// If the key in config.js ever changes, an old subscription silently stops
+// receiving anything (Google answers 403) — so drop it and subscribe again.
+async function getFreshPushSubscription(reg) {
+  const wanted = urlBase64ToUint8Array(window.CTORQ_CONFIG.VAPID_PUBLIC_KEY);
+  let sub = await reg.pushManager.getSubscription();
+  if (sub) {
+    const have = sub.options && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+    const same = have && have.length === wanted.length && have.every((b, i) => b === wanted[i]);
+    if (!same) {
+      try { await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); } catch (_) {}
+      try { await sub.unsubscribe(); } catch (_) {}
+      sub = null;
+    }
+  }
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: wanted });
+  }
+  return sub;
+}
+
 async function enablePushNotifications() {
   if (!pushSupported()) { showToast("This browser/device doesn't support notifications."); return; }
   const btn = $('enablePushBtn');
@@ -15151,13 +15172,7 @@ async function enablePushNotifications() {
     if (permission !== 'granted') { showToast('Notifications permission was not granted.'); return; }
 
     const reg = await navigator.serviceWorker.ready;
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(window.CTORQ_CONFIG.VAPID_PUBLIC_KEY),
-      });
-    }
+    const sub = await getFreshPushSubscription(reg);
     const json = sub.toJSON();
     const { error } = await sb.from('push_subscriptions').upsert({
       user_id: currentUser.id,
@@ -15204,13 +15219,7 @@ async function syncPushSubscriptionSilently() {
   try {
     if (!pushSupported() || Notification.permission !== 'granted' || !currentUser) return false;
     const reg = await navigator.serviceWorker.ready;
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(window.CTORQ_CONFIG.VAPID_PUBLIC_KEY),
-      });
-    }
+    const sub = await getFreshPushSubscription(reg);
     const json = sub.toJSON();
     const { error } = await sb.from('push_subscriptions').upsert({
       user_id: currentUser.id,
