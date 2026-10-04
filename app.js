@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.55.0';
+const APP_VERSION = 'v3.56.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Removed the Company Finder, Area Watch, and Quotations tiles/features. AEON Ai\'s fleet lookup (Company Fleet) and BOQ features are unaffected.';
+const APP_UPDATE_NOTES = 'Notifications everywhere: tapping a notification now opens the right screen, and leave and special requests (new and approved/rejected) now alert the right people. Admins can announce app updates from About.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -5978,6 +5978,7 @@ if ($('designEnquiryDetailBackBtn')) {
 function renderAboutPanel() {
   if ($('aboutVersionText')) $('aboutVersionText').textContent = `Version ${APP_VERSION}`;
   if ($('aboutUpdateNotes')) $('aboutUpdateNotes').textContent = APP_UPDATE_NOTES || 'No release notes for this version.';
+  if ($('notifyUpdateCard')) $('notifyUpdateCard').style.display = currentProfile?.role === 'admin' ? 'block' : 'none';
   // aboutHeroLogoMark itself is kept in sync by applyAppearance() (called on
   // load, on every global-appearance fetch/save/realtime push, and every
   // 15 min) — nothing extra to do for the logo here.
@@ -12580,6 +12581,12 @@ if ($('srSubmitBtn')) {
         'Submit special request'
       );
       if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+      pushNotify({
+        audience: 'admins_and_head',
+        title: '🕐 New special request',
+        text: `${myDisplayName()}: ${jobId}, ${entryDate} ${startTime}–${endTime}`,
+        nav: 'requests',
+      });
       showToast('Special request submitted — waiting for approval.');
       renderSpecialRequestForm();
       renderMySpecialRequests();
@@ -12669,6 +12676,7 @@ async function renderSpecialRequestApprovals() {
 async function reviewSpecialRequest(requestId, action) {
   if (action === 'reject' && !confirm('Reject this special request? No entry will be created.')) return;
   try {
+    const { data: srRow } = await sb.from('special_requests').select('person_id, job_id, entry_date').eq('id', requestId).maybeSingle();
     const { data: { session } } = await getSessionSafe();
     if (!session) { showToast('Please sign in again.'); return; }
     const { data, error } = await withTimeout(
@@ -12680,6 +12688,15 @@ async function reviewSpecialRequest(requestId, action) {
       'Review special request'
     );
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+    if (srRow?.person_id) {
+      pushNotify({
+        audience: 'users',
+        userIds: [srRow.person_id],
+        title: action === 'approve' ? '✅ Special request approved' : '❌ Special request rejected',
+        text: `${srRow.job_id || ''} · ${srRow.entry_date || ''}`.trim(),
+        nav: 'requests',
+      });
+    }
     showToast(action === 'approve' ? 'Approved — synced.' : 'Rejected.');
     renderSpecialRequestApprovals();
     renderMySpecialRequests();
@@ -12758,6 +12775,12 @@ if ($('leaveSubmitBtn')) {
         reason: reason || null,
       });
       if (error) throw error;
+      pushNotify({
+        audience: 'admins_and_head',
+        title: '🌴 New leave request',
+        text: `${myDisplayName()}: ${(LEAVE_TYPE_LABEL[selectedLeaveType] || 'Leave').replace(/^\S+\s/, '')}, ${startDate} → ${endDate}`,
+        nav: 'requests',
+      });
       showToast('Leave request submitted — waiting for approval.');
       resetLeaveRequestForm();
       renderMyLeaveRequests();
@@ -12848,12 +12871,22 @@ async function renderLeaveApprovals() {
 async function reviewLeaveRequest(requestId, action) {
   if (action === 'reject' && !confirm('Reject this leave request?')) return;
   try {
+    const { data: leaveRow } = await sb.from('leave_requests').select('person_id, start_date, end_date').eq('id', requestId).maybeSingle();
     const { error } = await sb.from('leave_requests').update({
       status: action === 'approve' ? 'approved' : 'rejected',
       reviewed_by: currentUser.id,
       reviewed_at: new Date().toISOString(),
     }).eq('id', requestId);
     if (error) throw error;
+    if (leaveRow?.person_id) {
+      pushNotify({
+        audience: 'users',
+        userIds: [leaveRow.person_id],
+        title: action === 'approve' ? '✅ Leave approved' : '❌ Leave request rejected',
+        text: `${leaveRow.start_date} → ${leaveRow.end_date}`,
+        nav: 'requests',
+      });
+    }
     showToast(action === 'approve' ? 'Approved.' : 'Rejected.');
     renderLeaveApprovals();
     renderMyLeaveRequests();
@@ -15229,6 +15262,32 @@ if ('serviceWorker' in navigator) {
 // (pendingNotificationNav is declared near the top of this file, next to
 // currentUser, so sign-in code that runs early can never hit a TDZ error.)
 
+// Fire-and-forget: ask send-push to notify someone about an action the
+// signed-in person just took (never blocks or breaks the action itself).
+async function pushNotify({ audience, userIds, title, text, nav, id }) {
+  try {
+    const { data: { session } } = await getSessionSafe();
+    if (!session) return;
+    await sb.functions.invoke('send-push', {
+      body: { kind: 'notify', audience, userIds, title, text, nav, id },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+  } catch (_) { /* best effort */ }
+}
+$('notifyUpdateBtn')?.addEventListener('click', async () => {
+  if (!confirm(`Send every team member a "new version ready" notification for ${APP_VERSION}?`)) return;
+  await pushNotify({
+    audience: 'all',
+    title: `🆕 App update ${APP_VERSION}`,
+    text: 'A new version of C-TORQ is ready. Open the app to update.',
+    nav: 'update',
+  });
+  showToast('Update notification sent.');
+});
+function myDisplayName() {
+  return currentProfile?.full_name || currentUser?.email || 'Someone';
+}
+
 function closeAllPanelsForNav() {
   try { Object.values(PANEL_IDS).forEach(([a, b]) => { $(a)?.classList.remove('show'); $(b)?.classList.remove('show'); }); } catch (_) {}
   try { closeNewsDrawer(); } catch (_) {}
@@ -15250,6 +15309,7 @@ function goToNotificationTarget(nav, id) {
       openPanel('myjobs');
       break;
     case 'document':
+    case 'requests':
       setActiveTab('home');
       openPanel('specialRequest');
       break;
