@@ -3916,3 +3916,32 @@ img.chat-img { max-width: 100%; height: auto; border-radius: 10px; display: bloc
    not a fixed per-vessel palette, since that's the meaningful signal here. */
 #areaWatchBrainMap .fleet-vessel-node.arriving { animation: areaWatchArrive 1.4s ease; }
 #areaWatchBrainMap .fleet-vessel-node.area-watch-node-departing { opacity: 0.35; transition: opacity 1.1s ease; }
+
+/* ===== iPhone / iPad fixes (v3.56.1) =====
+   1) Stop iOS Safari shrinking the whole page ("zoomed out") when anything
+      sits off-screen to the right (slide-in drawers, glows) and from
+      inflating text sizes.
+   2) ios-lite: Safari crashes pages with many live backdrop-filter blur
+      layers, so on iPhone/iPad blur is switched off and glass uses solid
+      colours instead. Same look, far lighter on memory. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html, body { max-width: 100%; overflow-x: hidden; }
+@supports (overflow: clip) { html, body { overflow-x: clip; } }
+.ai-mesh { max-width: 100vw; }
+
+html.ios-lite *,
+html.ios-lite *::before,
+html.ios-lite *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.ios-lite {
+  --glass: rgba(34, 33, 31, 0.92) !important;
+  --glass-strong: rgba(44, 42, 40, 0.96) !important;
+  --glass-2: rgba(30, 29, 27, 0.88) !important;
+}
+html.ios-lite[data-scheme="light"] {
+  --glass: rgba(255, 255, 255, 0.92) !important;
+  --glass-strong: rgba(255, 255, 255, 0.97) !important;
+  --glass-2: rgba(250, 249, 246, 0.9) !important;
+}
