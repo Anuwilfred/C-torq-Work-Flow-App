@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.53.10';
+const CACHE_NAME = 'ctorq-workflow-v3.54.0';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 // Resumable/chunked uploads for larger chat attachments (photos/videos) —
 // see the TUS_UPLOAD block in app.js for how this is used.
@@ -154,9 +154,25 @@ self.addEventListener('push', (event) => {
     body: data.body || 'You have a new message',
     icon: './icon-192.png',
     badge: './icon-192.png',
+    vibrate: [200, 100, 200],
+    // Same-tag alerts replace each other instead of piling up, but still
+    // buzz/sound again (renotify) — e.g. a burst of chat messages.
+    tag: data.tag || undefined,
+    renotify: !!data.tag,
     data: { url: data.url || './' },
   };
   event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// The browser can silently rotate a push subscription. Tell any open app
+// window to re-register; if none is open, the next sign-in re-syncs it
+// (see syncPushSubscriptionSilently in app.js).
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      list.forEach((c) => c.postMessage({ type: 'push-subscription-changed' }));
+    })
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

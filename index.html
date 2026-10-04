@@ -619,6 +619,12 @@
         <div id="recalledEntriesList" style="margin-top:12px;"><div class="empty">Tap Refresh to load.</div></div>
       </div>
       <div class="card glass">
+        <strong style="font-size:14px;">👥 Team Queue</strong>
+        <p class="hint" style="margin-top:4px;">See any team member's submitted timesheet, leave, daily progress, project report, and special request entries — exactly like they see their own Queue, without needing their device.</p>
+        <select id="teamQueuePersonSelect" style="margin-top:8px;"><option value="">Select a person…</option></select>
+        <div id="teamQueueList" style="margin-top:12px;"><div class="empty">Pick someone above to see their entries.</div></div>
+      </div>
+      <div class="card glass">
         <strong style="font-size:14px;">Locations &amp; allowances</strong>
         <p class="hint" style="margin-top:4px;">Add a place (country/city/site), how many extra hours get added automatically when someone works there, and the money rate per allowance hour — e.g. "Abu Dhabi" +2 hours at $10/hour.</p>
         <div class="row-2" style="margin-top:10px;">
@@ -644,6 +650,7 @@
         <p class="hint" style="margin-top:0;">Get a system/lock-screen alert — even when the app is closed — for Aeon Teams Chat messages, new News Room posts, and Job Allocation assignments.</p>
         <div id="pushStatus" class="hint" style="margin:2px 0 12px;">Checking…</div>
         <button id="enablePushBtn" class="primary" style="margin-top:0;">Enable notifications</button>
+        <button id="testPushBtn" class="secondary" style="margin-top:8px;">Send test notification</button>
       </div>
     </section>
   </main>
@@ -663,6 +670,13 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- PUSH NOTIFICATION PROMPT (shown after login until notifications are on) -->
+<div id="pushPromptBanner" style="display:none; position:fixed; left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom)); z-index:9999; align-items:center; gap:10px; padding:12px 14px; border-radius:14px; background:rgba(30,30,28,0.96); color:#fff; box-shadow:0 6px 24px rgba(0,0,0,.4); font-size:13px; line-height:1.4;">
+  <span id="pushPromptText" style="flex:1;"></span>
+  <button type="button" id="pushPromptBtn" class="primary" style="white-space:nowrap; padding:8px 12px;">Turn on</button>
+  <button type="button" id="pushPromptDismiss" class="ghost" aria-label="Dismiss" style="padding:6px 8px; color:#fff;">✕</button>
+</div>
 
 <!-- NEW MESSAGE BANNER (WhatsApp-style, slides down from the top) -->
 <div id="newMsgBanner" class="new-msg-banner">

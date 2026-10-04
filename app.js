@@ -5,7 +5,7 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.53.10';
+const APP_VERSION = 'v3.54.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
@@ -353,7 +353,7 @@ function setActiveTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('section.panel').forEach(s => s.classList.toggle('active', s.id === name));
   if (name === 'queue') renderQueue();
-  if (name === 'admin') { renderLocationList(); renderRecalledEntriesList(); }
+  if (name === 'admin') { renderLocationList(); renderRecalledEntriesList(); populateTeamQueuePersonSelect(); }
   if (name === 'reports') initReportsTab();
   if (name === 'settings') refreshPushStatus();
   if (name === 'home') { renderJobBoard(); renderQuoteOfDay(); }
@@ -1596,6 +1596,12 @@ async function buildDraftFromForm() {
       };
     }
 
+    // Job ID is mandatory on every work entry (leave is the only exception).
+    if (!$('jobId').value.trim() || !jobIdConfirmed) {
+      showToast('Job ID is required — pick it from the list below the field.');
+      return null;
+    }
+
     if (!$('date').value) { showToast('Pick a date.'); return null; }
     const lunchMinutesRaw = parseInt($('lunchMinutes').value, 10) || 0;
     const allowanceLocation = $('allowanceLocation') && $('allowanceLocation').value ? $('allowanceLocation').value : null;
@@ -1708,6 +1714,10 @@ async function buildDraftFromForm() {
   // progress / data
   if ($('jobIdSimple') && $('jobIdSimple').value.trim() && !jobIdSimpleConfirmed) {
     showToast('Pick the Job ID from the list below the field — free-typed Job IDs cause duplicate/mismatched projects.');
+    return null;
+  }
+  if (!$('jobIdSimple') || !$('jobIdSimple').value.trim() || !jobIdSimpleConfirmed) {
+    showToast('Job ID is required — pick it from the list below the field.');
     return null;
   }
   const descriptionSimpleCombined = combineDescription(descriptionSimpleSelected, $('descriptionSimple').value);
@@ -2249,6 +2259,7 @@ async function enterApp(knownUser) {
   initGlobalAppearance();
   startLastSeenHeartbeat();
   startGlobalMessageWatch();
+  initPushOnboarding();
   loadWeather();
   populateAllowanceDropdown();
   // Rehydrate BEFORE checking today's allocation, so an already-in-progress
@@ -3861,6 +3872,111 @@ $('recalledDeleteBtn')?.addEventListener('click', async () => {
 
 $('refreshRecalledBtn')?.addEventListener('click', renderRecalledEntriesList);
 
+// =====================================================================
+// TEAM QUEUE — admin-only read-only view of any one person's full entry
+// history (timesheet, leave, daily progress, project report, special
+// requests). Entirely server-side (admin-person-entries Edge Function
+// re-reads GitHub + Supabase directly), so this always reflects the truth
+// — not whatever happens to be cached on that person's own device.
+// =====================================================================
+
+let teamQueuePeopleCache = [];
+let teamQueueEntriesCache = [];
+
+async function populateTeamQueuePersonSelect() {
+  const select = $('teamQueuePersonSelect');
+  if (!select) return;
+  if (!teamQueuePeopleCache.length) {
+    const { data } = await sb.from('profiles').select('email, full_name').order('full_name', { ascending: true });
+    teamQueuePeopleCache = data || [];
+  }
+  const current = select.value;
+  select.innerHTML = '<option value="">Select a person…</option>' + teamQueuePeopleCache
+    .map((p) => `<option value="${escapeHtml(p.email)}">${escapeHtml(p.full_name || p.email)}</option>`)
+    .join('');
+  select.value = current;
+}
+
+function teamQueueEntryMeta(en) {
+  if (en.type === 'timesheet' && en.category === 'leave') {
+    return `${MODE_LABEL[en.mode] || en.mode} · ${en.leaveStart || ''} → ${en.leaveEnd || ''}`;
+  }
+  if (en.type === 'timesheet') {
+    return `${MODE_LABEL[en.mode] || en.mode} · ${en.project || '—'} · ${en.date || ''}`;
+  }
+  return `${en.type === 'progress' ? 'Daily Progress' : 'Project Report'} · ${en.project || '—'} · ${en.date || ''}`;
+}
+
+async function loadTeamQueueForSelected() {
+  const select = $('teamQueuePersonSelect');
+  const list = $('teamQueueList');
+  const personEmail = select?.value;
+  if (!personEmail) { list.innerHTML = '<div class="empty">Pick someone above to see their entries.</div>'; return; }
+
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { list.innerHTML = '<div class="empty">Please log in first.</div>'; return; }
+
+  const { data, error } = await sb.functions.invoke('admin-person-entries', {
+    body: { personEmail },
+    headers: { Authorization: `Bearer ${session?.access_token}` },
+  });
+  if (error || data?.error) {
+    list.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
+    return;
+  }
+
+  teamQueueEntriesCache = data.entries || [];
+  const srRows = data.specialRequests || [];
+  if (!teamQueueEntriesCache.length && !srRows.length) {
+    list.innerHTML = '<div class="empty">No entries yet for this person.</div>';
+    return;
+  }
+
+  const regularHtml = teamQueueEntriesCache.map((en, idx) => {
+    const icon = en.type === 'timesheet' ? (MODE_ICON[en.mode] || TYPE_ICON.timesheet) : TYPE_ICON[en.type];
+    return `
+      <div class="entry entry-clickable" data-team-entry-idx="${idx}" title="Tap to review the full details">
+        <span class="type-icon">${icon}</span>
+        <div class="entry-body">
+          <div class="entry-meta">${escapeHtml(teamQueueEntryMeta(en))}</div>
+          <div class="entry-desc">${escapeHtml(en.description || '')}</div>
+        </div>
+        <span class="chip synced">${en.status === 'recalled' ? 'recalled' : 'synced'}</span>
+      </div>
+    `;
+  }).join('');
+
+  const srHtml = srRows.map((r) => `
+    <div class="entry" title="Special request — see it in Admin → Special Requests for full details">
+      <span class="type-icon">${MODE_ICON[r.mode] || '🕐'}</span>
+      <div class="entry-body">
+        <div class="entry-meta">${escapeHtml(MODE_LABEL[r.mode] || r.mode || '')} · ${escapeHtml(r.job_id || '—')} · ${escapeHtml(r.entry_date || '')}</div>
+        <div class="entry-desc">${escapeHtml(r.description || r.reason || '')}</div>
+      </div>
+      <div class="entry-status-stack">
+        <span class="sr-tag">Special</span>
+        <span class="chip ${SR_STATUS_CLASS[r.status] || ''}">${SR_STATUS_LABEL[r.status] || r.status}</span>
+      </div>
+    </div>
+  `).join('');
+
+  list.innerHTML = regularHtml + srHtml;
+  list.querySelectorAll('[data-team-entry-idx]').forEach((row) => {
+    row.addEventListener('click', () => openTeamQueueEntryDetail(teamQueueEntriesCache[Number(row.dataset.teamEntryIdx)], data.personName));
+  });
+}
+
+function openTeamQueueEntryDetail(en, personName) {
+  if ($('entryDetailTitle')) $('entryDetailTitle').textContent = `${personName} — entry details`;
+  $('entryDetailBody').innerHTML = entryDetailRows(en, { full: true }).join('');
+  const actions = $('entryDetailActions');
+  if (actions) actions.innerHTML = '<p class="hint" style="margin-top:0;">Read-only — viewing as admin.</p>';
+  openPanel('entryDetail');
+}
+
+$('teamQueuePersonSelect')?.addEventListener('change', loadTeamQueueForSelected);
+
 // One-time backfill for the fast job_hours_ledger table — see
 // job_hours_ledger_schema.sql / backfill-job-hours Edge Function. Safe to
 // tap more than once (every write is an upsert keyed by entry id).
@@ -3911,6 +4027,11 @@ $('backfillDescriptionsBtn')?.addEventListener('click', async () => {
     if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
     const more = data.ranOutOfTime ? ' Time budget reached before finishing everyone — tap again to continue where it left off.' : ' All caught up.';
     status.textContent = `Done — checked ${data.entriesScanned} entries, filled in ${data.cellsFilled} blank Description cells, ${data.alreadyFilled} already had one, ${data.noMatch} had no matching Sheet row.${more}`;
+    // Diagnostic — open the browser console (F12) to see exactly which
+    // entries failed to match and why, if "no matching Sheet row" stays high
+    // run after run. Harmless to leave in; only logs locally, never sent anywhere.
+    console.log('[backfill diagnostic] no-match samples:', data.noMatchSamples);
+    console.log('[backfill diagnostic] sheet row samples:', data.sheetRowSamples);
     showToast('Description backfill run complete.');
   } catch (err) {
     status.textContent = `Backfill failed: ${err.message || err}`;
@@ -15054,6 +15175,113 @@ async function enablePushNotifications() {
   }
 }
 if ($('enablePushBtn')) $('enablePushBtn').addEventListener('click', enablePushNotifications);
+
+// ---- Auto-onboarding ------------------------------------------------------
+// ROOT CAUSE of "we only get notifications while the app is open": push was
+// 100% opt-in via Settings → Enable notifications, so almost nobody ever
+// turned it on — no subscription, nothing for the server to send to. Now:
+//  1. Anyone who already granted permission is silently (re-)subscribed on
+//     every sign-in, so a rotated/expired subscription heals itself.
+//  2. Everyone else sees a one-tap "Turn on notifications" banner right
+//     after login (browsers require a tap to ask for permission).
+//  3. iPhone only delivers push to an app installed on the Home Screen
+//     (iOS 16.4+), so non-installed iPhones get install steps instead.
+const PUSH_SNOOZE_KEY = 'ctorq_push_banner_snoozed_until';
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'push-subscription-changed') syncPushSubscriptionSilently();
+  });
+}
+
+function isIOSDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function isStandaloneApp() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+async function syncPushSubscriptionSilently() {
+  try {
+    if (!pushSupported() || Notification.permission !== 'granted' || !currentUser) return false;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(window.CTORQ_CONFIG.VAPID_PUBLIC_KEY),
+      });
+    }
+    const json = sub.toJSON();
+    const { error } = await sb.from('push_subscriptions').upsert({
+      user_id: currentUser.id,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+    }, { onConflict: 'endpoint' });
+    return !error;
+  } catch (_) { return false; }
+}
+
+async function initPushOnboarding() {
+  const banner = $('pushPromptBanner');
+  if (!banner || !currentUser) return;
+  const textEl = $('pushPromptText');
+  const btn = $('pushPromptBtn');
+  const hide = () => { banner.style.display = 'none'; };
+
+  // Already granted → just keep the server-side subscription fresh.
+  if (pushSupported() && Notification.permission === 'granted') {
+    await syncPushSubscriptionSilently();
+    hide();
+    return;
+  }
+  const snoozedUntil = Number(localStorage.getItem(PUSH_SNOOZE_KEY) || 0);
+  if (Date.now() < snoozedUntil) { hide(); return; }
+
+  if (isIOSDevice() && !isStandaloneApp()) {
+    textEl.textContent = '🔔 To get alerts on iPhone: tap Share ⬆️ → "Add to Home Screen", then open C-TORQ from your Home Screen and turn on notifications.';
+    btn.style.display = 'none';
+  } else if (!pushSupported()) {
+    textEl.textContent = "🔔 This browser can't show background notifications. Use Chrome/Edge on Android or Windows, or install the app on iPhone.";
+    btn.style.display = 'none';
+  } else if (Notification.permission === 'denied') {
+    textEl.textContent = '🔔 Notifications are blocked for this app. Allow them in your phone/browser settings for this site, then reopen the app.';
+    btn.style.display = 'none';
+  } else {
+    textEl.textContent = '🔔 Get job assignments, news, chat messages and clock-in/out reminders as phone alerts — even when the app is closed.';
+    btn.style.display = 'inline-block';
+  }
+  banner.style.display = 'flex';
+}
+
+$('pushPromptBtn')?.addEventListener('click', async () => {
+  await enablePushNotifications();
+  if (Notification.permission === 'granted') $('pushPromptBanner').style.display = 'none';
+});
+$('pushPromptDismiss')?.addEventListener('click', () => {
+  localStorage.setItem(PUSH_SNOOZE_KEY, String(Date.now() + 24 * 60 * 60 * 1000));
+  $('pushPromptBanner').style.display = 'none';
+});
+
+// Settings → send a test alert to this person's own devices, so anyone can
+// verify end-to-end that background notifications really work for them.
+$('testPushBtn')?.addEventListener('click', async () => {
+  const btn = $('testPushBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const { data: { session } } = await getSessionSafe();
+    const { data, error } = await sb.functions.invoke('send-push', {
+      body: { kind: 'test' },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    });
+    if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+    showToast(data?.sent ? 'Test sent — close the app and it should pop up on your device.' : 'No device registered yet — tap "Enable notifications" first.');
+  } catch (err) {
+    showToast(`Test failed: ${err.message || err}`);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send test notification';
+  }
+});
 
 // =====================================================================
 // HEALTH & LEARNING — curated, minimal content: a handful of short tips
