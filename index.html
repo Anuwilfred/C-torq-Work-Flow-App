@@ -28,6 +28,19 @@
   } catch (e) { /* localStorage unavailable (private browsing, etc.) — defaults apply */ }
 })();
 </script>
+<script>
+// iPhone/iPad: Safari kills a page that holds too many live blur (backdrop-
+// filter) layers — "A problem repeatedly occurred". styles.css switches those
+// off, and uses solid glass colours, when this class is present.
+(function () {
+  try {
+    var ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+      document.documentElement.classList.add('ios-lite');
+    }
+  } catch (e) { /* ignore */ }
+})();
+</script>
 <link rel="manifest" href="./manifest.json" />
 <link rel="icon" href="./icon.svg" />
 <meta name="theme-color" content="#cc785c" />
