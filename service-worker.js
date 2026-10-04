@@ -1,5 +1,5 @@
 // Bumping CACHE_NAME forces the app shell to refresh on next load.
-const CACHE_NAME = 'ctorq-workflow-v3.54.2';
+const CACHE_NAME = 'ctorq-workflow-v3.55.0';
 const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 // Resumable/chunked uploads for larger chat attachments (photos/videos) —
 // see the TUS_UPLOAD block in app.js for how this is used.
@@ -178,10 +178,22 @@ self.addEventListener('pushsubscriptionchange', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = event.notification.data?.url || './';
+  // url carries the deep link, e.g. ./?nav=chat&id=<chatId>. If the app is
+  // already open, hand the target to it so it can jump straight there;
+  // otherwise open the app with that URL and it navigates after login.
+  let nav = null, id = null;
+  try {
+    const u = new URL(url, self.location.origin);
+    nav = u.searchParams.get('nav');
+    id = u.searchParams.get('id');
+  } catch (_) { /* plain url */ }
   event.waitUntil(
-    self.clients.matchAll({ type: 'window' }).then((clientList) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) return client.focus();
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          if (nav) client.postMessage({ type: 'notification-nav', nav, id });
+          return client.focus();
+        }
       }
       if (self.clients.openWindow) return self.clients.openWindow(url);
     })
