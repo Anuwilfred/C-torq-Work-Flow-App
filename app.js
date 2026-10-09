@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.56.1';
+const APP_VERSION = 'v3.57.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Notifications everywhere: tapping a notification now opens the right screen, and leave and special requests (new and approved/rejected) now alert the right people. Admins can announce app updates from About.';
+const APP_UPDATE_NOTES = 'New: payroll salary timesheet for admins (Reports tab) with per-person overtime switch and public holidays. Overtime hours are highlighted in your report.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -3585,7 +3585,7 @@ async function renderTeamList() {
   // shows something actionable instead of nothing at all.
   const result = await raceTimeout(
     Promise.all([
-      sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at, last_seen').order('created_at', { ascending: false }),
+      sb.from('profiles').select('id, email, full_name, role, status, position, role_id, allowed_features, department_id, created_at, last_seen, overtime_enabled').order('created_at', { ascending: false }),
       fetchDepartments(),
       fetchRoles(),
     ]),
@@ -3616,6 +3616,7 @@ async function renderTeamList() {
       <select class="position-select" data-department-user="${p.id}">
         ${deptOptions.replace(`value="${p.department_id || ''}"`, `value="${p.department_id || ''}" selected`)}
       </select>
+      <button type="button" class="secondary" data-ot-toggle="${p.id}" data-ot-on="${p.overtime_enabled ? '1' : '0'}" title="When ON, hours over 8/day are paid as overtime and highlighted on this person's salary sheet and report" style="${p.overtime_enabled ? 'background:#9BC2E6;color:#000;font-weight:700;' : ''}">⏱ Overtime: ${p.overtime_enabled ? 'ON' : 'OFF'}</button>
       <button type="button" class="secondary" data-map-access="${p.id}" data-map-access-name="${escapeHtml(p.full_name || p.email)}" ${p.role === 'admin' ? 'disabled title="Admins already see everything"' : ''}>🔐 Map Access</button>
       ${p.role === 'admin'
         ? (() => {
@@ -3674,6 +3675,15 @@ async function renderTeamList() {
     });
   });
   initAllGlassSelects(list);
+  list.querySelectorAll('[data-ot-toggle]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const turnOn = btn.dataset.otOn !== '1';
+      const { error: updErr } = await sb.from('profiles').update({ overtime_enabled: turnOn }).eq('id', btn.dataset.otToggle);
+      if (updErr) { showToast(`Couldn't update overtime: ${updErr.message}`); return; }
+      showToast(turnOn ? 'Overtime enabled — hours over 8/day will be highlighted and paid as OT.' : 'Overtime turned off.');
+      renderTeamList();
+    });
+  });
   list.querySelectorAll('[data-map-access]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const person = data.find((p) => p.id === btn.dataset.mapAccess);
@@ -11424,13 +11434,14 @@ function renderReportTable(data) {
     wrap.innerHTML = '<div class="empty">No timesheet entries this month.</div>';
     return;
   }
+  const otOn = !!data.overtimeEnabled;
   const rows = data.dayRows.map(r => `
-    <tr>
+    <tr${otOn && r.overtime > 0 ? ' style="background:rgba(155,194,230,.35);"' : ''}>
       <td>${escapeHtml(r.date || '—')}</td>
       <td>${escapeHtml(MODE_LABEL[r.mode] || r.mode)}</td>
       <td>${escapeHtml(r.project || '—')}</td>
       <td>${r.hours}h</td>
-      <td class="${r.overtime > 0 ? 'ot' : ''}">${r.overtime > 0 ? r.overtime + 'h' : '—'}</td>
+      <td class="${otOn && r.overtime > 0 ? 'ot' : ''}" ${otOn && r.overtime > 0 ? 'style="font-weight:700;"' : ''}>${r.overtime > 0 ? r.overtime + 'h' + (otOn ? ' ⏱ OT' : '') : '—'}</td>
       <td>${r.lunchMinutes ? r.lunchMinutes + ' min' : '—'}</td>
       <td>${r.allowanceLocation ? escapeHtml(r.allowanceLocation) + (r.allowanceHours ? ` (+${r.allowanceHours}h)` : '') : '—'}</td>
     </tr>
@@ -11483,9 +11494,105 @@ async function fetchAndRenderReport() {
   }
 }
 
+// ---------- Salary sheet (admin) ----------
+// Pay cycle is the 21st to the 20th. Default = the cycle that most recently
+// ended (or the one in progress if we're past the 21st).
+function defaultSalaryCycle() {
+  const now = new Date();
+  let y = now.getFullYear(), m = now.getMonth(); // m: 0-based
+  const day = now.getDate();
+  // start = 21st of previous month if today <= 20th, else 21st of this month
+  let sy = y, sm = day >= 21 ? m : m - 1;
+  if (sm < 0) { sm = 11; sy = y - 1; }
+  const pad = (n) => String(n).padStart(2, '0');
+  let ey = sy, em = sm + 1;
+  if (em > 11) { em = 0; ey = sy + 1; }
+  return { start: `${sy}-${pad(sm + 1)}-21`, end: `${ey}-${pad(em + 1)}-20` };
+}
+
+async function renderHolidayList() {
+  const wrap = $('holidayList');
+  if (!wrap) return;
+  const { data, error } = await sb.from('public_holidays').select('holiday_date, name').order('holiday_date', { ascending: false }).limit(60);
+  if (error) { wrap.innerHTML = `<div class="hint">Couldn't load holidays (${escapeHtml(error.message)}). Has supabase/salary_sheet.sql been run?</div>`; return; }
+  wrap.innerHTML = (data || []).length
+    ? data.map((h) => `<div class="entry" style="padding:6px 8px;"><div class="entry-body"><div class="entry-desc">${escapeHtml(h.holiday_date)} — ${escapeHtml(h.name)}</div></div><button type="button" class="secondary" data-del-holiday="${h.holiday_date}">Remove</button></div>`).join('')
+    : '<div class="hint">No holidays added. Sundays are always treated as days off.</div>';
+  wrap.querySelectorAll('[data-del-holiday]').forEach((b) => b.addEventListener('click', async () => {
+    const { error: e } = await sb.from('public_holidays').delete().eq('holiday_date', b.dataset.delHoliday);
+    if (e) { showToast(`Couldn't remove: ${e.message}`); return; }
+    renderHolidayList();
+  }));
+}
+
+async function runSalaryGeneration(onlyEmail) {
+  const start = $('salaryStart').value, end = $('salaryEnd').value;
+  const status = $('salaryStatus');
+  if (!start || !end || start > end) { showToast('Pick a valid From / To date.'); return; }
+  const { data: { session } } = await getSessionSafe();
+  const headers = { Authorization: `Bearer ${session?.access_token}` };
+  const call = (body) => sb.functions.invoke('generate-salary-sheet', { body, headers });
+  $('salaryAllBtn').disabled = true; $('salaryOnePersonBtn').disabled = true;
+  try {
+    let people;
+    if (onlyEmail) people = [{ email: onlyEmail }];
+    else {
+      const { data, error } = await call({ action: 'list' });
+      if (error || data?.error) throw new Error(data?.error || await readFunctionsError(error));
+      people = data.people;
+    }
+    const rows = [], failed = [];
+    for (let i = 0; i < people.length; i++) {
+      status.textContent = `Building ${i + 1} of ${people.length}: ${people[i].full_name || people[i].email}…`;
+      const { data, error } = await call({ email: people[i].email, start, end });
+      if (error || data?.error) { failed.push(`${people[i].full_name || people[i].email}: ${data?.error || await readFunctionsError(error)}`); continue; }
+      if (data.summary.daysWorked > 0 || data.summary.leaveDays > 0) rows.push(data.summary);
+    }
+    if (!onlyEmail && rows.length) {
+      status.textContent = 'Writing summary tab…';
+      await call({ action: 'summary', start, end, rows });
+    }
+    const url = `https://docs.google.com/spreadsheets/d/1b74x_uaCpF_wUWwdvQ9wkFmC01j20kwc-VqDucybQ_g/edit`;
+    status.innerHTML = `Done — ${people.length - failed.length} sheet(s) written. <a href="${url}" target="_blank" rel="noopener">Open the sheet ↗</a>` +
+      (failed.length ? `<br><span style="color:var(--err)">Failed: ${failed.map(escapeHtml).join('; ')}</span>` : '');
+  } catch (err) {
+    status.innerHTML = `<span style="color:var(--err)">Couldn't generate: ${escapeHtml(String(err.message || err))}</span>`;
+  } finally {
+    $('salaryAllBtn').disabled = false; $('salaryOnePersonBtn').disabled = false;
+  }
+}
+
+$('salaryAllBtn')?.addEventListener('click', () => runSalaryGeneration(null));
+$('salaryOnePersonBtn')?.addEventListener('click', () => {
+  const email = $('reportPerson')?.value;
+  if (!email) { showToast('Choose a person in "Viewing report for" first.'); return; }
+  runSalaryGeneration(email);
+});
+$('holidayAddBtn')?.addEventListener('click', async () => {
+  const d = $('holidayDate').value, n = $('holidayName').value.trim() || 'Public holiday';
+  if (!d) { showToast('Pick the holiday date.'); return; }
+  const { error } = await sb.from('public_holidays').upsert({ holiday_date: d, name: n });
+  if (error) { showToast(`Couldn't add: ${error.message}`); return; }
+  $('holidayDate').value = ''; $('holidayName').value = '';
+  renderHolidayList();
+});
+
+function initSalarySheetCard() {
+  const card = $('salarySheetCard');
+  if (!card) return;
+  if (currentProfile?.role !== 'admin') { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  if (!$('salaryStart').value) {
+    const c = defaultSalaryCycle();
+    $('salaryStart').value = c.start; $('salaryEnd').value = c.end;
+  }
+  renderHolidayList();
+}
+
 async function initReportsTab() {
   if (!reportMonth) reportMonth = monthKey(new Date());
   $('reportMonthLabel').textContent = monthLabel(reportMonth);
+  initSalarySheetCard();
   await populateReportPersonPicker();
   renderMonthStrip();
   fetchAndRenderReport();
