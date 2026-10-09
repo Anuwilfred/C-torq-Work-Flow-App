@@ -578,6 +578,28 @@
         <select id="reportPerson"></select>
       </div>
 
+      <div class="card glass" id="salarySheetCard" style="display:none">
+        <strong style="font-size:14px;">💰 Salary timesheet (Google Sheet)</strong>
+        <p class="hint" style="margin:4px 0 8px;">Builds the payroll sheet (Date · Job numbers · Start · Finish · Break · Total · Normal · N/OT · SH/OT) into the shared FTD sheet — one tab per person.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:130px;"><label for="salaryStart">From</label><input type="date" id="salaryStart" /></div>
+          <div style="flex:1; min-width:130px;"><label for="salaryEnd">To</label><input type="date" id="salaryEnd" /></div>
+        </div>
+        <div class="review-actions" style="margin-top:8px;">
+          <button type="button" id="salaryOnePersonBtn" class="secondary">Selected person only</button>
+          <button type="button" id="salaryAllBtn" class="primary" style="margin-top:0;">Generate for everyone</button>
+        </div>
+        <div id="salaryStatus" class="hint" style="margin-top:8px;"></div>
+        <div class="section-divider"></div>
+        <strong style="font-size:13px;">Public holidays (shown yellow; worked = orange)</strong>
+        <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+          <input type="date" id="holidayDate" style="flex:1; min-width:130px;" />
+          <input type="text" id="holidayName" placeholder="e.g. Eid Al Adha" style="flex:2; min-width:130px;" />
+          <button type="button" id="holidayAddBtn" class="secondary">Add</button>
+        </div>
+        <div id="holidayList" style="margin-top:8px;"></div>
+      </div>
+
       <div class="card glass">
         <div class="report-month-nav">
           <button type="button" id="reportPrevMonth" class="ghost">‹ Prev</button>
