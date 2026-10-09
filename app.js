@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.57.0';
+const APP_VERSION = 'v3.58.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: payroll salary timesheet for admins (Reports tab) with per-person overtime switch and public holidays. Overtime hours are highlighted in your report.';
+const APP_UPDATE_NOTES = 'New: admins can choose who may send photos, videos and files in Team Chat and News Room (Map Access). Also: payroll salary timesheet and overtime switch.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -3158,7 +3158,7 @@ $('postNewsBtn')?.addEventListener('click', async () => {
   btn.textContent = 'Posting…';
   try {
     let attachment_path = null, attachment_name = null, attachment_mime = null;
-    const file = $('newsFile')?.files?.[0];
+    const file = hasFeature('sendMedia') ? $('newsFile')?.files?.[0] : null;
     if (file) {
       const safeName = file.name.replace(/[^a-z0-9_.-]/gi, '_');
       const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}_${safeName}`;
@@ -3257,6 +3257,7 @@ const FEATURE_LIST = [
   { key: 'reports', label: 'Reports' },
   { key: 'projects', label: 'Projects' },
   { key: 'chat', label: 'Team Chat' },
+  { key: 'sendMedia', label: 'Send photos, videos & files (Team Chat + News Room) — OFF = text only, saves data' },
   { key: 'ai', label: 'AEON Ai Assistant' },
   { key: 'settings', label: 'Settings' },
   { key: 'departments', label: 'Departments' },
@@ -3302,6 +3303,16 @@ function applyFeatureAccess() {
   const chatOn = has('chat');
   $('chatOrb').style.display = chatOn ? 'flex' : 'none';
   $('chatOrbLabel').style.display = chatOn ? 'block' : 'none';
+
+  // Media sending (photos/videos/files) is off unless an admin ticks it in
+  // Map Access — keeps data use down. Admins always have it.
+  const mediaOn = has('sendMedia');
+  if ($('chatAttachBtn')) $('chatAttachBtn').style.display = mediaOn ? '' : 'none';
+  if ($('newsFile')) {
+    $('newsFile').style.display = mediaOn ? '' : 'none';
+    const newsFileLabel = document.querySelector('label[for="newsFile"]');
+    if (newsFileLabel) newsFileLabel.style.display = mediaOn ? '' : 'none';
+  }
 
   const aiOn = has('ai');
   $('aiOrb').style.display = aiOn ? 'flex' : 'none';
@@ -12101,10 +12112,14 @@ const MAX_CHAT_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 // instead of failing outright and making the person start over.
 const TUS_CHUNK_THRESHOLD_BYTES = 6 * 1024 * 1024;
 
-$('chatAttachBtn').addEventListener('click', () => $('chatFileInput').click());
+$('chatAttachBtn').addEventListener('click', () => {
+  if (!hasFeature('sendMedia')) { showToast('Sending photos, videos and files is not enabled for your account.'); return; }
+  $('chatFileInput').click();
+});
 $('chatFileInput').addEventListener('change', () => {
   const file = $('chatFileInput').files[0];
   if (!file) return;
+  if (!hasFeature('sendMedia')) { $('chatFileInput').value = ''; showToast('Sending photos, videos and files is not enabled for your account.'); return; }
   if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
     showToast(`That file is ${(file.size / (1024 * 1024)).toFixed(1)}MB — the largest file this app can send right now is 50MB.`);
     $('chatFileInput').value = '';
