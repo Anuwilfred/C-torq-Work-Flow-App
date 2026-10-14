@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.58.0';
+const APP_VERSION = 'v3.59.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: admins can choose who may send photos, videos and files in Team Chat and News Room (Map Access). Also: payroll salary timesheet and overtime switch.';
+const APP_UPDATE_NOTES = 'Recalled timesheet entries: date, time and location are now locked — only the job and what was done can be corrected. Also: admin media-send control, payroll salary timesheet.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -3834,13 +3834,9 @@ function openRecalledEditPanel(item) {
     $('recEditLeaveStart').value = e.leaveStart || '';
     $('recEditLeaveEnd').value = e.leaveEnd || '';
   } else {
-    $('recEditDate').value = e.date || '';
-    $('recEditStart').value = e.startTime || '';
-    $('recEditEnd').value = e.endTime || '';
-    $('recEditLunch').value = e.lunchMinutesRaw ?? e.lunchMinutes ?? 0;
+    if ($('recEditLockedInfo')) $('recEditLockedInfo').textContent = `🔒 Locked — ${e.date || ''} ${e.startTime || ''}–${e.endTime || ''}${e.location ? ' · ' + e.location : ''}. Date, time and location cannot be edited.`;
     $('recEditJobId').value = e.jobId || '';
     $('recEditProject').value = e.project || '';
-    $('recEditLocation').value = e.location || '';
   }
   $('recEditNotes').value = e.description || '';
   openPanel('recalledEdit');
@@ -3866,10 +3862,9 @@ $('recalledSaveRestoreBtn')?.addEventListener('click', async () => {
   const updates = isLeave
     ? { leaveStart: $('recEditLeaveStart').value, leaveEnd: $('recEditLeaveEnd').value, description: $('recEditNotes').value.trim() }
     : {
-        date: $('recEditDate').value, startTime: $('recEditStart').value, endTime: $('recEditEnd').value,
-        lunchMinutes: parseInt($('recEditLunch').value, 10) || 0, lunchMinutesRaw: parseInt($('recEditLunch').value, 10) || 0,
+        // Only the job and what was done can be corrected — date/time/location are locked.
         jobId: $('recEditJobId').value.trim() || null, project: $('recEditProject').value.trim(),
-        location: $('recEditLocation').value.trim(), description: $('recEditNotes').value.trim(),
+        description: $('recEditNotes').value.trim(),
       };
   const btn = $('recalledSaveRestoreBtn');
   btn.disabled = true; btn.textContent = 'Saving…';
