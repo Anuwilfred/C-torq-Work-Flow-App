@@ -231,6 +231,10 @@
           <span class="home-tile-icon home-tile-icon-profit">💰</span>
           <span class="home-tile-label">Profit Analyzer</span>
         </button>
+        <button type="button" class="home-tile" data-open="manHour" data-feature="manHour">
+          <span class="home-tile-icon home-tile-icon-manhour">⏱️</span>
+          <span class="home-tile-label">Man Hours</span>
+        </button>
         <button type="button" class="home-tile" data-open="tank" data-feature="tank">
           <span class="home-tile-icon home-tile-icon-tank">🛢️</span>
           <span class="home-tile-label">Project Tank</span>
@@ -1108,6 +1112,29 @@
         <button id="createClientBtn" class="primary" style="margin-top:12px;">Add client</button>
       </div>
       <div id="clientsListArea" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MAN HOURS OVERLAY — pick a project (scrollable + searchable list), see
+     man-hours by role, allotted/used/remaining, timeline, hours per task, and
+     download it all as a PDF. Admins + anyone granted 'manHour' in Map Access. -->
+<div id="manHourOverlayBackdrop" class="panel-overlay-backdrop"></div>
+<div id="manHourOverlay" class="panel-overlay">
+  <div class="panel-shell">
+    <div class="panel-header">
+      <strong>⏱️ Man Hours</strong>
+      <button type="button" class="ghost" data-close="manHour">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="card glass">
+        <strong style="font-size:14px;">Select a project</strong>
+        <div class="mh-picker">
+          <input id="manHourProjectInput" type="text" autocomplete="off" placeholder="🔍 Tap to see all projects, or type to search…" />
+          <div id="manHourProjectList" class="mh-picker-list" style="display:none;"></div>
+        </div>
+      </div>
+      <div id="manHourReport" style="margin-top:14px;"></div>
     </div>
   </div>
 </div>
