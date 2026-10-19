@@ -3954,6 +3954,8 @@ html.ios-lite[data-scheme="light"] {
 }
 .home-tile:hover .home-tile-icon-manhour,
 .home-tile:active .home-tile-icon-manhour { box-shadow: 0 10px 22px rgba(255, 176, 32, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.mh-picker-card { position: relative; z-index: 50; overflow: visible; }
+#manHourReport { position: relative; z-index: 1; }
 .mh-picker { position: relative; margin-top: 8px; }
 .mh-picker-list {
   position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 30;
