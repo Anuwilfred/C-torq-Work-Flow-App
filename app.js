@@ -5,11 +5,11 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.59.0';
+const APP_VERSION = 'v3.60.0';
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'Recalled timesheet entries: date, time and location are now locked — only the job and what was done can be corrected. Also: admin media-send control, payroll salary timesheet.';
+const APP_UPDATE_NOTES = 'New: Man Hours tile — pick a project to see man-hours by role, allotted vs used vs remaining, job timeline, hours per task, and download a PDF. Enable per person in Map Access.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -3272,6 +3272,7 @@ const FEATURE_LIST = [
   { key: 'renewal', label: 'My Document Renewal Status (AEON Ai can tell them their own passport, visa, work permit and other document expiry — never anyone else\'s)' },
   { key: 'allData', label: 'Full Data Access (AEON Ai can see everyone\'s data + money for this person)' },
   { key: 'profit', label: 'Profit Analyzer (project cost/profit breakdown, hourly rates, payments)' },
+  { key: 'manHour', label: 'Man Hours (per-project manpower report by role and task, with PDF download)' },
   { key: 'leaveRequest', label: 'Leave / Vacation requests (inside Special Request)' },
   { key: 'documentRequest', label: 'Request Document (inside Special Request)' },
   { key: 'fieldActivities', label: 'Field Activities (mission start/stop + client visit logging — for marketing/field people)' },
@@ -5844,6 +5845,7 @@ const PANEL_IDS = {
   health: ['healthOverlay', 'healthOverlayBackdrop'],
   clients: ['clientsOverlay', 'clientsOverlayBackdrop'],
   profitAnalyzer: ['profitAnalyzerOverlay', 'profitAnalyzerOverlayBackdrop'],
+  manHour: ['manHourOverlay', 'manHourOverlayBackdrop'],
   profitDetail: ['profitDetailOverlay', 'profitDetailOverlayBackdrop'],
   renewalManager: ['renewalManagerOverlay', 'renewalManagerOverlayBackdrop'],
   renewalEdit: ['renewalEditOverlay', 'renewalEditOverlayBackdrop'],
@@ -5896,6 +5898,9 @@ function openPanel(name, opts = {}) {
   }
   if (name === 'renewalManager') {
     renderRenewalManager();
+  }
+  if (name === 'manHour') {
+    initManHourPanel();
   }
   if (name === 'profitAnalyzer') {
     renderProfitAnalyzerList();
@@ -16132,6 +16137,322 @@ function renderWeatherDetail() {
   `;
 }
 if ($('weatherBadge')) $('weatherBadge').addEventListener('click', () => openPanel('weather'));
+
+// =====================================================================
+// MAN HOURS — per-project manpower report (role bars, allotted/used/
+// remaining pie, timeline, hours per task, PDF). Data comes from the
+// get-manhour-report Edge Function (admins + 'manHour' Map Access only).
+// =====================================================================
+const MANHOUR_ROLE_META = {
+  manager: { label: 'Managers', color: '#8e6bff' },
+  engineer: { label: 'Engineers', color: '#39a0ff' },
+  supervisor: { label: 'Supervisors', color: '#ffb020' },
+  foreman: { label: 'Foremen', color: '#ff6b6b' },
+  technician: { label: 'Technicians', color: '#1fcf8f' },
+  driver: { label: 'Drivers', color: '#e0b020' },
+  other: { label: 'Others', color: '#9aa5b1' },
+};
+let manHourProjects = [];
+let manHourData = null;
+let manHourCharts = [];
+let manHourWired = false;
+
+const mhFmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const mhDate = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+
+async function initManHourPanel() {
+  if (!manHourWired) {
+    manHourWired = true;
+    const input = $('manHourProjectInput');
+    const list = $('manHourProjectList');
+    const show = () => { renderManHourProjectList(input.value); list.style.display = 'block'; };
+    input.addEventListener('focus', () => { input.select(); show(); });
+    input.addEventListener('click', show);
+    input.addEventListener('input', show);
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.mh-picker')) list.style.display = 'none';
+    });
+  }
+  if (!manHourProjects.length) {
+    const { rows, error } = await fetchProjects();
+    if (error) { showToast(`Couldn't load projects: ${error.message}`); return; }
+    manHourProjects = rows;
+  }
+}
+
+function renderManHourProjectList(query) {
+  const list = $('manHourProjectList');
+  const q = (query || '').trim().toLowerCase();
+  const rows = q
+    ? manHourProjects.filter((p) => (p.job_id || '').toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q))
+    : manHourProjects;
+  if (!rows.length) { list.innerHTML = '<div class="mh-picker-item">No projects match.</div>'; return; }
+  list.innerHTML = rows.map((p) => `
+    <div class="mh-picker-item" data-mh-job="${escapeHtml(p.job_id)}">
+      <strong>${escapeHtml(p.job_id)}</strong> — ${escapeHtml(p.name || '')}
+      <small>${escapeHtml(p.client || '')}${p.status ? ` · ${escapeHtml(p.status)}` : ''}</small>
+    </div>`).join('');
+  list.querySelectorAll('[data-mh-job]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const p = manHourProjects.find((r) => r.job_id === el.dataset.mhJob);
+      $('manHourProjectInput').value = `${p.job_id}${p.name ? ' — ' + p.name : ''}`;
+      list.style.display = 'none';
+      loadManHourReport(p.job_id);
+    });
+  });
+}
+
+async function loadManHourReport(jobId) {
+  const box = $('manHourReport');
+  box.innerHTML = '<div class="empty">Loading…</div>';
+  const { data: { session } } = await getSessionSafe();
+  if (!session) { box.innerHTML = '<div class="empty">Please log in first.</div>'; return; }
+  const { data, error } = await sb.functions.invoke('get-manhour-report', {
+    body: { jobId },
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (error || data?.error) {
+    box.innerHTML = `<div class="empty">Couldn't load: ${escapeHtml(data?.error || await readFunctionsError(error))}</div>`;
+    return;
+  }
+  manHourData = data;
+  renderManHourReport(data);
+}
+
+function destroyManHourCharts() {
+  manHourCharts.forEach((c) => { try { c.destroy(); } catch { /* ignore */ } });
+  manHourCharts = [];
+}
+
+// Draws the 3 charts onto the given canvases. `theme` switches text colours
+// so the same code serves the dark in-app view and the white PDF pages.
+function drawManHourCharts(d, cv, theme) {
+  const text = theme.text, grid = theme.grid;
+  const valuePlugin = {
+    id: 'mhValues',
+    afterDatasetsDraw(chart, _a, opts) {
+      const { ctx } = chart;
+      ctx.save();
+      ctx.fillStyle = opts.color || text;
+      ctx.font = 'bold 12px sans-serif';
+      chart.data.datasets.forEach((ds, di) => {
+        if (ds.skipLabels) return;
+        chart.getDatasetMeta(di).data.forEach((bar, i) => {
+          const v = ds.data[i];
+          if (v === null || v === undefined) return;
+          if (opts.horizontal) { ctx.textAlign = 'left'; ctx.fillText(`${mhFmt(v)} h`, bar.x + 6, bar.y + 4); }
+          else { ctx.textAlign = 'center'; ctx.fillText(`${mhFmt(v)} h`, bar.x, bar.y - 6); }
+        });
+      });
+      ctx.restore();
+    },
+  };
+  const charts = [];
+  const common = { responsive: true, maintainAspectRatio: false, animation: theme.animate ? undefined : false };
+
+  // 1) hours per role
+  const roles = d.roles;
+  const anyAlloc = roles.some((r) => r.allocatedHours > 0);
+  const datasets = [{
+    label: 'Used hours',
+    data: roles.map((r) => r.usedHours),
+    backgroundColor: roles.map((r) => (MANHOUR_ROLE_META[r.position] || MANHOUR_ROLE_META.other).color),
+    borderRadius: 6,
+  }];
+  if (anyAlloc) datasets.push({ label: 'Allotted hours', data: roles.map((r) => r.allocatedHours), backgroundColor: theme.allotted, borderRadius: 6 });
+  charts.push(new Chart(cv.bar.getContext('2d'), {
+    type: 'bar',
+    data: { labels: roles.map((r) => (MANHOUR_ROLE_META[r.position] || MANHOUR_ROLE_META.other).label), datasets },
+    options: {
+      ...common, layout: { padding: { top: 22 } },
+      plugins: { legend: { display: anyAlloc, labels: { color: text } }, mhValues: { color: text } },
+      scales: { x: { ticks: { color: text }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: text }, grid: { color: grid } } },
+    },
+    plugins: [valuePlugin],
+  }));
+
+  // 2) allotted / used / remaining pie
+  const t = d.totals;
+  let labels, values, colors;
+  if (t.allocatedHours <= 0) { labels = ['Used (no allotment set)']; values = [t.usedHours]; colors = ['#39a0ff']; }
+  else if (t.exceeded) { labels = ['Used within allotment', 'Over allotment']; values = [t.allocatedHours, t.exceededHours]; colors = ['#39a0ff', '#ff4d4d']; }
+  else { labels = ['Used', 'Remaining']; values = [t.usedHours, t.remainingHours]; colors = ['#39a0ff', '#1fcf8f']; }
+  charts.push(new Chart(cv.pie.getContext('2d'), {
+    type: 'pie',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: theme.sliceBorder, borderWidth: 2 }] },
+    options: {
+      ...common,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: text } },
+        tooltip: { callbacks: { label: (c) => `${c.label}: ${mhFmt(c.parsed)} h` } },
+      },
+    },
+  }));
+
+  // 3) hours per task
+  charts.push(new Chart(cv.task.getContext('2d'), {
+    type: 'bar',
+    data: { labels: d.tasks.map((x) => x.label), datasets: [{ label: 'Hours', data: d.tasks.map((x) => x.hours), backgroundColor: '#39a0ff', borderRadius: 6 }] },
+    options: {
+      ...common, indexAxis: 'y', layout: { padding: { right: 60 } },
+      plugins: { legend: { display: false }, mhValues: { color: text, horizontal: true } },
+      scales: { x: { beginAtZero: true, ticks: { color: text }, grid: { color: grid } }, y: { ticks: { color: text }, grid: { display: false } } },
+    },
+    plugins: [valuePlugin],
+  }));
+  return charts;
+}
+
+function renderManHourReport(d) {
+  destroyManHourCharts();
+  const t = d.totals;
+  const pct = t.allocatedHours > 0 ? Math.round((t.usedHours / t.allocatedHours) * 100) : null;
+  const tl = d.timeline;
+  const spanDays = tl.startDate && tl.lastDate ? Math.round((new Date(`${tl.lastDate}T00:00:00`) - new Date(`${tl.startDate}T00:00:00`)) / 86400000) + 1 : 0;
+  const active = (d.project.status || 'active') === 'active';
+  const taskHeight = Math.max(160, d.tasks.length * 34 + 40);
+  $('manHourReport').innerHTML = `
+    <div class="card glass">
+      <strong style="font-size:15px;">${escapeHtml(d.project.name || d.project.jobId)}</strong>
+      <div class="hint" style="margin-top:2px;">${escapeHtml(d.project.jobId)} · ${escapeHtml(d.project.status || '')}</div>
+      <div class="mh-stats">
+        <div class="mh-stat"><b>${mhFmt(t.allocatedHours)}</b><span>Allotted hrs</span></div>
+        <div class="mh-stat"><b>${mhFmt(t.usedHours)}</b><span>Used hrs${pct !== null ? ` (${pct}%)` : ''}</span></div>
+        <div class="mh-stat"><b>${t.exceeded ? '0' : mhFmt(t.remainingHours)}</b><span>Remaining hrs</span></div>
+      </div>
+      ${t.exceeded ? `<div class="mh-exceeded">⚠️ Time exceeded — this job has used ${mhFmt(t.exceededHours)} hours MORE than the ${mhFmt(t.allocatedHours)} hours allotted (${pct}% of allotment).</div>` : ''}
+      ${t.allocatedHours <= 0 ? '<p class="hint" style="margin-top:10px;">No allotted hours have been set for this project yet.</p>' : ''}
+    </div>
+
+    <div class="card glass" style="margin-top:14px;">
+      <strong style="font-size:14px;">👷 Total man-hours by role</strong>
+      <div class="mh-chart-box" style="height:280px;"><canvas id="mhRoleChart"></canvas></div>
+    </div>
+
+    <div class="card glass" style="margin-top:14px;">
+      <strong style="font-size:14px;">🥧 Allotted vs used vs remaining</strong>
+      <div class="mh-chart-box" style="height:260px;"><canvas id="mhPieChart"></canvas></div>
+    </div>
+
+    <div class="card glass" style="margin-top:14px;">
+      <strong style="font-size:14px;">📅 Job timeline</strong>
+      ${tl.startDate ? `
+        <div class="mh-timeline"><div class="mh-tl-line"></div><div class="mh-tl-dot start"></div><div class="mh-tl-dot end"></div></div>
+        <div class="mh-tl-labels">
+          <span>🟢 Started<br><b>${escapeHtml(mhDate(tl.startDate))}</b></span>
+          <span>${active ? '🔵 Latest entry (job active)' : '🏁 Finished / last entry'}<br><b>${escapeHtml(mhDate(tl.lastDate))}</b></span>
+        </div>
+        <p class="hint" style="margin-top:8px;">${spanDays} day${spanDays === 1 ? '' : 's'} from first to last entry · hours logged on ${tl.daysActive} day${tl.daysActive === 1 ? '' : 's'}.</p>`
+        : '<p class="hint">No hours have been logged on this job yet.</p>'}
+    </div>
+
+    <div class="card glass" style="margin-top:14px;">
+      <strong style="font-size:14px;">🧰 Hours per task — which task takes the most time</strong>
+      ${d.tasks.length ? `<div class="mh-chart-box" style="height:${taskHeight}px;"><canvas id="mhTaskChart"></canvas></div>` : '<p class="hint">No task descriptions logged yet.</p>'}
+      ${d.untaggedHours > 0 ? `<p class="hint" style="margin-top:6px;">${mhFmt(d.untaggedHours)} h were logged without a recognised task description.</p>` : ''}
+    </div>
+
+    <button type="button" id="manHourPdfBtn" class="primary" style="margin-top:14px; width:100%;">📄 Download report as PDF</button>
+  `;
+  const cs = getComputedStyle(document.body);
+  const dark = { text: cs.color || '#e8eefc', grid: 'rgba(255,255,255,0.12)', allotted: 'rgba(200,210,230,0.35)', sliceBorder: 'rgba(0,0,0,0.25)', animate: true };
+  const taskCanvas = $('mhTaskChart');
+  const fakeTask = taskCanvas || document.createElement('canvas');
+  manHourCharts = drawManHourCharts(d, { bar: $('mhRoleChart'), pie: $('mhPieChart'), task: fakeTask }, dark);
+  $('manHourPdfBtn').addEventListener('click', () => downloadManHourPdf(d));
+}
+
+function downloadManHourPdf(d) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { showToast('PDF tool is still loading — try again in a moment.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const mx = 40;
+  let y = 48;
+  const room = (need) => { if (y + need > H - 40) { doc.addPage(); y = 48; } };
+  const t = d.totals, tl = d.timeline;
+
+  // offscreen white-theme charts → images
+  const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; c.style.width = `${w}px`; c.style.height = `${h}px`; const wrap = document.createElement('div'); wrap.style.cssText = `position:fixed;left:-9999px;top:0;width:${w}px;height:${h}px;`; wrap.appendChild(c); document.body.appendChild(wrap); return { c, wrap }; };
+  const bar = mk(700, 300), pie = mk(520, 300), task = mk(700, Math.max(200, d.tasks.length * 30 + 50));
+  const light = { text: '#1b2433', grid: '#dfe5ee', allotted: 'rgba(150,160,180,0.45)', sliceBorder: '#ffffff', animate: false };
+  const charts = drawManHourCharts(d, { bar: bar.c, pie: pie.c, task: task.c }, light);
+  const img = (cv) => { const o = document.createElement('canvas'); o.width = cv.width; o.height = cv.height; const x = o.getContext('2d'); x.fillStyle = '#ffffff'; x.fillRect(0, 0, o.width, o.height); x.drawImage(cv, 0, 0); return o.toDataURL('image/png'); };
+  const barImg = img(bar.c), pieImg = img(pie.c), taskImg = d.tasks.length ? img(task.c) : null;
+  charts.forEach((c) => c.destroy());
+  [bar, pie, task].forEach((o) => o.wrap.remove());
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+  doc.text('C-TORQ Man Hour Report', mx, y); y += 24;
+  doc.setFontSize(13);
+  doc.text(String(d.project.name || d.project.jobId), mx, y, { maxWidth: W - mx * 2 }); y += 18;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.text(`Job ID: ${d.project.jobId}    Status: ${d.project.status || '-'}`, mx, y); y += 14;
+  const by = currentProfile?.full_name || currentProfile?.email || '';
+  doc.text(`Generated ${new Date(d.generatedAt).toLocaleString()}${by ? ' by ' + by : ''}`, mx, y); y += 20;
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.text('Hours summary', mx, y); y += 16;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  doc.text(`Allotted: ${mhFmt(t.allocatedHours)} h     Used: ${mhFmt(t.usedHours)} h     Remaining: ${t.exceeded ? '0' : mhFmt(t.remainingHours)} h`, mx, y); y += 16;
+  if (t.exceeded) {
+    doc.setTextColor(200, 30, 30); doc.setFont('helvetica', 'bold');
+    doc.text(`TIME EXCEEDED: ${mhFmt(t.exceededHours)} h over the allotted ${mhFmt(t.allocatedHours)} h.`, mx, y); y += 16;
+    doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal');
+  }
+  y += 6;
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.text('Man-hours by role', mx, y); y += 14;
+  doc.setFontSize(10);
+  doc.text('Role', mx, y); doc.text('Used h', mx + 150, y); doc.text('Allotted h', mx + 220, y); doc.text('People', mx + 300, y); y += 4;
+  doc.line(mx, y, W - mx, y); y += 12;
+  doc.setFont('helvetica', 'normal');
+  d.roles.forEach((r) => {
+    const names = r.people.map((p) => `${p.name} (${mhFmt(p.hours)})`).join(', ') || '-';
+    const lines = doc.splitTextToSize(names, W - mx - (mx + 300));
+    room(lines.length * 12 + 4);
+    doc.text((MANHOUR_ROLE_META[r.position] || MANHOUR_ROLE_META.other).label, mx, y);
+    doc.text(mhFmt(r.usedHours), mx + 150, y);
+    doc.text(r.allocatedHours ? mhFmt(r.allocatedHours) : '-', mx + 220, y);
+    doc.text(lines, mx + 300, y);
+    y += lines.length * 12 + 4;
+  });
+  y += 8;
+
+  room(250);
+  doc.addImage(barImg, 'PNG', mx, y, W - mx * 2, (W - mx * 2) * 300 / 700); y += (W - mx * 2) * 300 / 700 + 14;
+  room(220);
+  const pw = 300, ph = pw * 300 / 520;
+  doc.addImage(pieImg, 'PNG', mx, y, pw, ph);
+  doc.setFontSize(10);
+  doc.text(`Allotted ${mhFmt(t.allocatedHours)} h`, mx + pw + 20, y + 40);
+  doc.text(`Used ${mhFmt(t.usedHours)} h`, mx + pw + 20, y + 58);
+  doc.text(t.exceeded ? `Over by ${mhFmt(t.exceededHours)} h` : `Remaining ${mhFmt(t.remainingHours)} h`, mx + pw + 20, y + 76);
+  y += ph + 16;
+
+  room(70);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.text('Job timeline', mx, y); y += 16;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  if (tl.startDate) {
+    doc.text(`Started: ${mhDate(tl.startDate)}`, mx, y); y += 14;
+    doc.text(`${(d.project.status || 'active') === 'active' ? 'Latest entry (job active)' : 'Finished / last entry'}: ${mhDate(tl.lastDate)}`, mx, y); y += 14;
+    doc.text(`Hours were logged on ${tl.daysActive} day(s).`, mx, y); y += 18;
+  } else { doc.text('No hours logged yet.', mx, y); y += 18; }
+
+  if (taskImg) {
+    const th = (W - mx * 2) * task.c.height / 700;
+    room(th + 40);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text('Hours per task', mx, y); y += 10;
+    doc.addImage(taskImg, 'PNG', mx, y, W - mx * 2, th); y += th + 8;
+    if (d.untaggedHours > 0) { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text(`${mhFmt(d.untaggedHours)} h logged without a recognised task description.`, mx, y); }
+  }
+
+  const safe = String(d.project.jobId).replace(/[^a-z0-9_-]/gi, '_');
+  doc.save(`ManHours_${safe}.pdf`);
+}
 
 // Give every plain <select> already in the page the glass-styled dropdown
 // treatment. Selects created dynamically later (Team roster role/department
