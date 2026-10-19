@@ -5,7 +5,7 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.61.0';
+const APP_VERSION = 'v3.61.1';
 // FEATURES PAUSED FOR EVERYONE (admins too) to save Supabase egress. Nothing is
 // deleted — all data, tables and code are untouched. To switch one back on,
 // remove its key from this list ('chat' = Team Chat, 'news' = News Room,
