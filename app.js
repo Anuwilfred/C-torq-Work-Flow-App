@@ -5,7 +5,7 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.61.1';
+const APP_VERSION = 'v3.61.2';
 // FEATURES PAUSED FOR EVERYONE (admins too) to save Supabase egress. Nothing is
 // deleted — all data, tables and code are untouched. To switch one back on,
 // remove its key from this list ('chat' = Team Chat, 'news' = News Room,
@@ -16346,6 +16346,12 @@ function renderManHourReport(d) {
     <div class="card glass" style="margin-top:14px;">
       <strong style="font-size:14px;">👷 Total man-hours by role</strong>
       <div class="mh-chart-box" style="height:280px;"><canvas id="mhRoleChart"></canvas></div>
+      ${(d.roles || []).filter((r) => (r.people || []).length).map((r) => {
+        const m = MANHOUR_ROLE_META[r.position] || MANHOUR_ROLE_META.other;
+        const isOther = r.position === 'other';
+        return `<div style="margin-top:10px;"><b style="color:${m.color};">${escapeHtml(m.label)}</b> · ${mhFmt(r.usedHours)} h${isOther ? ' <span class="hint">(position not set to a role — set it in Team to move them)</span>' : ''}
+          ${r.people.map((p) => `<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0;"><span>${escapeHtml(p.name)}</span><b>${mhFmt(p.hours)} h</b></div>`).join('')}</div>`;
+      }).join('')}
     </div>
 
     <div class="card glass" style="margin-top:14px;">
