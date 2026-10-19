@@ -3945,3 +3945,36 @@ html.ios-lite[data-scheme="light"] {
   --glass-strong: rgba(255, 255, 255, 0.97) !important;
   --glass-2: rgba(250, 249, 246, 0.9) !important;
 }
+
+/* ---------- Man Hours tile + report ---------- */
+.home-tile-icon-manhour {
+  background: linear-gradient(160deg, rgba(255, 176, 32, 0.30), rgba(230, 120, 20, 0.14));
+  border-color: rgba(255, 176, 32, 0.55);
+  box-shadow: 0 6px 16px rgba(255, 176, 32, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.home-tile:hover .home-tile-icon-manhour,
+.home-tile:active .home-tile-icon-manhour { box-shadow: 0 10px 22px rgba(255, 176, 32, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.mh-picker { position: relative; margin-top: 8px; }
+.mh-picker-list {
+  position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 30;
+  max-height: 260px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: rgba(20, 28, 44, 0.97); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+.mh-picker-item { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.mh-picker-item:last-child { border-bottom: 0; }
+.mh-picker-item:hover, .mh-picker-item:active { background: rgba(255, 255, 255, 0.09); }
+.mh-picker-item small { display: block; opacity: 0.7; }
+.mh-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.mh-stat { text-align: center; padding: 10px 6px; border-radius: 12px; background: rgba(255, 255, 255, 0.07); }
+.mh-stat b { display: block; font-size: 20px; }
+.mh-stat span { font-size: 11px; opacity: 0.75; }
+.mh-exceeded { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 77, 77, 0.16); border: 1px solid rgba(255, 77, 77, 0.6); color: #ff8a8a; font-weight: 600; }
+.mh-chart-box { position: relative; margin-top: 10px; }
+.mh-timeline { position: relative; margin: 22px 8px 6px; height: 36px; }
+.mh-tl-line { position: absolute; left: 6px; right: 6px; top: 9px; height: 4px; border-radius: 4px; background: linear-gradient(90deg, #39ffb0, #39a0ff); }
+.mh-tl-dot { position: absolute; top: 3px; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; }
+.mh-tl-dot.start { left: 0; background: #39ffb0; }
+.mh-tl-dot.end { right: 0; background: #39a0ff; }
+.mh-tl-labels { display: flex; justify-content: space-between; font-size: 12px; margin-top: 26px; }
+.mh-tl-labels > span:last-child { text-align: right; }
