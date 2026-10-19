@@ -5,11 +5,23 @@
 // (v3.35.1 -> v3.35.2 -> v3.35.3 ...), every single release, no matter how
 // big the change is. Never bump the first two numbers — that used to happen
 // for "big" features and made version jumps look confusing/skipped.
-const APP_VERSION = 'v3.60.0';
+const APP_VERSION = 'v3.61.0';
+// FEATURES PAUSED FOR EVERYONE (admins too) to save Supabase egress. Nothing is
+// deleted — all data, tables and code are untouched. To switch one back on,
+// remove its key from this list ('chat' = Team Chat, 'news' = News Room,
+// 'liveDrivers' = Live Drivers) and publish. Declared up here (not near
+// hasFeature) because enterApp() can run before later consts are initialised.
+const PAUSED_FEATURES = ['chat', 'news', 'liveDrivers'];
+function isPaused(key) { return PAUSED_FEATURES.includes(key); }
+const PAUSED_MSG = {
+  chat: 'Team Chat is paused for now.',
+  news: 'News Room is paused for now.',
+  liveDrivers: 'Live Drivers is paused for now.',
+};
 // One short line describing what changed this round — read by OTHER, older
 // tabs (via a plain-text fetch of this exact file) so the update icon's
 // toast can say what's new before anyone taps to refresh.
-const APP_UPDATE_NOTES = 'New: Man Hours tile — pick a project to see man-hours by role, allotted vs used vs remaining, job timeline, hours per task, and download a PDF. Enable per person in Map Access.';
+const APP_UPDATE_NOTES = 'Team Chat, News Room and Live Drivers are paused for now to save data. Also: Man Hours report tile.';
 if (document.getElementById('appVersionLabel')) document.getElementById('appVersionLabel').textContent = `App version ${APP_VERSION}`;
 
 // ---------- Self-heal a stale cached app shell ----------
@@ -1405,6 +1417,7 @@ async function updateMyDriverLocation() {
 }
 
 async function startDriverLocationLoopIfNeeded() {
+  if (isPaused('liveDrivers')) return; // Live Drivers paused — no location pings
   if (driverLocationIntervalId) return; // already running
   const isDriver = await isCurrentUserDriverRole();
   if (!isDriver || !navigator.geolocation) return;
@@ -2262,12 +2275,12 @@ async function enterApp(knownUser) {
 
   $('newGroupBtn').style.display = 'inline-block';
   if ($('newsComposeCard')) $('newsComposeCard').style.display = 'block';
-  checkForUnreadNews();
+  if (!isPaused('news')) checkForUnreadNews();
   applyFeatureAccess();
-  startPresence();
+  if (!isPaused('chat')) startPresence();
   initGlobalAppearance();
   startLastSeenHeartbeat();
-  startGlobalMessageWatch();
+  if (!isPaused('chat')) startGlobalMessageWatch();
   initPushOnboarding();
   consumePendingNotificationNav();
   loadWeather();
@@ -3136,6 +3149,7 @@ async function checkForUnreadNews() {
 }
 
 function openNewsDrawer() {
+  if (isPaused('news')) { showToast(PAUSED_MSG.news); return; }
   $('newsDrawerBackdrop').classList.add('show');
   $('newsDrawer').classList.add('show');
   renderNewsList();
@@ -3289,6 +3303,7 @@ const FEATURE_LIST = [
 // tile gate, admin-only History button, etc.) can call it directly instead
 // of duplicating the isAdmin/allowed_features logic inline.
 function hasFeature(key) {
+  if (isPaused(key)) return false;
   const isAdmin = currentProfile?.role === 'admin';
   const allowed = Array.isArray(currentProfile?.allowed_features) ? currentProfile.allowed_features : [];
   return isAdmin || allowed.includes(key);
@@ -3304,6 +3319,8 @@ function applyFeatureAccess() {
   const chatOn = has('chat');
   $('chatOrb').style.display = chatOn ? 'flex' : 'none';
   $('chatOrbLabel').style.display = chatOn ? 'block' : 'none';
+  if ($('newsHandle')) $('newsHandle').style.display = isPaused('news') ? 'none' : '';
+  if (isPaused('news')) { $('newsDrawer')?.classList.remove('show'); $('newsDrawerBackdrop')?.classList.remove('show'); }
 
   // Media sending (photos/videos/files) is off unless an admin ticks it in
   // Map Access — keeps data use down. Admins always have it.
@@ -5872,6 +5889,7 @@ const PANEL_IDS = {
 function openPanel(name, opts = {}) {
   const ids = PANEL_IDS[name];
   if (!ids) return;
+  if (isPaused(name)) { showToast(PAUSED_MSG[name] || 'This feature is paused for now.'); return; }
   if (name === 'liveDrivers') renderLiveDrivers();
   $(ids[0]).classList.add('show');
   $(ids[1]).classList.add('show');
@@ -11654,6 +11672,7 @@ let globalMessagesChannel = null; // app-wide watch for the new-message banner (
 
 // ---------- Chat overlay (floating icon, bottom-left) ----------
 function openChatOverlay() {
+  if (isPaused('chat')) { showToast(PAUSED_MSG.chat); return; }
   $('chatOverlayBackdrop').classList.add('show');
   $('chatOverlay').classList.add('show');
   initChatTab();
